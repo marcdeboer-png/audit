@@ -1,0 +1,74 @@
+# dependencies
+node_modules/
+
+# env / secrets
+.env
+.env.*
+!.env.example
+
+# local databases / runtime data
+*.sqlite
+*.sqlite3
+*.db
+*.sqlite-wal
+*.sqlite-shm
+*.sqlite3-wal
+*.sqlite3-shm
+*.db-wal
+*.db-shm
+*.sqlite-journal
+*.sqlite3-journal
+*.db-journal
+data/
+storage/
+database/
+
+# generated reports / old runs / exports
+reports/
+exports/
+coverage/
+*.zip
+audit-*-full-audit.zip
+*-full-audit.zip
+
+# customer/reference/original data
+reference-audits/**/original/
+reference-audits/**/*.xlsx
+reference-audits/**/*.xls
+reference-audits/**/*.csv
+reference-audits/**/*.zip
+
+# generated reference / validation artifacts
+reference-audits/**/fressnapf-reference-audit.json
+reference-audits/**/source-inventory.json
+reference-audits/**/reference-import-summary.*
+reference-audits/**/coverage-matrix.*
+reference-audits/**/tool-gap-backlog.*
+reference-audits/**/validation-report.*
+reference-audits/**/storage-reality-check.*
+
+# screenshots / images generated during tests
+*.png
+*.jpg
+*.jpeg
+*.webp
+!src/public/assets/*.png
+!src/public/assets/*.svg
+!src/public/assets/*.webp
+screenshots/
+tmp/
+.temp/
+.cache/
+.playwright/
+lighthouse-cache/
+playwright-report/
+test-results/
+
+# logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# OS
+.DS_Store
