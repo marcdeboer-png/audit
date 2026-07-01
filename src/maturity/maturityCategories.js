@@ -101,6 +101,7 @@ const rawMaturityCategories = [
       'tech.internal_links_to_3xx',
       'tech.internal_links_to_4xx_5xx',
       'tech.orphan_like_sitemap_urls',
+      'tech.hreflang_x_default_missing',
       'template.noindex_pattern',
       'template.canonical_pattern_issue'
     ]
@@ -125,6 +126,7 @@ const rawMaturityCategories = [
       'tech.viewport_missing',
       'tech.open_graph_basics_missing',
       'tech.favicon_missing',
+      'tech.app_icons_incomplete',
       'tech.webmanifest_missing',
       'tech.charset_utf8_present',
       'template.title_pattern_issue',
@@ -153,6 +155,8 @@ const rawMaturityCategories = [
     checkIds: [
       'tech.compression_header',
       'tech.cache_control_header',
+      'tech.cdn_cache_signals',
+      'tech.http_version_support',
       'tech.raw_html_size_large',
       'tech.too_many_js',
       'tech.too_many_css',
@@ -161,6 +165,8 @@ const rawMaturityCategories = [
       'tech.third_party_scripts_detected',
       'tech.preload_missing',
       'tech.preconnect_missing',
+      'tech.resource_hints_summary',
+      'tech.imported_resource_performance_signals',
       'tech.high_ttfb',
       'tech.images_without_alt',
       'tech.empty_alt_texts',
@@ -218,14 +224,16 @@ const rawMaturityCategories = [
   {
     id: 'ai-crawler-policy',
     name: 'AI Crawler Policy',
-    description: 'Explizite robots.txt-Signale für GPTBot, OAI-SearchBot, ClaudeBot, PerplexityBot und Google-Extended.',
+    description: 'Explizite robots.txt-Signale für GPTBot, OAI-SearchBot, ChatGPT-User, ClaudeBot, PerplexityBot, Google-Extended und CCBot.',
     recommendation: 'Dokumentiere die gewünschte AI-Crawler-Policy explizit, wenn sie strategisch relevant ist.',
     checkIds: [
       'geo.robots_mentions_gptbot',
       'geo.robots_mentions_oai_searchbot',
+      'geo.robots_mentions_chatgpt_user',
       'geo.robots_mentions_claudebot',
       'geo.robots_mentions_perplexitybot',
       'geo.robots_mentions_google_extended',
+      'geo.robots_mentions_ccbot',
       'geo.ai_bots_policy_summary'
     ]
   },
@@ -252,7 +260,8 @@ const rawMaturityCategories = [
       'tech.x_frame_options',
       'tech.x_content_type_options',
       'tech.referrer_policy',
-      'tech.permissions_policy'
+      'tech.permissions_policy',
+      'tech.consent_technical_signals'
     ]
   },
   {

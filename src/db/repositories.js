@@ -347,6 +347,8 @@ export function insertPage(db, page) {
       h1Json, h1Count, h2Json, canonical, canonicalStatus, htmlLang, viewport, metaRobots,
       metaCharset, hasHeaderUtf8, hasMetaCharsetUtf8, xRobotsTag, wordCountRaw, wordCountRendered, rawTextLength,
       renderedTextLength, rawHtmlSize, internalLinksCount, externalLinksCount,
+      uniqueInternalTargetsCount, uniqueExternalTargetsCount, nofollowLinksCount,
+      imageLinksCount, storedLinkRowsCount, linkRowsTruncated, linkSamplesJson,
       inlinkCount, outlinkCount, schemaTypesJson, imagesCount, imagesWithoutAltCount, responseHeadersJson,
       loadTimeMs, ttfbMs, consoleErrorsJson, renderedH1Json, renderedH1Count,
       renderedLinksCount, ogJson, favicon, manifest, featureFlagsJson,
@@ -362,6 +364,8 @@ export function insertPage(db, page) {
       @h1Json, @h1Count, @h2Json, @canonical, @canonicalStatus, @htmlLang, @viewport, @metaRobots,
       @metaCharset, @hasHeaderUtf8, @hasMetaCharsetUtf8, @xRobotsTag, @wordCountRaw, @wordCountRendered, @rawTextLength,
       @renderedTextLength, @rawHtmlSize, @internalLinksCount, @externalLinksCount,
+      @uniqueInternalTargetsCount, @uniqueExternalTargetsCount, @nofollowLinksCount,
+      @imageLinksCount, @storedLinkRowsCount, @linkRowsTruncated, @linkSamplesJson,
       @inlinkCount, @outlinkCount, @schemaTypesJson, @imagesCount, @imagesWithoutAltCount, @responseHeadersJson,
       @loadTimeMs, @ttfbMs, @consoleErrorsJson, @renderedH1Json, @renderedH1Count,
       @renderedLinksCount, @ogJson, @favicon, @manifest, @featureFlagsJson,
@@ -403,6 +407,13 @@ export function insertPage(db, page) {
       rawHtmlSize = excluded.rawHtmlSize,
       internalLinksCount = excluded.internalLinksCount,
       externalLinksCount = excluded.externalLinksCount,
+      uniqueInternalTargetsCount = excluded.uniqueInternalTargetsCount,
+      uniqueExternalTargetsCount = excluded.uniqueExternalTargetsCount,
+      nofollowLinksCount = excluded.nofollowLinksCount,
+      imageLinksCount = excluded.imageLinksCount,
+      storedLinkRowsCount = excluded.storedLinkRowsCount,
+      linkRowsTruncated = excluded.linkRowsTruncated,
+      linkSamplesJson = excluded.linkSamplesJson,
       inlinkCount = excluded.inlinkCount,
       outlinkCount = excluded.outlinkCount,
       schemaTypesJson = excluded.schemaTypesJson,
@@ -446,6 +457,13 @@ export function insertPage(db, page) {
     canonicalStatus: null,
     inlinkCount: null,
     outlinkCount: null,
+    uniqueInternalTargetsCount: 0,
+    uniqueExternalTargetsCount: 0,
+    nofollowLinksCount: 0,
+    imageLinksCount: 0,
+    storedLinkRowsCount: 0,
+    linkRowsTruncated: 0,
+    linkSamplesJson: JSON.stringify([]),
     cruxLcp: null,
     cruxInp: null,
     cruxCls: null,
@@ -460,7 +478,7 @@ export function insertPage(db, page) {
   });
 }
 
-export function replacePageArtifacts(db, runId, pageUrl, { links = [], images = [], resources = [], schemas = [] }) {
+export function replacePageArtifacts(db, runId, pageUrl, { links = [], images = [], resources = [], schemas = [], linkAggregates = null }) {
   const tx = db.transaction(() => {
     db.prepare('DELETE FROM page_links WHERE runId = ? AND sourceUrl = ?').run(runId, pageUrl);
     db.prepare('DELETE FROM page_images WHERE runId = ? AND pageUrl = ?').run(runId, pageUrl);
@@ -485,6 +503,34 @@ export function replacePageArtifacts(db, runId, pageUrl, { links = [], images = 
         link.statusCode || null
       );
     }
+    const aggregates = linkAggregates || buildLinkAggregates(links, links.length, false);
+    db.prepare(`
+      UPDATE pages
+      SET internalLinksCount = ?,
+          externalLinksCount = ?,
+          uniqueInternalTargetsCount = ?,
+          uniqueExternalTargetsCount = ?,
+          nofollowLinksCount = ?,
+          imageLinksCount = ?,
+          storedLinkRowsCount = ?,
+          linkRowsTruncated = ?,
+          linkSamplesJson = ?
+      WHERE runId = ? AND (finalUrl = ? OR normalizedUrl = ? OR url = ?)
+    `).run(
+      aggregates.internalLinkCount || 0,
+      aggregates.externalLinkCount || 0,
+      aggregates.uniqueInternalTargetsCount || 0,
+      aggregates.uniqueExternalTargetsCount || 0,
+      aggregates.nofollowCount || 0,
+      aggregates.imageLinkCount || 0,
+      links.length,
+      aggregates.truncated ? 1 : 0,
+      JSON.stringify(aggregates.samples || []),
+      runId,
+      pageUrl,
+      pageUrl,
+      pageUrl
+    );
 
     const insertImage = db.prepare(`
       INSERT INTO page_images (
@@ -536,9 +582,9 @@ export function replacePageArtifacts(db, runId, pageUrl, { links = [], images = 
 
     const insertSchema = db.prepare(`
       INSERT INTO schemas (
-        runId, pageUrl, schemaType, rawJson, parseStatus, parseError
+        runId, pageUrl, schemaType, rawJson, rawJsonHash, rawJsonBytes, parseStatus, parseError
       )
-      VALUES (?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `);
     for (const schema of schemas) {
       insertSchema.run(
@@ -546,6 +592,8 @@ export function replacePageArtifacts(db, runId, pageUrl, { links = [], images = 
         pageUrl,
         schema.schemaType || null,
         schema.rawJson ? String(schema.rawJson).slice(0, 50000) : null,
+        schema.rawJsonHash || null,
+        schema.rawJsonBytes || null,
         schema.parseStatus,
         schema.parseError ? truncateText(schema.parseError, 2000) : null
       );
@@ -553,6 +601,48 @@ export function replacePageArtifacts(db, runId, pageUrl, { links = [], images = 
   });
 
   tx();
+}
+
+function buildLinkAggregates(links = [], totalLinks = links.length, truncated = false) {
+  const internalTargets = new Set();
+  const externalTargets = new Set();
+  let internalLinkCount = 0;
+  let externalLinkCount = 0;
+  let nofollowCount = 0;
+  let imageLinkCount = 0;
+  const samples = [];
+  for (const link of links) {
+    const target = link.normalizedTargetUrl || link.targetUrl || '';
+    if (link.linkType === 'external') {
+      externalLinkCount += 1;
+      if (target) externalTargets.add(target);
+    } else {
+      internalLinkCount += 1;
+      if (target) internalTargets.add(target);
+    }
+    if (/\bnofollow\b/i.test(link.rel || '')) nofollowCount += 1;
+    if (/\.(png|jpe?g|webp|gif|svg)(?:[?#]|$)/i.test(target)) imageLinkCount += 1;
+    if (samples.length < 20 && target) {
+      samples.push({
+        targetUrl: target,
+        linkType: link.linkType || 'internal',
+        anchorText: link.anchorText || null,
+        rel: link.rel || null
+      });
+    }
+  }
+  return {
+    internalLinkCount,
+    externalLinkCount,
+    uniqueInternalTargetsCount: internalTargets.size,
+    uniqueExternalTargetsCount: externalTargets.size,
+    nofollowCount,
+    imageLinkCount,
+    storedRows: links.length,
+    totalRows: totalLinks,
+    truncated,
+    samples
+  };
 }
 
 export function insertDomainAsset(db, asset) {

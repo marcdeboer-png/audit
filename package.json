@@ -10,6 +10,7 @@
     "audit": "node src/cli/audit.js",
     "validate:audit": "node scripts/validate-audit.js",
     "validate:fressnapf": "node scripts/prepare-fressnapf-reference.js",
+    "validate:fressnapf:sf": "node scripts/prepare-fressnapf-sf-import.js",
     "test": "node --test --test-concurrency=1 tests/*.test.js"
   },
   "dependencies": {

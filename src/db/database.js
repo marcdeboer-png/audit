@@ -198,6 +198,13 @@ export function initDatabase(database = getDb()) {
       rawHtmlSize INTEGER,
       internalLinksCount INTEGER,
       externalLinksCount INTEGER,
+      uniqueInternalTargetsCount INTEGER NOT NULL DEFAULT 0,
+      uniqueExternalTargetsCount INTEGER NOT NULL DEFAULT 0,
+      nofollowLinksCount INTEGER NOT NULL DEFAULT 0,
+      imageLinksCount INTEGER NOT NULL DEFAULT 0,
+      storedLinkRowsCount INTEGER NOT NULL DEFAULT 0,
+      linkRowsTruncated INTEGER NOT NULL DEFAULT 0,
+      linkSamplesJson TEXT,
       inlinkCount INTEGER,
       outlinkCount INTEGER,
       schemaTypesJson TEXT,
@@ -335,6 +342,8 @@ export function initDatabase(database = getDb()) {
       pageUrl TEXT NOT NULL,
       schemaType TEXT,
       rawJson TEXT,
+      rawJsonHash TEXT,
+      rawJsonBytes INTEGER,
       parseStatus TEXT NOT NULL,
       parseError TEXT,
       createdAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -647,6 +656,13 @@ export function initDatabase(database = getDb()) {
     ['hasVideoEmbed', 'INTEGER NOT NULL DEFAULT 0'],
     ['inlinkCount', 'INTEGER'],
     ['outlinkCount', 'INTEGER'],
+    ['uniqueInternalTargetsCount', 'INTEGER NOT NULL DEFAULT 0'],
+    ['uniqueExternalTargetsCount', 'INTEGER NOT NULL DEFAULT 0'],
+    ['nofollowLinksCount', 'INTEGER NOT NULL DEFAULT 0'],
+    ['imageLinksCount', 'INTEGER NOT NULL DEFAULT 0'],
+    ['storedLinkRowsCount', 'INTEGER NOT NULL DEFAULT 0'],
+    ['linkRowsTruncated', 'INTEGER NOT NULL DEFAULT 0'],
+    ['linkSamplesJson', 'TEXT'],
     ['cruxLcp', 'REAL'],
     ['cruxInp', 'REAL'],
     ['cruxCls', 'REAL'],
@@ -764,6 +780,11 @@ export function initDatabase(database = getDb()) {
     ['likelyTrackingPixel', 'INTEGER NOT NULL DEFAULT 0'],
     ['likelyIcon', 'INTEGER NOT NULL DEFAULT 0'],
     ['imageRole', 'TEXT']
+  ]);
+
+  ensureColumns(database, 'schemas', [
+    ['rawJsonHash', 'TEXT'],
+    ['rawJsonBytes', 'INTEGER']
   ]);
 
   ensureColumns(database, 'check_results', [

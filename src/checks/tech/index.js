@@ -68,6 +68,8 @@ export function techChecks() {
       okFinding: 'HTML responses include a Cache-Control header where stored.',
       recommendation: 'HTTP Cache-Control header not detected for HTML responses. Review caching policy for performance and freshness control.'
     }),
+    httpVersionSupport(),
+    cdnCacheSignals(),
     headerPresence('hsts_header', 'Security Best Practice', 'HSTS present', 'strict-transport-security', 'Medium'),
     headerPresence('content_security_policy', 'Security Best Practice', 'Content-Security-Policy present', 'content-security-policy', 'Medium'),
     headerPresence('x_frame_options', 'Security Best Practice', 'X-Frame-Options present', 'x-frame-options', 'Low'),
@@ -104,7 +106,10 @@ export function techChecks() {
     missingField('viewport_missing', 'HTML Head & Meta', 'Viewport missing', 'viewport', 'Warning'),
     openGraphMissing(),
     missingField('favicon_missing', 'HTML Head & Meta', 'Favicon missing', 'favicon', 'Warning', 'Low'),
+    appIconsIncomplete(),
     missingField('webmanifest_missing', 'Browser Metadata Opportunity', 'Webmanifest missing', 'manifest', 'Warning', 'Low'),
+    hreflangXDefaultMissing(),
+    consentTechnicalSignals(),
     pageStatusCheck('raw_html_size_large', 'Performance Light', `Raw HTML size > ${thresholds.largeHtmlKb} KB`, `rawHtmlSize > ${thresholdBytes.largeHtmlBytes}`, 'Warning'),
     resourceCountCheck('too_many_js', 'Performance Light', `Too many JS resources > ${thresholds.tooManyJsResources} per page`, 'script', thresholds.tooManyJsResources, 'Warning'),
     resourceCountCheck('too_many_css', 'Performance Light', `Too many CSS resources > ${thresholds.tooManyCssResources} per page`, 'stylesheet', thresholds.tooManyCssResources, 'Warning'),
@@ -113,6 +118,8 @@ export function techChecks() {
     thirdPartyScripts(),
     preloadMissing(),
     preconnectMissing(),
+    resourceHintsSummary(),
+    importedResourcePerformanceSignals(),
     highTtfbCheck(),
     pageStatusCheck('rendered_word_count_delta', 'JavaScript & Rendering', `Rendered word count > raw word count * ${thresholds.renderedRawWordCountRatio}`, `wordCountRendered IS NOT NULL AND wordCountRendered > wordCountRaw * ${thresholds.renderedRawWordCountRatio} AND wordCountRendered - wordCountRaw > 50`, 'Warning'),
     pageStatusCheck('raw_h1_missing_rendered_present', 'JavaScript & Rendering', 'Raw H1 missing but rendered H1 present', 'h1Count = 0 AND renderedH1Count > 0', 'Warning'),
@@ -287,6 +294,77 @@ function headerPresence(id, category, name, headerKey, priority = 'Medium', opti
       confidence: 'high'
     });
   }, { priority, effort: 'M' });
+}
+
+function httpVersionSupport() {
+  return tech('http_version_support', 'Server/Performance Best Practice', 'HTTP protocol version evidence', function run(ctx) {
+    const rows = all(ctx.db, `
+      SELECT url, responseHeadersJson, featureFlagsJson
+      FROM pages
+      WHERE runId = ? AND (
+        COALESCE(responseHeadersJson, '') LIKE '%x-http-version%' OR
+        COALESCE(featureFlagsJson, '') LIKE '%httpVersion%'
+      )
+      LIMIT 20
+    `, [ctx.run.id]);
+    if (!rows.length) {
+      return makeResult(this, 'NA', {
+        finding: 'No HTTP protocol version data is stored for this run.',
+        recommendation: 'Import a Requests/Screaming-Frog header export or capture protocol metadata before judging HTTP/2 or HTTP/3 coverage.',
+        evidence: { requiredData: ['protocol_version', 'response_headers'] },
+        findingType: 'info',
+        confidence: 'high'
+      });
+    }
+    const weak = rows.filter((row) => !/h2|http\/2|http\/3|h3/i.test(`${row.responseHeadersJson || ''} ${row.featureFlagsJson || ''}`));
+    return makeResult(this, weak.length ? 'Warning' : 'OK', {
+      affectedCount: weak.length,
+      sampleUrls: weak.map((row) => row.url).slice(0, 10),
+      finding: weak.length
+        ? `${weak.length} sampled page(s) have protocol evidence but no HTTP/2+/HTTP/3 signal.`
+        : 'Stored protocol evidence includes HTTP/2+/HTTP/3 signals where available.',
+      recommendation: 'Verify protocol support with request-level tooling before using this as a final infrastructure finding.',
+      evidence: { checkedRows: rows.length, samples: rows.slice(0, 10) },
+      findingType: 'best_practice',
+      confidence: 'medium',
+      reviewRecommended: weak.length > 0
+    });
+  }, { priority: 'Low', effort: 'S' });
+}
+
+function cdnCacheSignals() {
+  return tech('cdn_cache_signals', 'Server/Performance Best Practice', 'CDN/cache header signals', function run(ctx) {
+    const total = htmlPageCount(ctx.db, ctx.run.id);
+    const rows = all(ctx.db, `
+      SELECT url, responseHeadersJson
+      FROM pages
+      WHERE runId = ? AND ${HTML_WHERE}
+        AND COALESCE(responseHeadersJson, '') <> ''
+      LIMIT 50
+    `, [ctx.run.id]);
+    if (!rows.length) {
+      return makeResult(this, total ? 'NA' : 'NA', {
+        finding: 'No compact response header data is stored for CDN/cache assessment.',
+        recommendation: 'Store response headers or import SF/Requests headers to evaluate cache/CDN patterns.',
+        evidence: { totalHtmlPages: total, requiredHeaders: ['cache-control', 'age', 'via', 'x-cache', 'cf-cache-status', 'x-azure-ref', 'server'] },
+        findingType: 'info'
+      });
+    }
+    const signalRows = rows.filter((row) => /cache-control|age|via|x-cache|cf-cache-status|x-azure-ref|x-served-by|cloudflare|akamai|fastly|azure/i.test(row.responseHeadersJson || ''));
+    const status = signalRows.length ? 'OK' : 'Warning';
+    return makeResult(this, status, {
+      affectedCount: status === 'OK' ? 0 : total,
+      sampleUrls: status === 'OK' ? [] : rows.slice(0, 10).map((row) => row.url),
+      finding: signalRows.length
+        ? `${signalRows.length}/${rows.length} sampled HTML page(s) include CDN/cache header signals.`
+        : 'Stored headers do not show CDN/cache signals in the sampled HTML responses.',
+      recommendation: 'Use this as technical evidence only; validate CDN architecture and cache policy with header exports or infrastructure data.',
+      evidence: { sampledHeaderRows: rows.length, signalRows: signalRows.slice(0, 10) },
+      findingType: 'best_practice',
+      confidence: rows.length >= 10 ? 'medium' : 'low',
+      reviewRecommended: true
+    });
+  }, { priority: 'Low', effort: 'S' });
 }
 
 function xRobotsTagCheck() {
@@ -549,7 +627,8 @@ function openGraphMissing() {
       ogJson NOT LIKE '%"og:title":"%' OR
       ogJson NOT LIKE '%"og:description":"%' OR
       ogJson NOT LIKE '%"og:image":"%' OR
-      ogJson NOT LIKE '%"og:url":"%'
+      ogJson NOT LIKE '%"og:url":"%' OR
+      ogJson NOT LIKE '%"og:type":"%'
     )`;
     const affectedCount = count(ctx.db, `SELECT COUNT(*) AS count FROM pages WHERE runId = ? AND ${where}`, [ctx.run.id]);
     const samples = affectedCount ? sampleUrls(ctx.db, ctx.run.id, where) : [];
@@ -557,10 +636,113 @@ function openGraphMissing() {
       affectedCount,
       sampleUrls: samples,
       finding: affectedCount ? `${affectedCount} page(s) miss one or more Open Graph basics.` : 'Open Graph basics are present on crawled HTML pages.',
-      recommendation: 'Add og:title, og:description, og:image and og:url where social previews matter.',
+      recommendation: 'Add og:title, og:description, og:image, og:url and og:type where social previews matter.',
       evidence: { affectedCount, sampleUrls: samples }
     });
   }, { priority: 'Low' });
+}
+
+function appIconsIncomplete() {
+  return tech('app_icons_incomplete', 'Browser Metadata Opportunity', 'Favicon/App icon signals incomplete', function run(ctx) {
+    const candidates = all(ctx.db, `
+      SELECT url, favicon, manifest, featureFlagsJson
+      FROM pages
+      WHERE runId = ? AND ${HTML_WHERE}
+      LIMIT 500
+    `, [ctx.run.id]);
+    const affected = candidates.filter((row) => {
+      const flags = safeJson(row.featureFlagsJson, {});
+      return !row.favicon || Number(flags.appleTouchIconCount || 0) <= 0;
+    });
+    const rows = affected.slice(0, 10);
+    const affectedCount = affected.length;
+    return makeResult(this, affectedCount ? 'Warning' : 'OK', {
+      affectedCount,
+      sampleUrls: rows.map((row) => row.url),
+      finding: affectedCount ? `${affectedCount} page(s) have incomplete favicon/app icon signals.` : 'Favicon/app icon signals are present where checked.',
+      recommendation: 'Provide favicon and Apple touch/app icon signals for robust browser and sharing metadata.',
+      evidence: { samples: rows },
+      findingType: 'best_practice',
+      confidence: 'medium'
+    });
+  }, { priority: 'Low', effort: 'S' });
+}
+
+function hreflangXDefaultMissing() {
+  return tech('hreflang_x_default_missing', 'HTML Head & Meta', 'Hreflang x-default missing when hreflang exists', function run(ctx) {
+    const rows = all(ctx.db, `
+      SELECT url, featureFlagsJson
+      FROM pages
+      WHERE runId = ? AND COALESCE(featureFlagsJson, '') LIKE '%hreflang%'
+      LIMIT 50
+    `, [ctx.run.id]);
+    const hreflangRows = rows.filter((row) => {
+      const flags = safeJson(row.featureFlagsJson, {});
+      return Number(flags.hreflangCount || 0) > 0 || (flags.hreflangLanguages || []).length > 0;
+    });
+    if (!hreflangRows.length) {
+      return makeResult(this, 'NA', {
+        finding: 'No hreflang data is stored for this run.',
+        recommendation: 'Import Screaming Frog hreflang exports or crawl pages with hreflang extraction before evaluating internationalisation.',
+        evidence: { requiredData: ['hreflang_export', 'html_head'] },
+        findingType: 'info'
+      });
+    }
+    const missing = hreflangRows.filter((row) => !safeJson(row.featureFlagsJson, {}).hasHreflangXDefault);
+    return makeResult(this, missing.length ? 'Warning' : 'OK', {
+      affectedCount: missing.length,
+      sampleUrls: missing.slice(0, 10).map((row) => row.url),
+      finding: missing.length
+        ? `${missing.length}/${hreflangRows.length} page(s) with hreflang signals have no x-default signal.`
+        : 'Stored hreflang signals include x-default where detected.',
+      recommendation: 'Review hreflang clusters and return links in SF before final internationalisation recommendations.',
+      evidence: { hreflangRows: hreflangRows.length, missingSamples: missing.slice(0, 10) },
+      findingType: 'best_practice',
+      confidence: 'medium',
+      reviewRecommended: true
+    });
+  }, { priority: 'Low', effort: 'M' });
+}
+
+function consentTechnicalSignals() {
+  return tech('consent_technical_signals', 'Consent/Privacy Technical Review', 'Consent and tag-manager technical signals', function run(ctx) {
+    const rows = all(ctx.db, `
+      SELECT url, featureFlagsJson
+      FROM pages
+      WHERE runId = ? AND ${HTML_WHERE}
+      LIMIT 500
+    `, [ctx.run.id]);
+    if (!rows.length) {
+      return makeResult(this, 'NA', {
+        finding: 'No HTML pages are stored for consent technical signal detection.',
+        recommendation: 'Run a crawl or import rendered/JavaScript facts before reviewing consent implementation.',
+        evidence: {}
+      });
+    }
+    const parsed = rows.map((row) => ({ url: row.url, flags: safeJson(row.featureFlagsJson, {}) }));
+    const cmpRows = parsed.filter((row) => row.flags.hasConsentSignal || (row.flags.consentVendorSignals || []).length);
+    const tagRows = parsed.filter((row) => row.flags.hasGoogleTagManager || row.flags.hasGtag || row.flags.hasDataLayer || row.flags.hasMetaPixel);
+    const status = tagRows.length && !cmpRows.length ? 'Warning' : cmpRows.length ? 'OK' : 'Warning';
+    return makeResult(this, status, {
+      affectedCount: status === 'OK' ? 0 : Math.max(1, tagRows.length || rows.length),
+      sampleUrls: (tagRows.length ? tagRows : parsed).slice(0, 10).map((row) => row.url),
+      finding: cmpRows.length
+        ? `${cmpRows.length} sampled page(s) show CMP/consent technical signals; ${tagRows.length} show tag-manager/marketing signals.`
+        : tagRows.length
+          ? `${tagRows.length} sampled page(s) show tag-manager/marketing signals, but no CMP/consent signal was detected in stored HTML.`
+          : 'No CMP or tag-manager technical signals detected in stored HTML.',
+      recommendation: 'Treat this as technical detection only. Legal/GDPR assessment requires human review and consent-mode verification.',
+      evidence: {
+        sampledPages: rows.length,
+        consentSignalSamples: cmpRows.slice(0, 10),
+        tagSignalSamples: tagRows.slice(0, 10),
+        legalJudgment: 'needs_human_review'
+      },
+      findingType: 'best_practice',
+      confidence: 'medium',
+      reviewRecommended: true
+    });
+  }, { priority: 'Low', effort: 'M' });
 }
 
 function canonicalOtherDomain() {
@@ -819,6 +1001,88 @@ function preconnectMissing() {
       evidence: { samples: rows }
     });
   }, { priority: 'Low' });
+}
+
+function resourceHintsSummary() {
+  return tech('resource_hints_summary', 'Performance Light', 'Resource hint coverage summary', function run(ctx) {
+    const rows = all(ctx.db, `
+      SELECT url, featureFlagsJson
+      FROM pages
+      WHERE runId = ? AND ${HTML_WHERE}
+      LIMIT 500
+    `, [ctx.run.id]);
+    if (!rows.length) {
+      return makeResult(this, 'NA', {
+        finding: 'No HTML pages are stored for resource hint assessment.',
+        recommendation: 'Run a crawl or import HTML-head/resource-hint facts.',
+        evidence: {}
+      });
+    }
+    const parsed = rows.map((row) => ({ url: row.url, flags: safeJson(row.featureFlagsJson, {}) }));
+    const withHints = parsed.filter((row) => {
+      const counts = row.flags.resourceHintCounts || {};
+      return row.flags.hasPreload || row.flags.hasPreconnect || Number(counts.preload || 0) || Number(counts.preconnect || 0) || Number(counts.dnsPrefetch || 0) || Number(counts.prefetch || 0);
+    });
+    return makeResult(this, withHints.length ? 'OK' : 'Warning', {
+      affectedCount: withHints.length ? 0 : rows.length,
+      sampleUrls: withHints.length ? [] : rows.slice(0, 10).map((row) => row.url),
+      finding: withHints.length
+        ? `${withHints.length}/${rows.length} sampled page(s) include preload/preconnect/dns-prefetch/prefetch signals.`
+        : 'No resource hint signals detected in sampled pages.',
+      recommendation: 'Use resource hints only for validated critical origins/assets; confirm with Lighthouse/field data before prioritizing.',
+      evidence: { sampledPages: rows.length, withHints: withHints.slice(0, 10) },
+      findingType: 'best_practice',
+      confidence: 'medium'
+    });
+  }, { priority: 'Low', effort: 'S' });
+}
+
+function importedResourcePerformanceSignals() {
+  return tech('imported_resource_performance_signals', 'Performance Light', 'Imported JS/CSS resource performance signals', function run(ctx) {
+    const rows = all(ctx.db, `
+      SELECT url, featureFlagsJson
+      FROM pages
+      WHERE runId = ? AND COALESCE(featureFlagsJson, '') <> ''
+      LIMIT 1000
+    `, [ctx.run.id]);
+    const parsed = rows.map((row) => ({ url: row.url, flags: safeJson(row.featureFlagsJson, {}) }));
+    const withImportedMetrics = parsed.filter((row) =>
+      Number(row.flags.jsCount || 0) ||
+      Number(row.flags.cssCount || 0) ||
+      Number(row.flags.totalJsBytes || 0) ||
+      Number(row.flags.totalCssBytes || 0)
+    );
+    if (!withImportedMetrics.length) {
+      return makeResult(this, 'NA', {
+        finding: 'No imported JS/CSS count or byte metrics are available.',
+        recommendation: 'Import SF JavaScript/rendered/resource exports or run browser sampling before evaluating JS/CSS totals at enterprise scale.',
+        evidence: { requiredData: ['resource_facts', 'sf_javascript_rendered_export'] },
+        findingType: 'info'
+      });
+    }
+    const heavy = withImportedMetrics.filter((row) =>
+      Number(row.flags.jsCount || 0) > thresholds.tooManyJsResources ||
+      Number(row.flags.cssCount || 0) > thresholds.tooManyCssResources ||
+      Number(row.flags.totalJsBytes || 0) > thresholds.largeJsTotalBytes ||
+      Number(row.flags.totalCssBytes || 0) > thresholds.largeCssTotalBytes
+    );
+    return makeResult(this, heavy.length ? 'Warning' : 'OK', {
+      affectedCount: heavy.length,
+      sampleUrls: heavy.slice(0, 10).map((row) => row.url),
+      finding: heavy.length
+        ? `${heavy.length}/${withImportedMetrics.length} page(s) exceed imported JS/CSS count or byte thresholds.`
+        : 'Imported JS/CSS metrics do not exceed configured thresholds.',
+      recommendation: 'Use imported SF/browser resource metrics to prioritize template-level JS/CSS optimization.',
+      evidence: { thresholds: {
+        tooManyJsResources: thresholds.tooManyJsResources,
+        tooManyCssResources: thresholds.tooManyCssResources,
+        largeJsTotalBytes: thresholds.largeJsTotalBytes,
+        largeCssTotalBytes: thresholds.largeCssTotalBytes
+      }, samples: heavy.slice(0, 10) },
+      findingType: 'best_practice',
+      confidence: 'medium'
+    });
+  }, { priority: 'Medium', effort: 'M' });
 }
 
 function consoleErrorsPresent() {

@@ -35,6 +35,42 @@ const FIELD_HEADERS = {
   psiPerformanceScore: ['psi_performance_score', 'performance_score'],
   lighthousePerformanceScore: ['lighthouse_performance_score'],
   lighthouseSeoScore: ['lighthouse_seo_score', 'seo_score'],
+  httpVersion: ['http_version', 'protocol'],
+  cacheControl: ['cache_control', 'cache_control_header'],
+  age: ['age'],
+  via: ['via'],
+  xCache: ['x_cache', 'x_cache_header'],
+  xCacheHits: ['x_cache_hits'],
+  cfCacheStatus: ['cf_cache_status'],
+  xAzureRef: ['x_azure_ref'],
+  server: ['server'],
+  contentEncoding: ['content_encoding'],
+  ogTitle: ['og_title', 'open_graph_title'],
+  ogDescription: ['og_description', 'open_graph_description'],
+  ogImage: ['og_image', 'open_graph_image'],
+  ogUrl: ['og_url', 'open_graph_url'],
+  ogType: ['og_type', 'open_graph_type'],
+  favicon: ['favicon', 'favicon_url'],
+  manifest: ['manifest', 'web_manifest', 'manifest_url'],
+  appleTouchIcon: ['apple_touch_icon', 'apple_touch_icon_url'],
+  hreflang: ['hreflang', 'language', 'language_region'],
+  hreflangUrl: ['alternate_url', 'href', 'hreflang_url'],
+  xDefault: ['x_default', 'x_default_url'],
+  returnLinks: ['return_links', 'return_link_status'],
+  preloadCount: ['preload', 'preload_count'],
+  preconnectCount: ['preconnect', 'preconnect_count'],
+  dnsPrefetchCount: ['dns_prefetch', 'dns_prefetch_count'],
+  prefetchCount: ['prefetch', 'prefetch_count'],
+  jsCount: ['js_count', 'javascript_count', 'scripts'],
+  cssCount: ['css_count', 'stylesheets', 'stylesheet_count'],
+  totalJsBytes: ['total_js_size', 'total_js_bytes', 'javascript_bytes'],
+  totalCssBytes: ['total_css_size', 'total_css_bytes', 'css_bytes'],
+  consentManager: ['consent_manager', 'cmp', 'cookie_banner', 'cookie_consent'],
+  googleConsentMode: ['google_consent_mode', 'consent_mode'],
+  googleTagManager: ['google_tag_manager', 'gtm'],
+  gtag: ['gtag'],
+  dataLayer: ['data_layer', 'datalayer'],
+  metaPixel: ['meta_pixel', 'facebook_pixel'],
   source: ['source', 'from'],
   destination: ['destination', 'to'],
   anchorText: ['anchor_text', 'anchor'],
@@ -134,6 +170,11 @@ export function mapScreamingFrogRow(row, exportType) {
     psiPerformanceScore: normalizeScore(getter('psiPerformanceScore')),
     lighthousePerformanceScore: normalizeScore(getter('lighthousePerformanceScore')),
     lighthouseSeoScore: normalizeScore(getter('lighthouseSeoScore')),
+    responseHeadersJson: responseHeadersJson(getter),
+    og: openGraphFact(getter),
+    favicon: normalizeUrl(getter('favicon'), url) || getter('favicon'),
+    manifest: normalizeUrl(getter('manifest'), url) || getter('manifest'),
+    featureFlags: featureFlagsFact(getter, exportType),
     importedSourceTypes: [exportType]
   };
 
@@ -180,4 +221,72 @@ function normalizeScore(value) {
 
 function linkTypeFromValue(value) {
   return /external/i.test(value || '') ? 'external' : 'internal';
+}
+
+function responseHeadersJson(getter) {
+  const headers = {
+    'cache-control': getter('cacheControl'),
+    age: getter('age'),
+    via: getter('via'),
+    'x-cache': getter('xCache'),
+    'x-cache-hits': getter('xCacheHits'),
+    'cf-cache-status': getter('cfCacheStatus'),
+    'x-azure-ref': getter('xAzureRef'),
+    server: getter('server'),
+    'content-encoding': getter('contentEncoding'),
+    'x-http-version': getter('httpVersion')
+  };
+  const compact = Object.fromEntries(Object.entries(headers).filter(([, value]) => value));
+  return Object.keys(compact).length ? JSON.stringify(compact) : null;
+}
+
+function openGraphFact(getter) {
+  const og = {
+    'og:title': getter('ogTitle') || null,
+    'og:description': getter('ogDescription') || null,
+    'og:image': getter('ogImage') || null,
+    'og:url': getter('ogUrl') || null,
+    'og:type': getter('ogType') || null
+  };
+  return Object.fromEntries(Object.entries(og).filter(([, value]) => value));
+}
+
+function featureFlagsFact(getter, exportType) {
+  const hreflang = getter('hreflang');
+  const xDefault = getter('xDefault');
+  const consentVendor = getter('consentManager');
+  const flags = {
+    httpVersion: getter('httpVersion') || null,
+    hasHreflangXDefault: Boolean(xDefault || String(hreflang).toLowerCase() === 'x-default'),
+    hreflangCount: hreflang ? 1 : 0,
+    hreflangLanguages: hreflang ? [String(hreflang).toLowerCase()] : [],
+    hreflangReturnLinks: getter('returnLinks') || null,
+    resourceHintCounts: {
+      preload: numberValue(getter('preloadCount')) || 0,
+      preconnect: numberValue(getter('preconnectCount')) || 0,
+      dnsPrefetch: numberValue(getter('dnsPrefetchCount')) || 0,
+      prefetch: numberValue(getter('prefetchCount')) || 0
+    },
+    hasPreload: Boolean(numberValue(getter('preloadCount'))),
+    hasPreconnect: Boolean(numberValue(getter('preconnectCount')) || numberValue(getter('dnsPrefetchCount'))),
+    jsCount: numberValue(getter('jsCount')),
+    cssCount: numberValue(getter('cssCount')),
+    totalJsBytes: numberValue(getter('totalJsBytes')),
+    totalCssBytes: numberValue(getter('totalCssBytes')),
+    appleTouchIconCount: getter('appleTouchIcon') ? 1 : 0,
+    hasConsentSignal: Boolean(consentVendor || truthyText(getter('googleConsentMode'))),
+    consentVendorSignals: consentVendor ? [consentVendor] : [],
+    hasGoogleConsentMode: truthyText(getter('googleConsentMode')),
+    hasGoogleTagManager: truthyText(getter('googleTagManager')),
+    hasGtag: truthyText(getter('gtag')),
+    hasDataLayer: truthyText(getter('dataLayer')),
+    hasMetaPixel: truthyText(getter('metaPixel')),
+    importedSfExportType: exportType
+  };
+  return flags;
+}
+
+function truthyText(value) {
+  if (!value) return false;
+  return /^(1|true|yes|ja|present|detected|found)$/i.test(String(value).trim()) || !/^(0|false|no|nein|missing|not found)$/i.test(String(value).trim());
 }

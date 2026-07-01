@@ -21,7 +21,7 @@ const geo = (id, category, name, run, options = {}) => ({
   run
 });
 
-const AI_BOTS = ['GPTBot', 'OAI-SearchBot', 'ClaudeBot', 'PerplexityBot', 'Google-Extended'];
+const AI_BOTS = ['GPTBot', 'OAI-SearchBot', 'ChatGPT-User', 'ClaudeBot', 'PerplexityBot', 'Google-Extended', 'CCBot'];
 const ABOUT_TARGET_PATTERNS = [
   { needle: '/about', pattern: /(^|\/)about(\/|$)/i },
   { needle: '/about-us', pattern: /(^|\/)about-us(\/|$)/i },

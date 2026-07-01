@@ -1,5 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import Database from 'better-sqlite3';
 import { initDatabase } from '../src/db/database.js';
 import {
@@ -101,6 +104,14 @@ test('Batch 10.3 storage caps schema rawJson, domain assets and page links by pr
   const standardRunId = seedRun(db, { storageProfile: 'standard' });
   const leanRunId = seedRun(db, { storageProfile: 'lean' });
   const debugRunId = seedRun(db, { storageProfile: 'debug' });
+  for (const runId of [standardRunId, leanRunId, debugRunId]) {
+    insertPage(db, pageRecordFromFact(runId, {
+      url: 'https://example.com/a',
+      statusCode: 200,
+      title: 'Example',
+      h1Text: 'Example'
+    }));
+  }
 
   replacePageArtifacts(db, standardRunId, 'https://example.com/a', filterArtifactsForStorage(getRunWithProject(db, standardRunId), {
     links: Array.from({ length: 250 }, (_, index) => ({
@@ -147,10 +158,15 @@ test('Batch 10.3 storage caps schema rawJson, domain assets and page links by pr
   assert.ok(standardSchema.rawJson.length < 5000);
   assert.equal(leanSchema.rawJson, null);
   assert.ok(debugSchema.rawJson.length > 10000);
-  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM page_links WHERE runId = ?').get(standardRunId).count, 200);
+  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM page_links WHERE runId = ?').get(standardRunId).count, 25);
   assert.equal(db.prepare('SELECT COUNT(*) AS count FROM page_links WHERE runId = ?').get(leanRunId).count, 0);
   assert.equal(db.prepare('SELECT COUNT(*) AS count FROM domain_assets WHERE runId = ?').get(standardRunId).count, 1);
   assert.match(db.prepare('SELECT content FROM domain_assets WHERE runId = ?').get(standardRunId).content, /dedupe/);
+  const page = db.prepare('SELECT uniqueInternalTargetsCount, storedLinkRowsCount, linkRowsTruncated FROM pages WHERE runId = ? AND finalUrl = ?').get(standardRunId, 'https://example.com/a');
+  assert.equal(page.uniqueInternalTargetsCount, 250);
+  assert.equal(page.storedLinkRowsCount, 25);
+  assert.equal(page.linkRowsTruncated, 1);
+  assert.ok(db.prepare('SELECT rawJsonHash, rawJsonBytes FROM schemas WHERE runId = ?').get(standardRunId).rawJsonHash);
   db.close();
 });
 
@@ -181,6 +197,51 @@ test('Batch 10 Screaming Frog CSV detection and import create facts, findings, m
   const fullJson = JSON.parse(collectFullAuditJson(db, runId, ['findings']).body);
   assert.equal(fullJson.runConfig.sourceType, 'screaming_frog_import');
   assert.equal(fullJson.exportManifest.storageProfile, 'standard');
+  db.close();
+});
+
+test('Batch 10.4 Screaming Frog folder import maps enterprise header, hreflang and Open Graph signals', async () => {
+  const db = setupDb();
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'audit-sf-folder-'));
+  fs.writeFileSync(path.join(dir, 'internal_html.csv'), [
+    'Address,Status Code,Content Type,Indexability,Title 1,Meta Description 1,H1-1',
+    'https://example.com/a,200,text/html,Indexable,Page A,Description A,Heading A'
+  ].join('\n'), 'utf8');
+  fs.writeFileSync(path.join(dir, 'headers.csv'), [
+    'Address,Cache-Control,X-Cache,CF-Cache-Status,HTTP Version,Server',
+    'https://example.com/a,max-age=3600,HIT,HIT,h2,cloudflare'
+  ].join('\n'), 'utf8');
+  fs.writeFileSync(path.join(dir, 'hreflang.csv'), [
+    'Address,Hreflang,Alternate URL,X-Default',
+    'https://example.com/a,de-DE,https://example.com/a,https://example.com/'
+  ].join('\n'), 'utf8');
+  fs.writeFileSync(path.join(dir, 'open_graph.csv'), [
+    'Address,OG Title,OG Description,OG Image,OG URL,OG Type,Favicon,Apple Touch Icon,Preconnect,Google Tag Manager,Google Consent Mode',
+    'https://example.com/a,Page A,Description A,https://example.com/og.jpg,https://example.com/a,website,https://example.com/favicon.ico,https://example.com/apple.png,1,true,true'
+  ].join('\n'), 'utf8');
+
+  const { runId, summary } = await importScreamingFrogAudit(db, {
+    domain: 'https://example.com',
+    folderPath: dir,
+    storageProfile: 'standard'
+  });
+  assert.equal(summary.filesImported, 4);
+  assert.ok(summary.detectedExportTypes.includes('hreflang'));
+  assert.ok(summary.detectedExportTypes.includes('opengraph'));
+  assert.ok(summary.detectedExportTypes.includes('security_headers'));
+  const page = db.prepare('SELECT responseHeadersJson, ogJson, favicon, featureFlagsJson FROM pages WHERE runId = ?').get(runId);
+  assert.match(page.responseHeadersJson, /cf-cache-status/);
+  assert.match(page.ogJson, /og:type/);
+  assert.equal(page.favicon, 'https://example.com/favicon.ico');
+  const flags = JSON.parse(page.featureFlagsJson);
+  assert.equal(flags.hasHreflangXDefault, true);
+  assert.equal(flags.hasGoogleTagManager, true);
+  assert.equal(flags.hasGoogleConsentMode, true);
+  const checks = db.prepare('SELECT checkId, status FROM check_results WHERE runId = ?').all(runId);
+  const byId = new Map(checks.map((row) => [row.checkId, row.status]));
+  assert.equal(byId.get('tech.http_version_support'), 'OK');
+  assert.equal(byId.get('tech.hreflang_x_default_missing'), 'OK');
+  fs.rmSync(dir, { recursive: true, force: true });
   db.close();
 });
 

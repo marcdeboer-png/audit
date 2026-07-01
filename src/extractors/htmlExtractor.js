@@ -127,7 +127,7 @@ function headings($, selector) {
 }
 
 function extractOpenGraph($) {
-  const wanted = ['og:title', 'og:description', 'og:image', 'og:url'];
+  const wanted = ['og:title', 'og:description', 'og:image', 'og:url', 'og:type'];
   const output = {};
   for (const property of wanted) {
     output[property] = $(`meta[property="${property}"]`).first().attr('content')?.trim() || null;
@@ -344,6 +344,25 @@ function extractFeatureFlags($, bodyText, links, h2Count, pageUrl) {
   );
   const hasTables = $('table').length > 0;
   const hasLists = $('ul,ol').length > 0;
+  const htmlSample = $.html().slice(0, 500000);
+  const scriptSources = $('script[src]')
+    .map((_, element) => $(element).attr('src') || '')
+    .get()
+    .join(' ');
+  const consentSignals = detectConsentSignals(`${htmlSample} ${bodyText} ${scriptSources}`);
+  const hreflangLinks = $('link[rel~="alternate"][hreflang]')
+    .map((_, element) => ({
+      hreflang: String($(element).attr('hreflang') || '').trim(),
+      href: String($(element).attr('href') || '').trim()
+    }))
+    .get()
+    .filter((item) => item.hreflang);
+  const resourceHintCounts = {
+    preload: $('link[rel~="preload"]').length,
+    preconnect: $('link[rel~="preconnect"]').length,
+    dnsPrefetch: $('link[rel~="dns-prefetch"]').length,
+    prefetch: $('link[rel~="prefetch"]').length
+  };
 
   return {
     tablesCount: $('table').length,
@@ -360,8 +379,16 @@ function extractFeatureFlags($, bodyText, links, h2Count, pageUrl) {
     hasVisibleDate,
     hasAuthorHint: hasAuthorPattern,
     hasAuthorPattern,
-    hasPreload: $('link[rel~="preload"]').length > 0,
-    hasPreconnect: $('link[rel~="preconnect"], link[rel~="dns-prefetch"]').length > 0,
+    hasPreload: resourceHintCounts.preload > 0,
+    hasPreconnect: resourceHintCounts.preconnect > 0 || resourceHintCounts.dnsPrefetch > 0,
+    resourceHintCounts,
+    hreflangCount: hreflangLinks.length,
+    hreflangLanguages: [...new Set(hreflangLinks.map((item) => item.hreflang.toLowerCase()))].slice(0, 50),
+    hasHreflangXDefault: hreflangLinks.some((item) => item.hreflang.toLowerCase() === 'x-default'),
+    appleTouchIconCount: $('link[rel~="apple-touch-icon"]').length,
+    iconLinkCount: $('link[rel~="icon"], link[rel="shortcut icon"], link[rel~="apple-touch-icon"]').length,
+    manifestIconHint: $('link[rel="manifest"]').length > 0,
+    ...consentSignals,
     videosCount,
     hasVideoEmbed: videosCount > 0,
     h2Count,
@@ -369,6 +396,33 @@ function extractFeatureFlags($, bodyText, links, h2Count, pageUrl) {
     articleLike,
     productLike: /\/(product|produkt|shop|p)\//i.test(new URLSafePath($, pageUrl)) || $('[itemtype*="Product"]').length > 0,
     lowStructuredSections: countWords(bodyText) > 250 && h2Count < 2 && !hasLists && !hasTables
+  };
+}
+
+function detectConsentSignals(text) {
+  const value = String(text || '').toLowerCase();
+  const vendors = [
+    ['onetrust', /onetrust|optanonconsent|optanonalertbox/i],
+    ['usercentrics', /usercentrics|uc_settings|uc_ui/i],
+    ['cookiebot', /cookiebot|cookieconsent/i],
+    ['didomi', /didomi/i],
+    ['consentmanager', /consentmanager/i]
+  ];
+  const matchedVendors = vendors.filter(([, pattern]) => pattern.test(value)).map(([vendor]) => vendor);
+  const hasGoogleConsentMode = /gtag\(['"]consent|google consent mode|ad_storage|analytics_storage/i.test(text);
+  const hasGoogleTagManager = /googletagmanager\.com\/gtm\.js|gtm-[a-z0-9]+|google tag manager/i.test(text);
+  const hasGtag = /gtag\(/i.test(text) || /googletagmanager\.com\/gtag\/js/i.test(text);
+  const hasDataLayer = /datalayer/i.test(text);
+  const hasMetaPixel = /connect\.facebook\.net|fbq\(/i.test(text);
+  return {
+    consentVendorSignals: matchedVendors,
+    hasConsentSignal: matchedVendors.length > 0 || hasGoogleConsentMode,
+    hasGoogleConsentMode,
+    hasGoogleTagManager,
+    hasGtag,
+    hasDataLayer,
+    hasMetaPixel,
+    thirdPartyMarketingSignals: [hasGoogleTagManager && 'google_tag_manager', hasGtag && 'gtag', hasMetaPixel && 'meta_pixel'].filter(Boolean)
   };
 }
 

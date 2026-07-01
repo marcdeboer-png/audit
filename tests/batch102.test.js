@@ -120,6 +120,32 @@ test('Batch 10.3 manual OK item with matching OK tool check is covered', () => {
   assert.equal(coverage.coverageStatus, 'covered');
 });
 
+test('Batch 10.4 mapping covers enterprise validation families', () => {
+  const cases = [
+    ['HTTP version uses HTTP/2', 'tech.http_version_support'],
+    ['CDN and Cache-Control CONFIG_NOCACHE issues', 'tech.cdn_cache_signals'],
+    ['Open Graph tags incomplete', 'tech.open_graph_basics_missing'],
+    ['Favicon and app icon incomplete', 'tech.app_icons_incomplete'],
+    ['Preconnects and resource hints missing', 'tech.resource_hints_summary'],
+    ['Google Consent Mode v2 and Tag Manager consent integration', 'tech.consent_technical_signals'],
+    ['Hreflang x-default missing', 'tech.hreflang_x_default_missing'],
+    ['AI bot handling in robots.txt GPTBot ChatGPT-User CCBot', 'geo.ai_bots_policy_summary']
+  ];
+  for (const [title, expectedCheckId] of cases) {
+    const mapping = mapReferenceItemToChecks({
+      id: title,
+      title,
+      category: 'Technical SEO',
+      priority: 'Medium',
+      status: 'open'
+    });
+    assert.ok(
+      [...mapping.expectedCheckIds, ...mapping.possibleCheckIds].includes(expectedCheckId),
+      `${title} should map to ${expectedCheckId}, got ${[...mapping.expectedCheckIds, ...mapping.possibleCheckIds].join(', ')}`
+    );
+  }
+});
+
 test('Batch 10.2 storage reality check separates run estimate from global DB and projects scale', () => {
   const db = setupDb();
   const runId = seedValidationRun(db);
@@ -179,6 +205,8 @@ test('Batch 10.2 validation exports include executive, false-positive/negative, 
 
   const files = buildValidationExportPayload(report);
   assert.match(files['executive-validation-summary.md'], /Weighted coverage|Manual audit points/);
+  assert.match(files['validation-report.md'], /Data Basis|Top Covered|What The Tool Finds Beyond The Manual Audit/);
+  assert.match(files['validation-report.html'], /Data basis:|Top Covered|Next Automation Steps/);
   assert.match(files['false-negatives.md'], /Cache CDN Probleme|False Negative/);
   assert.match(files['false-positives.md'], /false-positive candidates|False Positive/i);
   assert.match(files['check-roadmap.json'], /Cache CDN Probleme/);

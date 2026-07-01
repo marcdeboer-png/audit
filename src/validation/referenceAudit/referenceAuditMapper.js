@@ -31,11 +31,10 @@ export const REFERENCE_MAPPING_RULES = Object.freeze([
     category: 'media-performance',
     requiredData: ['response_headers']
   }),
-  rule('http-version', /http\/2|http2|http version|h2\b/, [], {
+  rule('http-version', /http\/2|http2|http version|h2\b|http protocol/, ['tech.http_version_support'], {
     category: 'media-performance',
     requiredData: ['requests_audit', 'protocol_version'],
     sourceTypes: ['external', 'screaming_frog_import'],
-    possibleCheckId: 'tech.http_version_support',
     requiresExternalData: true
   }),
   rule('charset-lang-viewport', /charset|utf-?8|html lang|language attribute|viewport meta|mobile rendering/, ['tech.charset_utf8_present', 'tech.html_lang_missing', 'tech.viewport_missing'], {
@@ -48,11 +47,10 @@ export const REFERENCE_MAPPING_RULES = Object.freeze([
     category: 'technical-seo',
     requiredData: ['sitemap', 'robots', 'url_patterns']
   }),
-  rule('hreflang', /hreflang|x-default|internationali[sz]ation|language.country|language region/, [], {
+  rule('hreflang', /hreflang|x-default|internationali[sz]ation|language.country|language region/, ['tech.hreflang_x_default_missing'], {
     category: 'html-head',
     sourceTypes: ['screaming_frog_import', 'external'],
     requiredData: ['hreflang_export'],
-    possibleCheckId: 'tech.hreflang_x_default_missing',
     requiresExternalData: true
   }),
   rule('schema', /schema|structured data|strukturierte daten|json.?ld/, ['tech.schema_types_coverage_summary', 'tech.json_ld_parse_errors'], {
@@ -87,7 +85,7 @@ export const REFERENCE_MAPPING_RULES = Object.freeze([
   rule('security-headers', /security|hsts|csp|content security|x-frame|x-content|referrer|permissions policy/, ['tech.hsts_header', 'tech.content_security_policy', 'tech.x_frame_options', 'tech.x_content_type_options', 'tech.referrer_policy', 'tech.permissions_policy'], {
     category: 'security-server'
   }),
-  rule('cache-cdn', /cache|cdn|edge|expires|cache-control/, ['tech.cache_control_header'], {
+  rule('cache-cdn', /cache|cdn|edge|expires|cache-control|azure front door|config_nocache|x-cache|cf-cache|akamai|fastly/, ['tech.cache_control_header', 'tech.cdn_cache_signals'], {
     category: 'media-performance',
     requiredData: ['response_headers', 'cdn_headers']
   }),
@@ -105,14 +103,24 @@ export const REFERENCE_MAPPING_RULES = Object.freeze([
     category: 'media-performance',
     requiredData: ['resource_facts']
   }),
-  rule('critical-css-preload-fonts', /critical path css|render-blocking|preload|preconnect|font preload|web fonts|lcp image|fetchpriority|largest visible element/, ['tech.too_many_css', 'tech.large_css_total', 'tech.third_party_scripts_detected', 'template.high_lcp', 'template.high_tbt'], {
+  rule('critical-css-preload-fonts', /critical path css|render-blocking|preload|preconnect|dns-prefetch|font preload|web fonts|lcp image|fetchpriority|largest visible element|resource hints?/, ['tech.too_many_css', 'tech.large_css_total', 'tech.third_party_scripts_detected', 'tech.preload_missing', 'tech.preconnect_missing', 'tech.resource_hints_summary', 'tech.imported_resource_performance_signals', 'template.high_lcp', 'template.high_tbt'], {
     category: 'media-performance',
     sourceTypes: ['crawl', 'external', 'screaming_frog_import'],
     requiredData: ['resource_facts', 'browser_check', 'lighthouse']
   }),
-  rule('webmanifest-favicon-pwa', /web manifest|manifest|pwa|favicon|app icon|add to home screen/, ['tech.webmanifest_missing'], {
+  rule('open-graph', /open graph|\bog:|social preview|facebook sharing|social metadata/, ['tech.open_graph_basics_missing'], {
+    category: 'html-head',
+    requiredData: ['html_head']
+  }),
+  rule('webmanifest-favicon-pwa', /web manifest|manifest|pwa|favicon|app icon|apple-touch-icon|add to home screen/, ['tech.webmanifest_missing', 'tech.favicon_missing', 'tech.app_icons_incomplete'], {
     category: 'html-head',
     requiredData: ['html_head', 'browser_check']
+  }),
+  rule('consent-privacy-tagmanager', /consent|cookie banner|cookiebot|onetrust|usercentrics|didomi|consentmanager|google consent mode|tag manager|gtm|dataLayer|meta pixel|gdpr|dsgvo/, ['tech.consent_technical_signals'], {
+    category: 'consent-privacy',
+    sourceTypes: ['crawl', 'screaming_frog_import', 'external'],
+    requiredData: ['browser_check', 'html_head', 'tag_manager_inventory'],
+    requiresHumanJudgment: true
   }),
   rule('facet-bloat', /facet|facette|filter|sortier|sort|parameter|crawl.?bloat|pagination|paginierung/, [], {
     category: 'technical-seo',
@@ -124,7 +132,7 @@ export const REFERENCE_MAPPING_RULES = Object.freeze([
   rule('llms', /llms\.txt|llms-full|markdown twin/, ['geo.llms_txt_present', 'geo.llms_txt_http_status', 'geo.llms_full_txt_present', 'geo.markdown_twin_homepage'], {
     category: 'geo-readiness'
   }),
-  rule('ai-bots', /ai bot|gptbot|oai-searchbot|claudebot|perplexity|google-extended|crawler policy/, ['geo.ai_bots_policy_summary', 'geo.robots_mentions_gptbot', 'geo.robots_mentions_oai_searchbot', 'geo.robots_mentions_claudebot', 'geo.robots_mentions_perplexitybot', 'geo.robots_mentions_google_extended'], {
+  rule('ai-bots', /ai bot|gptbot|oai-searchbot|chatgpt-user|claudebot|perplexity|google-extended|ccbot|crawler policy/, ['geo.ai_bots_policy_summary', 'geo.robots_mentions_gptbot', 'geo.robots_mentions_oai_searchbot', 'geo.robots_mentions_chatgpt_user', 'geo.robots_mentions_claudebot', 'geo.robots_mentions_perplexitybot', 'geo.robots_mentions_google_extended', 'geo.robots_mentions_ccbot'], {
     category: 'ai-crawler-policy'
   }),
   rule('trust-entity', /e-?e-?a-?t|trust|author|quellenhinweis|source link|external source|entity|brand|marke|about|kontakt|contact|impressum|datenschutz/, ['geo.impressum_linked', 'geo.datenschutz_linked', 'geo.about_linked', 'geo.contact_linked', 'geo.source_or_external_links_present', 'geo.author_hints_present'], {

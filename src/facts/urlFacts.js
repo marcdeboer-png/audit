@@ -55,6 +55,13 @@ export function pageRecordFromFact(runId, fact = {}) {
     rawHtmlSize: nullableNumber(fact.rawHtmlSize ?? fact.sizeBytes),
     internalLinksCount: nullableNumber(fact.internalLinksCount ?? fact.outlinkCount) ?? 0,
     externalLinksCount: nullableNumber(fact.externalLinksCount) ?? 0,
+    uniqueInternalTargetsCount: nullableNumber(fact.uniqueInternalTargetsCount) ?? nullableNumber(fact.internalLinksCount ?? fact.outlinkCount) ?? 0,
+    uniqueExternalTargetsCount: nullableNumber(fact.uniqueExternalTargetsCount) ?? nullableNumber(fact.externalLinksCount) ?? 0,
+    nofollowLinksCount: nullableNumber(fact.nofollowLinksCount) ?? 0,
+    imageLinksCount: nullableNumber(fact.imageLinksCount) ?? 0,
+    storedLinkRowsCount: nullableNumber(fact.storedLinkRowsCount) ?? 0,
+    linkRowsTruncated: boolInt(fact.linkRowsTruncated),
+    linkSamplesJson: JSON.stringify(normalizeList(fact.linkSamples)),
     inlinkCount: nullableNumber(fact.inlinkCount),
     outlinkCount: nullableNumber(fact.outlinkCount ?? fact.internalLinksCount),
     schemaTypesJson: JSON.stringify(schemaTypes),
@@ -96,11 +103,32 @@ export function mergeFacts(existing = {}, incoming = {}) {
     if (value === undefined || value === null || value === '') continue;
     if (Array.isArray(value)) {
       merged[key] = [...new Set([...(Array.isArray(merged[key]) ? merged[key] : []), ...value])];
+    } else if (value && typeof value === 'object' && !Array.isArray(value)) {
+      merged[key] = mergeObjects(merged[key], value);
     } else {
       merged[key] = value;
     }
   }
   return merged;
+}
+
+function mergeObjects(existing = {}, incoming = {}) {
+  const output = existing && typeof existing === 'object' && !Array.isArray(existing) ? { ...existing } : {};
+  for (const [key, value] of Object.entries(incoming || {})) {
+    if (value === undefined || value === null || value === '') continue;
+    if (Array.isArray(value)) {
+      output[key] = [...new Set([...(Array.isArray(output[key]) ? output[key] : []), ...value])];
+    } else if (value && typeof value === 'object') {
+      output[key] = mergeObjects(output[key], value);
+    } else if (typeof value === 'boolean' && typeof output[key] === 'boolean') {
+      output[key] = output[key] || value;
+    } else if (typeof value === 'number' && typeof output[key] === 'number') {
+      output[key] = Math.max(output[key], value);
+    } else {
+      output[key] = value;
+    }
+  }
+  return output;
 }
 
 export function normalizeSchemaTypes(value) {

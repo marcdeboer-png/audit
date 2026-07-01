@@ -3,9 +3,11 @@ import robotsParser from 'robots-parser';
 const AI_BOTS = [
   'GPTBot',
   'OAI-SearchBot',
+  'ChatGPT-User',
   'ClaudeBot',
   'PerplexityBot',
-  'Google-Extended'
+  'Google-Extended',
+  'CCBot'
 ];
 
 export function parseRobots(url, content) {

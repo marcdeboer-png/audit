@@ -102,6 +102,35 @@ export function renderValidationMarkdown(report) {
     `- Needs LLM review: ${summary.needsLlmReview || 0}`,
     `- Tool extras: ${summary.toolExtras || 0}`,
     `- Estimated coverage: ${summary.coveragePercent ?? 0}%`,
+    `- Data basis: ${summary.dataBasisLabel || report.executiveValidationSummary?.sampleNote || 'n/a'}`,
+    '',
+    '## Data Basis',
+    '',
+    report.executiveValidationSummary?.sampleNote || 'No data-basis note available.',
+    '',
+    '## Top Covered',
+    '',
+    ...topCoverageLines(report.coverageMatrix, 'covered'),
+    '',
+    '## Top Partial',
+    '',
+    ...topCoverageLines(report.coverageMatrix, 'partially_covered'),
+    '',
+    '## Top Gaps',
+    '',
+    ...topCoverageLines(report.coverageMatrix, ['not_covered', 'false_negative_candidate', 'needs_external_data', 'needs_larger_crawl', 'needs_human_review', 'needs_llm_review']),
+    '',
+    '## Needs Bigger Data Basis',
+    '',
+    ...topCoverageLines(report.coverageMatrix, 'needs_larger_crawl'),
+    '',
+    '## What The Tool Finds Beyond The Manual Audit',
+    '',
+    ...topToolExtraLines(report.unmatchedToolFindings),
+    '',
+    '## Next Automation Steps',
+    '',
+    ...nextAutomationLines(report.checkRoadmap),
     '',
     '## Coverage Matrix',
     '',
@@ -126,6 +155,29 @@ export function renderValidationMarkdown(report) {
     renderBacklogMarkdown(report.nextCheckBacklog || [])
   );
   return `${lines.join('\n')}\n`;
+}
+
+function topCoverageLines(rows = [], statuses = [], limit = 8) {
+  const statusSet = new Set(Array.isArray(statuses) ? statuses : [statuses]);
+  const selected = (rows || [])
+    .filter((row) => statusSet.has(row.coverageStatus))
+    .slice(0, limit);
+  if (!selected.length) return ['- None'];
+  return selected.map((row) => `- **${md(row.manualItem?.title || row.manualItemId)}** (${md(row.coverageStatus)}, ${md(row.confidence)}): ${md(row.rationale || '')}`);
+}
+
+function topToolExtraLines(rows = [], limit = 8) {
+  const selected = (rows || [])
+    .filter((row) => ['likely_relevant', 'needs_review', 'low_priority'].includes(row.extraClassification))
+    .slice(0, limit);
+  if (!selected.length) return ['- No tool-only findings ready for review.'];
+  return selected.map((row) => `- **${md(row.checkId)}** (${md(row.extraClassification)}): ${md(row.finding || row.title || '')}`);
+}
+
+function nextAutomationLines(rows = [], limit = 8) {
+  const selected = (rows || []).slice(0, limit);
+  if (!selected.length) return ['- No roadmap items generated.'];
+  return selected.map((row) => `- **${md(row.title)}** (${md(row.roadmapCategory || '')}): ${md(row.suggestedImplementation || '')}`);
 }
 
 export function renderBacklogMarkdown(backlog = []) {
@@ -164,6 +216,7 @@ export function renderExecutiveSummaryMarkdown(report) {
     `- Tool-only findings: ${summary.toolExtras ?? 0}`,
     `- False-positive candidates: ${summary.falsePositiveCandidates ?? 0}`,
     `- Storage risk: ${summary.storageRiskLevel || 'unknown'}`,
+    `- Data basis: ${validation.dataBasisLabel || summary.sampleNote || 'n/a'}`,
     '',
     '## Most Important Gaps',
     ''
@@ -308,6 +361,9 @@ export function renderValidationHtml(report) {
     <div class="muted">Run ${escapeHtml(report.runId)} · ${escapeHtml(report.generatedAt || '')}</div>
   </header>
   <main>
+    <section class="card">
+      <strong>Data basis:</strong> ${escapeHtml(summary.dataBasisLabel || report.executiveValidationSummary?.sampleNote || '')}
+    </section>
     <section class="grid">
       ${metricCard('Manual Items', summary.manualItemCount)}
       ${metricCard('Covered', summary.covered)}
@@ -323,6 +379,16 @@ export function renderValidationHtml(report) {
     </section>
     <h2>Executive Summary</h2>
     <p>${escapeHtml(report.executiveValidationSummary?.answer || '')}</p>
+    <h2>Top Covered</h2>
+    ${htmlList(topCoverageLines(report.coverageMatrix, 'covered'))}
+    <h2>Top Partial</h2>
+    ${htmlList(topCoverageLines(report.coverageMatrix, 'partially_covered'))}
+    <h2>Top Gaps</h2>
+    ${htmlList(topCoverageLines(report.coverageMatrix, ['not_covered', 'false_negative_candidate', 'needs_external_data', 'needs_larger_crawl', 'needs_human_review', 'needs_llm_review']))}
+    <h2>What The Tool Finds Beyond The Manual Audit</h2>
+    ${htmlList(topToolExtraLines(report.unmatchedToolFindings))}
+    <h2>Next Automation Steps</h2>
+    ${htmlList(nextAutomationLines(report.checkRoadmap))}
     <h2>Coverage Matrix</h2>
     <table>
       <thead><tr><th>Manual Item</th><th>Status</th><th>Confidence</th><th>Matched Check</th><th>Rationale</th></tr></thead>
@@ -373,6 +439,11 @@ function groupBy(rows, keyFn) {
 
 function metricCard(label, value) {
   return `<div class="card"><div class="muted">${escapeHtml(label)}</div><div class="metric">${escapeHtml(value ?? 0)}</div></div>`;
+}
+
+function htmlList(lines = []) {
+  const items = lines.map((line) => String(line || '').replace(/^- /, ''));
+  return `<ul>${items.map((line) => `<li>${escapeHtml(line).replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')}</li>`).join('')}</ul>`;
 }
 
 function md(value) {

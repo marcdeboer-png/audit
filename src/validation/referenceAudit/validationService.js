@@ -227,6 +227,9 @@ function buildValidationSummary({ run, referenceAudit, coverageMatrix, toolExtra
   return {
     runId: run.id,
     domain: run.finalDomain || run.inputDomain,
+    sourceType: run.sourceType || 'crawl',
+    processedUrls: run.processedUrls || 0,
+    dataBasisLabel: dataBasisLabel(run),
     referenceFilename: referenceAudit.filename || null,
     manualItemCount,
     covered: counts.covered || 0,
@@ -377,6 +380,15 @@ function buildExecutiveValidationSummary(summary, context = {}) {
       ? 'Use this report to separate already automated audit coverage from implementation gaps, external-data gaps and review-only topics.'
       : 'Place the original manual audit export in the reference-audits folder and rerun validation before using coverage figures in a management demo.'
   };
+}
+
+function dataBasisLabel(run = {}) {
+  const sourceType = run.sourceType || 'crawl';
+  const processedUrls = Number(run.processedUrls || run.successfulUrls || 0);
+  if (sourceType === 'screaming_frog_import') return `Screaming Frog import (${processedUrls} URL facts)`;
+  if (processedUrls && processedUrls <= 1000) return `Sample crawl (${processedUrls} processed URLs)`;
+  if (processedUrls) return `Crawl/import run (${processedUrls} processed URLs)`;
+  return sourceType;
 }
 
 function buildChefDemoSummary(summary, toolExtras = [], falseNegativeCandidates = []) {

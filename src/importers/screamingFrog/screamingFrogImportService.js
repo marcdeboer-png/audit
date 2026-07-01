@@ -1,4 +1,6 @@
 import fs from 'node:fs';
+import path from 'node:path';
+import { spawnSync } from 'node:child_process';
 import { createProject, createRun, insertImportFileSummary, insertPage, logRun, replacePageArtifacts, updateProject, updateRun } from '../../db/repositories.js';
 import { normalizeAuditConfig } from '../../crawler/auditRunner.js';
 import { buildTemplateClusters } from '../../analysis/templateClusterer.js';
@@ -7,7 +9,7 @@ import { generateReport } from '../../reports/reportGenerator.js';
 import { nowIso } from '../../utils/time.js';
 import { normalizeUrl } from '../../utils/url.js';
 import { pageRecordFromFact, mergeFacts } from '../../facts/urlFacts.js';
-import { filterArtifactsForStorage } from '../../storage/retention.js';
+import { buildLinkAggregates, filterArtifactsForStorage } from '../../storage/retention.js';
 import { storeBenchmarkSummary } from '../../analysis/benchmarkSummary.js';
 import { parseScreamingFrogCsv } from './parseScreamingFrogCsv.js';
 import { detectScreamingFrogExport, expectedScreamingFrogExportTypes } from './detectScreamingFrogExport.js';
@@ -33,6 +35,7 @@ export async function importScreamingFrogAudit(db, input = {}) {
     const fileWarnings = [];
     if (detection.type === 'unknown') fileWarnings.push('Export type could not be detected confidently.');
     if (!parsed.rows.length) fileWarnings.push('CSV contained no data rows.');
+    if (file.sizeBytes && file.sizeBytes > 100 * 1024 * 1024) fileWarnings.push('Large CSV parsed in memory; split exports or run on a machine with sufficient RAM until streaming import is implemented.');
 
     for (const row of parsed.rows) {
       const mappedRow = mapScreamingFrogRow(row, detection.type);
@@ -50,6 +53,8 @@ export async function importScreamingFrogAudit(db, input = {}) {
 
     fileSummaries.push({
       filename: file.filename,
+      sourcePath: file.sourcePath || null,
+      sizeBytes: file.sizeBytes || Buffer.byteLength(file.content || '', 'utf8'),
       exportType: detection.type,
       exportLabel: detection.label,
       confidence: detection.confidence,
@@ -61,6 +66,7 @@ export async function importScreamingFrogAudit(db, input = {}) {
     warnings.push(...fileWarnings.map((message) => `${file.filename}: ${message}`));
   }
 
+  mergeArtifactAggregatesIntoFacts(factsByUrl, linksByPage);
   const firstUrl = [...factsByUrl.keys()][0] || firstUrlFromArtifacts(linksByPage, imagesByPage);
   const domain = String(input.domain || inferDomain(firstUrl) || '').trim();
   if (!domain) throw new Error('domain is required when no URL could be inferred from the import.');
@@ -139,6 +145,9 @@ export async function importScreamingFrogAudit(db, input = {}) {
     ignoredColumns: [...new Set(fileSummaries.flatMap((file) => file.ignoredColumns))].sort(),
     warnings,
     missingExpectedExports,
+    recommendedExports: expectedScreamingFrogExportTypes(),
+    totalRows: fileSummaries.reduce((sum, file) => sum + Number(file.rowCount || 0), 0),
+    totalInputBytes: files.reduce((sum, file) => sum + Number(file.sizeBytes || Buffer.byteLength(file.content || '', 'utf8')), 0),
     files: fileSummaries
   };
 
@@ -167,8 +176,74 @@ async function loadImportFiles(input) {
     }
   }
   if (input.filePath) {
-    const content = fs.readFileSync(input.filePath, 'utf8');
-    files.push({ filename: input.filePath.split(/[\\/]/).pop(), content });
+    loadPath(input.filePath, files);
+  }
+  for (const filePath of input.filePaths || []) {
+    loadPath(filePath, files);
+  }
+  for (const folderPath of [input.folderPath, input.directoryPath, input.importDir].filter(Boolean)) {
+    for (const candidate of listCsvFiles(folderPath)) loadPath(candidate, files);
+  }
+  return files;
+}
+
+function loadPath(filePath, files) {
+  const resolved = path.resolve(filePath);
+  if (!fs.existsSync(resolved)) throw new Error(`Screaming Frog import path not found: ${resolved}`);
+  const stat = fs.statSync(resolved);
+  if (stat.isDirectory()) {
+    for (const candidate of listCsvFiles(resolved)) loadPath(candidate, files);
+    return;
+  }
+  if (/\.zip$/i.test(resolved)) {
+    files.push(...readCsvFilesFromZip(resolved));
+    return;
+  }
+  if (!/\.csv$/i.test(resolved)) return;
+  const content = fs.readFileSync(resolved, 'utf8');
+  files.push({
+    filename: path.basename(resolved),
+    sourcePath: resolved,
+    sizeBytes: stat.size,
+    content
+  });
+}
+
+function listCsvFiles(folderPath) {
+  const root = path.resolve(folderPath);
+  if (!fs.existsSync(root)) return [];
+  const output = [];
+  const walk = (dir, depth = 0) => {
+    if (depth > 4) return;
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const fullPath = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        if (!entry.name.startsWith('.')) walk(fullPath, depth + 1);
+      } else if (/\.csv$/i.test(entry.name)) {
+        output.push(fullPath);
+      } else if (/\.zip$/i.test(entry.name)) {
+        output.push(fullPath);
+      }
+    }
+  };
+  walk(root);
+  return output.sort();
+}
+
+function readCsvFilesFromZip(zipPath) {
+  const list = spawnSync('unzip', ['-Z1', zipPath], { encoding: 'utf8', maxBuffer: 20 * 1024 * 1024 });
+  if (list.status !== 0) throw new Error(`Unable to inspect ZIP ${zipPath}: ${list.stderr || list.stdout || list.status}`);
+  const entries = list.stdout.split(/\r?\n/).filter((entry) => /\.csv$/i.test(entry) && !/(^|\/)\./.test(entry));
+  const files = [];
+  for (const entry of entries) {
+    const read = spawnSync('unzip', ['-p', zipPath, entry], { encoding: 'utf8', maxBuffer: 250 * 1024 * 1024 });
+    if (read.status !== 0) throw new Error(`Unable to read ${entry} from ZIP ${zipPath}: ${read.stderr || read.stdout || read.status}`);
+    files.push({
+      filename: path.basename(entry),
+      sourcePath: `${zipPath}#${entry}`,
+      sizeBytes: Buffer.byteLength(read.stdout || '', 'utf8'),
+      content: read.stdout || ''
+    });
   }
   return files;
 }
@@ -183,6 +258,26 @@ function firstUrlFromArtifacts(...maps) {
     for (const key of map.keys()) return key;
   }
   return null;
+}
+
+function mergeArtifactAggregatesIntoFacts(factsByUrl, linksByPage) {
+  for (const [sourceUrl, links] of linksByPage.entries()) {
+    const aggregates = buildLinkAggregates(links, links);
+    factsByUrl.set(sourceUrl, mergeFacts(factsByUrl.get(sourceUrl), {
+      url: sourceUrl,
+      finalUrl: sourceUrl,
+      internalLinksCount: aggregates.internalLinkCount,
+      externalLinksCount: aggregates.externalLinkCount,
+      uniqueInternalTargetsCount: aggregates.uniqueInternalTargetsCount,
+      uniqueExternalTargetsCount: aggregates.uniqueExternalTargetsCount,
+      nofollowLinksCount: aggregates.nofollowCount,
+      imageLinksCount: aggregates.imageLinkCount,
+      storedLinkRowsCount: aggregates.storedRows,
+      linkRowsTruncated: aggregates.truncated,
+      linkSamples: aggregates.samples,
+      importedSourceTypes: ['inlinks_outlinks']
+    }));
+  }
 }
 
 function inferDomain(url) {
