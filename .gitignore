@@ -19,14 +19,14 @@ node_modules/
 *.sqlite-journal
 *.sqlite3-journal
 *.db-journal
-data/
-storage/
-database/
+/data/
+/storage/
+/database/
 
 # generated reports / old runs / exports
-reports/
-exports/
-coverage/
+/reports/
+/exports/
+/coverage/
 *.zip
 audit-*-full-audit.zip
 *-full-audit.zip

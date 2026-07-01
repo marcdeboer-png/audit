@@ -5,7 +5,7 @@ export const REFERENCE_MAPPING_RULES = Object.freeze([
     category: 'html-head',
     patternCheckIds: ['template.title_pattern_issue']
   }),
-  rule('meta-description', /meta.?description|description|beschreibung/, ['tech.meta_description_missing', 'tech.meta_description_too_short', 'tech.meta_description_too_long', 'tech.duplicate_meta_descriptions'], {
+  rule('meta-description', /meta.?description|meta.?beschreibung|description tag|description length|beschreibungstag/, ['tech.meta_description_missing', 'tech.meta_description_too_short', 'tech.meta_description_too_long', 'tech.duplicate_meta_descriptions'], {
     category: 'html-head',
     patternCheckIds: ['template.meta_pattern_issue']
   }),
@@ -15,6 +15,10 @@ export const REFERENCE_MAPPING_RULES = Object.freeze([
   rule('noindex', /noindex|nicht indexierbar|indexierbarkeit|indexability/, ['tech.noindex_pages'], {
     category: 'technical-seo',
     patternCheckIds: ['template.noindex_pattern']
+  }),
+  rule('internal-search-indexation', /internal search|site search|search result|suchergebnis|interne suche|suchseite/, ['tech.internal_search_noindex_policy'], {
+    category: 'technical-seo',
+    requiredData: ['url_patterns', 'meta_robots']
   }),
   rule('canonical', /canonical|kanonisch|canonicalized|canonicalised/, ['tech.canonical_missing', 'tech.canonical_non_self', 'tech.canonical_to_other_domain', 'tech.canonical_target_non_200'], {
     category: 'technical-seo',
@@ -43,9 +47,13 @@ export const REFERENCE_MAPPING_RULES = Object.freeze([
   rule('internal-links', /internal link|interne link|broken link|3xx|4xx|orphan/, ['tech.internal_links_to_3xx', 'tech.internal_links_to_4xx_5xx', 'tech.orphan_like_sitemap_urls'], {
     category: 'technical-seo'
   }),
-  rule('robots-sitemap-pagination', /robots\.txt|sitemap|xml sitemap|pagination|rel=next|rel next|rel prev|paginated/, ['tech.robots_txt_present', 'tech.sitemap_present', 'tech.sitemap_in_robots', 'tech.sitemap_urls_non_200', 'tech.noindex_pages'], {
+  rule('robots-sitemap-pagination', /robots\.txt|sitemap|xml sitemap|pagination|rel=next|rel next|rel prev|paginated/, ['tech.robots_txt_present', 'tech.sitemap_present', 'tech.sitemap_in_robots', 'tech.sitemap_urls_non_200'], {
     category: 'technical-seo',
     requiredData: ['sitemap', 'robots', 'url_patterns']
+  }),
+  rule('x-robots', /x-robots|x robots|x.?robots.?tag|header.?noindex|robots header/, ['tech.x_robots_tag_unusual'], {
+    category: 'technical-seo',
+    requiredData: ['response_headers']
   }),
   rule('hreflang', /hreflang|x-default|internationali[sz]ation|language.country|language region/, ['tech.hreflang_x_default_missing'], {
     category: 'html-head',
@@ -99,7 +107,7 @@ export const REFERENCE_MAPPING_RULES = Object.freeze([
     requiredData: ['crux', 'psi', 'lighthouse'],
     requiresExternalData: true
   }),
-  rule('js-css', /javascript|\bjs\b|css|resource|asset|script|stylesheet/, ['tech.too_many_js', 'tech.too_many_css', 'tech.large_js_total', 'tech.large_css_total', 'tech.third_party_scripts_detected'], {
+  rule('js-css', /javascript|\bjs\b|css|script|stylesheet|hydration|rendering service|google rendering|client.?side|csr|ssr/, ['tech.too_many_js', 'tech.too_many_css', 'tech.large_js_total', 'tech.large_css_total', 'tech.third_party_scripts_detected'], {
     category: 'media-performance',
     requiredData: ['resource_facts']
   }),
@@ -122,6 +130,18 @@ export const REFERENCE_MAPPING_RULES = Object.freeze([
     requiredData: ['browser_check', 'html_head', 'tag_manager_inventory'],
     requiresHumanJudgment: true
   }),
+  rule('critical-raw-html', /critical content|raw html|initial html|server.?render|rendered html|js.?dependent content|javascript.?dependent content|critical seo elements/, ['tech.critical_content_raw_html_signal', 'tech.raw_h1_missing_rendered_present', 'tech.raw_internal_links_fewer_rendered', 'tech.rendered_word_count_delta', 'template.js_required_content'], {
+    category: 'javascript-rendering',
+    requiredData: ['raw_html_facts', 'rendered_html_sample']
+  }),
+  rule('html-semantics', /html semantics|semantic html|landmark|main region|heading hierarchy|accessibility semantics|aria landmark|wysiwyg|cms editor|editor content/, ['tech.html_semantics_summary', 'tech.h1_missing', 'tech.multiple_h1'], {
+    category: 'html-head',
+    requiredData: ['html_structure']
+  }),
+  rule('template-patterns', /page templates?|template issue|template pattern|wysiwyg|cms module|content module|component pattern/, ['template.title_pattern_issue', 'template.meta_pattern_issue', 'template.noindex_pattern', 'template.schema_missing_pattern', 'template.large_html_pattern', 'template.canonical_pattern_issue'], {
+    category: 'template-patterns',
+    requiredData: ['template_clusters']
+  }),
   rule('facet-bloat', /facet|facette|filter|sortier|sort|parameter|crawl.?bloat|pagination|paginierung/, [], {
     category: 'technical-seo',
     sourceTypes: ['crawl', 'screaming_frog_import'],
@@ -132,14 +152,19 @@ export const REFERENCE_MAPPING_RULES = Object.freeze([
   rule('llms', /llms\.txt|llms-full|markdown twin/, ['geo.llms_txt_present', 'geo.llms_txt_http_status', 'geo.llms_full_txt_present', 'geo.markdown_twin_homepage'], {
     category: 'geo-readiness'
   }),
-  rule('ai-bots', /ai bot|gptbot|oai-searchbot|chatgpt-user|claudebot|perplexity|google-extended|ccbot|crawler policy/, ['geo.ai_bots_policy_summary', 'geo.robots_mentions_gptbot', 'geo.robots_mentions_oai_searchbot', 'geo.robots_mentions_chatgpt_user', 'geo.robots_mentions_claudebot', 'geo.robots_mentions_perplexitybot', 'geo.robots_mentions_google_extended', 'geo.robots_mentions_ccbot'], {
+  rule('ai-bots', /ai bot|gptbot|oai-searchbot|chatgpt-user|claudebot|claude-web|perplexity|google-extended|ccbot|applebot|bytespider|crawler policy/, ['geo.ai_bots_policy_summary', 'geo.robots_mentions_gptbot', 'geo.robots_mentions_oai_searchbot', 'geo.robots_mentions_chatgpt_user', 'geo.robots_mentions_claudebot', 'geo.robots_mentions_claude_web', 'geo.robots_mentions_perplexitybot', 'geo.robots_mentions_google_extended', 'geo.robots_mentions_ccbot', 'geo.robots_mentions_applebot', 'geo.robots_mentions_bytespider'], {
     category: 'ai-crawler-policy'
   }),
-  rule('trust-entity', /e-?e-?a-?t|trust|author|quellenhinweis|source link|external source|entity|brand|marke|about|kontakt|contact|impressum|datenschutz/, ['geo.impressum_linked', 'geo.datenschutz_linked', 'geo.about_linked', 'geo.contact_linked', 'geo.source_or_external_links_present', 'geo.author_hints_present'], {
+  rule('ymyl', /ymyl|your money your life|sensitive topic|health|gesundheit|tierarzt|futterberatung|ernaehrung|ernährung|medical|finance|recht|legal advice/, ['trust.ymyl_review_signal', 'trust.eeat_signal_summary'], {
+    category: 'trust-entity',
+    requiresHumanJudgment: true,
+    requiresLlmJudgment: true
+  }),
+  rule('trust-entity', /e-?e-?a-?t|trust|author|quellenhinweis|source link|external source|entity|brand|marke|about|kontakt|contact|impressum|datenschutz/, ['trust.eeat_signal_summary', 'geo.impressum_linked', 'geo.datenschutz_linked', 'geo.about_linked', 'geo.contact_linked', 'geo.source_or_external_links_present', 'geo.author_hints_present'], {
     category: 'trust-entity',
     requiresHumanJudgment: true
   }),
-  rule('geo-quality', /geo|ai search|answerability|answer.?fähig|helpful|intent|suchintention|content quality|faq quality/, ['geo.tables_present', 'geo.bulletpoints_lists_present', 'geo.low_structured_sections'], {
+  rule('geo-quality', /\bgeo\b|generative engine|ai search|answerability|answer.?fähig|helpful|search intent|suchintention|content quality|faq quality/, ['geo.tables_present', 'geo.bulletpoints_lists_present', 'geo.low_structured_sections'], {
     category: 'geo-readiness',
     sourceTypes: ['llm', 'crawl'],
     requiresLlmJudgment: true,
@@ -157,7 +182,7 @@ export function mapReferenceItemToChecks(item = {}, options = {}) {
     Object.values(item.evidence || {}).join(' ')
   ].map(text).join(' ').toLowerCase();
   const explicit = normalizeList(item.expectedToolCheckIds);
-  const exactRules = REFERENCE_MAPPING_RULES.filter((mappingRule) => mappingRule.pattern.test(haystack));
+  const exactRules = refineMatchedRules(REFERENCE_MAPPING_RULES.filter((mappingRule) => mappingRule.pattern.test(haystack)), haystack);
   const categoryRules = REFERENCE_MAPPING_RULES.filter((mappingRule) => mappingRule.category === normalizeCategory(item.category));
   const matchedRules = exactRules.length ? exactRules : categoryRules;
   const checkIds = unique([
@@ -212,6 +237,24 @@ function rule(id, pattern, checkIds, options = {}) {
     requiresHumanJudgment: Boolean(options.requiresHumanJudgment),
     requiresLlmJudgment: Boolean(options.requiresLlmJudgment)
   };
+}
+
+function refineMatchedRules(rules, haystack) {
+  let output = [...rules];
+  const hasRule = (id) => output.some((mappingRule) => mappingRule.id === id);
+  if (hasRule('internal-search-indexation')) {
+    output = output.filter((mappingRule) => mappingRule.id !== 'noindex');
+  }
+  if (hasRule('http-version')) {
+    output = output.filter((mappingRule) => mappingRule.id !== 'js-css' && mappingRule.id !== 'critical-css-preload-fonts');
+  }
+  if (/content quality|thin content|helpful content|content depth/.test(haystack)) {
+    output = output.filter((mappingRule) => mappingRule.id !== 'meta-description');
+  }
+  if (hasRule('cache-cdn') && !/ai search|answerability|\bgeo\b|generative engine/.test(haystack)) {
+    output = output.filter((mappingRule) => mappingRule.id !== 'geo-quality');
+  }
+  return output;
 }
 
 function unique(values) {

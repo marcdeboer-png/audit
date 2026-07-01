@@ -133,7 +133,7 @@ export function loadResultsWithScores(db, runId) {
       cr.checkId ASC
   `).all(runId).map((row) => ({
     ...row,
-    auditType: row.checkId.startsWith('geo.') || row.checkId.startsWith('llm.') ? 'geo' : 'tech',
+    auditType: row.checkId.startsWith('geo.') || row.checkId.startsWith('trust.') || row.checkId.startsWith('llm.') ? 'geo' : 'tech',
     sampleUrls: safeParse(row.sampleUrlsJson, []),
     evidence: safeParse(row.evidenceJson, {}),
     relatedCheckIds: safeParse(row.relatedCheckIdsJson, [])

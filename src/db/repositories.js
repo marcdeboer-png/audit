@@ -1,8 +1,10 @@
 import { scoreForStatus } from '../utils/scoring.js';
 import { crawlerDefaults } from '../crawler/defaults.js';
 import {
+  normalizeAutomationCoverage,
   normalizeConfidence,
   dedupeUrlSamples,
+  normalizeEvidenceLevel,
   normalizeFindingType,
   normalizePriority,
   normalizeStatus
@@ -801,12 +803,16 @@ export function insertCheckResults(db, runId, results) {
     INSERT INTO check_results (
       runId, checkId, category, checkName, status, priority, effort, score,
       finding, details, recommendation, affectedCount, sampleUrlsJson, evidenceJson,
-      reportGroupingKey, findingType, confidence, reviewRecommended, relatedCheckIdsJson
+      reportGroupingKey, findingType, confidence, reviewRecommended,
+      maturityImpact, dataBasis, evidenceLevel, reviewReason, automationCoverage,
+      interpretation, limitations, relatedCheckIdsJson
     )
     VALUES (
       @runId, @checkId, @category, @checkName, @status, @priority, @effort, @score,
       @finding, @details, @recommendation, @affectedCount, @sampleUrlsJson, @evidenceJson,
-      @reportGroupingKey, @findingType, @confidence, @reviewRecommended, @relatedCheckIdsJson
+      @reportGroupingKey, @findingType, @confidence, @reviewRecommended,
+      @maturityImpact, @dataBasis, @evidenceLevel, @reviewReason, @automationCoverage,
+      @interpretation, @limitations, @relatedCheckIdsJson
     )
   `);
 
@@ -837,6 +843,13 @@ export function insertCheckResults(db, runId, results) {
         findingType: normalizeFindingType(storedItem.findingType),
         confidence: normalizeConfidence(storedItem.confidence),
         reviewRecommended: storedItem.reviewRecommended ? 1 : 0,
+        maturityImpact: truncateText(storedItem.maturityImpact || null, 200),
+        dataBasis: truncateText(storedItem.dataBasis || null, 1000),
+        evidenceLevel: normalizeEvidenceLevel(storedItem.evidenceLevel),
+        reviewReason: truncateText(storedItem.reviewReason || null, 1000),
+        automationCoverage: normalizeAutomationCoverage(storedItem.automationCoverage),
+        interpretation: truncateText(storedItem.interpretation || null, 2000),
+        limitations: truncateText(storedItem.limitations || null, 2000),
         relatedCheckIdsJson: JSON.stringify(Array.isArray(storedItem.relatedCheckIds) ? storedItem.relatedCheckIds.slice(0, 20) : [])
       });
     }

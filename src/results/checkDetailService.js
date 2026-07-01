@@ -124,7 +124,7 @@ function loadCheckResult(db, runId, checkResultId) {
   if (!row) return null;
   return applyDisplaySemantics(applyEffectiveValues({
     ...row,
-    auditType: row.checkId.startsWith('geo.') || row.checkId.startsWith('llm.') ? 'geo' : 'tech',
+    auditType: row.checkId.startsWith('geo.') || row.checkId.startsWith('trust.') || row.checkId.startsWith('llm.') ? 'geo' : 'tech',
     sampleUrls: safeJson(row.sampleUrlsJson, []),
     evidence: safeJson(row.evidenceJson, {}),
     relatedCheckIds: safeJson(row.relatedCheckIdsJson, [])

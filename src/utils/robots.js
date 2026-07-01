@@ -5,9 +5,12 @@ const AI_BOTS = [
   'OAI-SearchBot',
   'ChatGPT-User',
   'ClaudeBot',
+  'Claude-Web',
   'PerplexityBot',
   'Google-Extended',
-  'CCBot'
+  'CCBot',
+  'Applebot',
+  'Bytespider'
 ];
 
 export function parseRobots(url, content) {
@@ -32,6 +35,7 @@ export function robotsMentions(content, botName) {
 
 export function summarizeAiBotRules(robotsUrl, content) {
   const parser = parseRobots(robotsUrl, content || '');
+  const wildcardRootAllowed = parser ? parser.isAllowed(new URL(robotsUrl).origin + '/', '*') : undefined;
   return AI_BOTS.map((bot) => {
     const mentioned = robotsMentions(content, bot);
     let status = 'unknown';
@@ -39,7 +43,13 @@ export function summarizeAiBotRules(robotsUrl, content) {
       const allowedRoot = parser.isAllowed(new URL(robotsUrl).origin + '/', bot);
       status = allowedRoot === false ? 'blocked' : 'allowed';
     }
-    return { bot, mentioned, status };
+    const inheritedWildcard = !mentioned && parser && status !== 'unknown' && wildcardRootAllowed === (status === 'allowed');
+    const policyStatus = mentioned
+      ? (status === 'blocked' ? 'blocked_explicitly' : 'allowed_explicitly')
+      : inheritedWildcard
+        ? `inherited_wildcard_${status}`
+        : 'not_mentioned';
+    return { bot, mentioned, status, policyStatus, inheritedWildcard };
   });
 }
 

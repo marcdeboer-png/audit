@@ -3,6 +3,8 @@ export const VALID_STATUSES = new Set(['OK', 'Warning', 'Error', 'NA']);
 export const VALID_PRIORITIES = new Set(['High', 'Medium', 'Low']);
 export const VALID_FINDING_TYPES = new Set(['core_issue', 'opportunity', 'best_practice', 'info', 'llm_assisted']);
 export const VALID_CONFIDENCE = new Set(['high', 'medium', 'low']);
+export const VALID_EVIDENCE_LEVELS = new Set(['none', 'fact', 'sample', 'aggregate', 'pattern', 'external']);
+export const VALID_AUTOMATION_COVERAGE = new Set(['full', 'partial', 'sample', 'requires_external_data', 'requires_human_review', 'requires_llm_review']);
 
 export function makeResult(check, status, options = {}) {
   const evidence = normalizeEvidence(options.evidence || {});
@@ -28,6 +30,13 @@ export function makeResult(check, status, options = {}) {
     findingType: normalizeFindingType(options.findingType || check.findingType || defaultFindingType(check, finalStatus)),
     confidence: normalizeConfidence(options.confidence || check.confidence || (finalStatus === 'NA' ? 'low' : 'high')),
     reviewRecommended: Boolean(options.reviewRecommended ?? check.reviewRecommended ?? false),
+    maturityImpact: options.maturityImpact || check.maturityImpact || defaultMaturityImpact(finalStatus, options.findingType || check.findingType),
+    dataBasis: options.dataBasis || check.dataBasis || defaultDataBasis(evidence),
+    evidenceLevel: normalizeEvidenceLevel(options.evidenceLevel || check.evidenceLevel || defaultEvidenceLevel(finalStatus, evidence)),
+    reviewReason: options.reviewReason || check.reviewReason || null,
+    automationCoverage: normalizeAutomationCoverage(options.automationCoverage || check.automationCoverage || defaultAutomationCoverage(finalStatus, options)),
+    interpretation: options.interpretation || check.interpretation || '',
+    limitations: options.limitations || check.limitations || '',
     relatedCheckIds: Array.isArray(options.relatedCheckIds || check.relatedCheckIds)
       ? (options.relatedCheckIds || check.relatedCheckIds).slice(0, 20)
       : []
@@ -174,6 +183,14 @@ export function normalizeConfidence(value) {
   return VALID_CONFIDENCE.has(value) ? value : 'medium';
 }
 
+export function normalizeEvidenceLevel(value) {
+  return VALID_EVIDENCE_LEVELS.has(value) ? value : 'fact';
+}
+
+export function normalizeAutomationCoverage(value) {
+  return VALID_AUTOMATION_COVERAGE.has(value) ? value : 'partial';
+}
+
 function defaultFinding(check, status) {
   if (status === 'OK') return `${check.name}: no issue detected.`;
   if (status === 'NA') return `${check.name}: not enough stored data.`;
@@ -185,6 +202,34 @@ function defaultFindingType(check, status) {
   if (/opportunit/i.test(check.category || '') || /opportunit/i.test(check.name || '')) return 'opportunity';
   if (/security|best practice/i.test(check.category || '')) return 'best_practice';
   return 'core_issue';
+}
+
+function defaultMaturityImpact(status, findingType) {
+  if (status === 'Error') return 'high';
+  if (status === 'Warning' && findingType === 'core_issue') return 'medium';
+  if (status === 'Warning') return 'low';
+  return 'none';
+}
+
+function defaultDataBasis(evidence) {
+  const keys = Object.keys(evidence || {}).filter((key) => key !== 'status');
+  return keys.length ? keys.slice(0, 6).join(', ') : 'stored audit facts';
+}
+
+function defaultEvidenceLevel(status, evidence) {
+  if (status === 'NA') return 'none';
+  const keys = Object.keys(evidence || {});
+  if (keys.some((key) => /pattern|template/i.test(key))) return 'pattern';
+  if (keys.some((key) => /sample|samples|sampleUrls/i.test(key))) return 'sample';
+  if (keys.some((key) => /count|total|coverage|distribution/i.test(key))) return 'aggregate';
+  return 'fact';
+}
+
+function defaultAutomationCoverage(status, options = {}) {
+  if (options.reviewRecommended) return 'requires_human_review';
+  if (status === 'NA') return 'requires_external_data';
+  if (options.confidence === 'low') return 'sample';
+  return 'partial';
 }
 
 function okFindingForIssue(id, name) {

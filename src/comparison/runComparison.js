@@ -290,7 +290,7 @@ function loadFindings(db, runId) {
     ORDER BY cr.checkId ASC
   `).all(runId).map((row) => ({
     ...row,
-    auditType: row.checkId.startsWith('geo.') ? 'geo' : 'tech',
+    auditType: row.checkId.startsWith('geo.') || row.checkId.startsWith('trust.') || row.checkId.startsWith('llm.') ? 'geo' : 'tech',
     sampleUrls: safeJson(row.sampleUrlsJson, []),
     evidence: safeJson(row.evidenceJson, {}),
     reviewRecommended: Boolean(row.reviewRecommended)

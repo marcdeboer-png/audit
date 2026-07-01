@@ -61,12 +61,27 @@ export function techChecks() {
     pageStatusCheck('4xx_pages', 'Server & Infrastructure', '4xx pages present', 'statusCode >= 400 AND statusCode < 500', 'Warning'),
     pageStatusCheck('5xx_pages', 'Server & Infrastructure', '5xx pages present', 'statusCode >= 500', 'Error', 'High'),
     pageStatusCheck('redirect_pages', 'Server & Infrastructure', 'Redirect pages present', '(statusCode >= 300 AND statusCode < 400) OR finalUrl <> url', 'Warning'),
-    headerPresence('compression_header', 'Server & Infrastructure', 'Compression header present', 'content-encoding', 'Low'),
+    headerPresence('compression_header', 'Server/Performance Best Practice', 'Compression header present', 'content-encoding', 'Low', {
+      findingType: 'best_practice',
+      missingFinding: (affected, total) => `${affected}/${total} HTML page(s) have no detected Content-Encoding header.`,
+      okFinding: 'HTML responses include compression evidence where headers were stored.',
+      recommendation: 'Treat a missing Content-Encoding header as a header-sample review item; verify transfer compression with Requests/SF before prioritizing.',
+      confidence: (affected) => affected > 5 ? 'medium' : affected ? 'low' : 'high',
+      reviewRecommended: (affected) => affected > 0,
+      dataBasis: 'stored compact response headers',
+      limitations: 'Header evidence can be affected by crawler/request settings and does not replace a transfer-size audit.'
+    }),
     headerPresence('cache_control_header', 'Server/Performance Best Practice', 'Cache-Control header present', 'cache-control', 'Low', {
       findingType: 'best_practice',
       missingFinding: (affected, total) => `${affected}/${total} HTML page(s) have no detected HTTP Cache-Control header.`,
       okFinding: 'HTML responses include a Cache-Control header where stored.',
-      recommendation: 'HTTP Cache-Control header not detected for HTML responses. Review caching policy for performance and freshness control.'
+      recommendation: 'Review caching policy: HTTP Cache-Control was not detected on sampled HTML responses. Validate static assets/CDN TTLs before calling it a performance defect.',
+      confidence: 'medium',
+      reviewRecommended: true,
+      reviewReason: 'HTML Cache-Control intent varies by template and cannot prove CDN/cache effectiveness alone.',
+      dataBasis: 'stored HTML response headers',
+      automationCoverage: 'partial',
+      limitations: 'Use Requests/SF resource header exports for asset TTL and CONFIG_NOCACHE conclusions.'
     }),
     httpVersionSupport(),
     cdnCacheSignals(),
@@ -83,6 +98,7 @@ export function techChecks() {
     sitemapPresent(),
     sitemapInRobots(),
     sitemapUrlsNon200(),
+    internalSearchNoindexPolicy(),
     noindexPagesCheck(),
     nofollowPagesCheck(),
     canonicalMissing(),
@@ -102,10 +118,11 @@ export function techChecks() {
     duplicateContentField('duplicate_meta_descriptions', 'HTML Head & Meta', 'Duplicate meta descriptions', 'metaDescription', 'Warning', 'Low'),
     pageStatusCheck('h1_missing', 'HTML Head & Meta', 'H1 missing', `${HTML_WHERE} AND h1Count = 0`, 'Error'),
     pageStatusCheck('multiple_h1', 'HTML Head & Meta', 'Multiple H1', `${HTML_WHERE} AND h1Count > 1`, 'Warning'),
+    htmlSemanticsSummary(),
     missingField('html_lang_missing', 'HTML Head & Meta', 'HTML lang missing', 'htmlLang', 'Warning'),
     missingField('viewport_missing', 'HTML Head & Meta', 'Viewport missing', 'viewport', 'Warning'),
     openGraphMissing(),
-    missingField('favicon_missing', 'HTML Head & Meta', 'Favicon missing', 'favicon', 'Warning', 'Low'),
+    faviconMissing(),
     appIconsIncomplete(),
     missingField('webmanifest_missing', 'Browser Metadata Opportunity', 'Webmanifest missing', 'manifest', 'Warning', 'Low'),
     hreflangXDefaultMissing(),
@@ -122,6 +139,7 @@ export function techChecks() {
     importedResourcePerformanceSignals(),
     highTtfbCheck(),
     pageStatusCheck('rendered_word_count_delta', 'JavaScript & Rendering', `Rendered word count > raw word count * ${thresholds.renderedRawWordCountRatio}`, `wordCountRendered IS NOT NULL AND wordCountRendered > wordCountRaw * ${thresholds.renderedRawWordCountRatio} AND wordCountRendered - wordCountRaw > 50`, 'Warning'),
+    criticalContentRawHtmlSignal(),
     pageStatusCheck('raw_h1_missing_rendered_present', 'JavaScript & Rendering', 'Raw H1 missing but rendered H1 present', 'h1Count = 0 AND renderedH1Count > 0', 'Warning'),
     pageStatusCheck('raw_internal_links_fewer_rendered', 'JavaScript & Rendering', 'Raw internal links much fewer than rendered links', 'renderedLinksCount IS NOT NULL AND renderedLinksCount > internalLinksCount * 1.5 AND renderedLinksCount - internalLinksCount > 5', 'Warning'),
     consoleErrorsPresent(),
@@ -149,7 +167,12 @@ export function techChecks() {
     organizationSameAsMissing(),
     imagesWithoutAlt(),
     emptyAltTexts(),
-    imageAttributeCheck('images_without_width_height', 'Media SEO', 'Images without width/height', "(width IS NULL OR width = '' OR height IS NULL OR height = '')", 'Warning'),
+    imageAttributeCheck('images_without_width_height', 'Media SEO', 'Images without width/height', "(width IS NULL OR width = '' OR height IS NULL OR height = '')", 'Warning', 'Medium', {
+      findingType: 'best_practice',
+      finding: 'Some likely content images are missing width/height attributes.',
+      recommendation: 'Add explicit dimensions or CSS aspect-ratio for meaningful images to reduce CLS risk; confirm impact with Lighthouse/CrUX before treating this as a Core Web Vitals defect.',
+      issueReason: 'content image missing dimensions'
+    }),
     imageAttributeCheck('images_without_lazy_loading', 'Media SEO', 'Images without lazy loading', "(loading IS NULL OR LOWER(loading) <> 'lazy')", 'Warning', 'Low', {
       findingType: 'best_practice',
       extraContentWhere: `${NOT_SMALL_IMAGE_WHERE} AND ${NOT_LIKELY_HERO_IMAGE_WHERE}`,
@@ -291,7 +314,14 @@ function headerPresence(id, category, name, headerKey, priority = 'Medium', opti
       recommendation: options.recommendation || `Review whether the ${headerKey} header should be sent for HTML responses.`,
       evidence: { totalHtmlPages: total, missingHeaderPages: affectedCount, headerKey, sampleUrls: samples },
       findingType: options.findingType || (category === 'Security Best Practice' ? 'best_practice' : undefined),
-      confidence: 'high'
+      confidence: typeof options.confidence === 'function' ? options.confidence(affectedCount, total) : (options.confidence || 'high'),
+      reviewRecommended: typeof options.reviewRecommended === 'function' ? options.reviewRecommended(affectedCount, total) : Boolean(options.reviewRecommended),
+      reviewReason: options.reviewReason,
+      dataBasis: options.dataBasis || 'stored response headers',
+      evidenceLevel: 'aggregate',
+      automationCoverage: options.automationCoverage || 'partial',
+      interpretation: options.interpretation || '',
+      limitations: options.limitations || ''
     });
   }, { priority, effort: 'M' });
 }
@@ -350,52 +380,119 @@ function cdnCacheSignals() {
         findingType: 'info'
       });
     }
-    const signalRows = rows.filter((row) => /cache-control|age|via|x-cache|cf-cache-status|x-azure-ref|x-served-by|cloudflare|akamai|fastly|azure/i.test(row.responseHeadersJson || ''));
-    const status = signalRows.length ? 'OK' : 'Warning';
+    const parsed = rows.map((row) => ({ ...row, headers: safeJson(row.responseHeadersJson, {}) }));
+    const signalRows = parsed.filter((row) => hasCdnOrCacheSignal(row.headers));
+    const noStoreRows = parsed.filter((row) => /no-store/i.test(String(row.headers['cache-control'] || '')));
+    const noCacheRows = parsed.filter((row) => /\bno-cache\b|max-age=0|s-maxage=0/i.test(String(row.headers['cache-control'] || '')));
+    const assetCacheRows = all(ctx.db, `
+      SELECT pageUrl AS url, resourceUrl, resourceType, responseHeadersJson
+      FROM resources
+      WHERE runId = ?
+        AND resourceType IN ('script', 'stylesheet', 'font', 'image')
+        AND COALESCE(responseHeadersJson, '') <> ''
+      LIMIT 200
+    `, [ctx.run.id]).map((row) => ({ ...row, headers: safeJson(row.responseHeadersJson, {}) }));
+    const uncacheableAssets = assetCacheRows.filter((row) => {
+      const cacheControl = String(row.headers['cache-control'] || '').toLowerCase();
+      return !cacheControl || /no-store|no-cache|max-age=0|s-maxage=0/.test(cacheControl);
+    });
+    const clearAssetProblem = assetCacheRows.length >= 10 && uncacheableAssets.length / assetCacheRows.length > 0.5;
+    const status = clearAssetProblem ? 'Warning' : 'OK';
     return makeResult(this, status, {
-      affectedCount: status === 'OK' ? 0 : total,
-      sampleUrls: status === 'OK' ? [] : rows.slice(0, 10).map((row) => row.url),
-      finding: signalRows.length
-        ? `${signalRows.length}/${rows.length} sampled HTML page(s) include CDN/cache header signals.`
-        : 'Stored headers do not show CDN/cache signals in the sampled HTML responses.',
-      recommendation: 'Use this as technical evidence only; validate CDN architecture and cache policy with header exports or infrastructure data.',
-      evidence: { sampledHeaderRows: rows.length, signalRows: signalRows.slice(0, 10) },
+      affectedCount: clearAssetProblem ? uncacheableAssets.length : 0,
+      sampleUrls: clearAssetProblem ? uncacheableAssets.slice(0, 10).map((row) => row.url) : [],
+      finding: clearAssetProblem
+        ? `${uncacheableAssets.length}/${assetCacheRows.length} sampled static asset response(s) have missing or no-cache Cache-Control evidence.`
+        : signalRows.length
+          ? `${signalRows.length}/${rows.length} sampled HTML page(s) include CDN/cache header signals.`
+          : 'Stored headers do not prove CDN/cache issues; no clear static-asset caching problem was detected from available facts.',
+      recommendation: clearAssetProblem
+        ? 'Review cache policy for static assets and CDN edge behaviour with a Requests/SF header export before prioritizing infrastructure changes.'
+        : 'Use this as a technical evidence inventory. CDN architecture, CONFIG_NOCACHE and TTL quality require response-header/resource exports or infrastructure data.',
+      evidence: {
+        sampledHtmlHeaderRows: rows.length,
+        signalRows: signalRows.slice(0, 10),
+        htmlNoStoreRows: noStoreRows.slice(0, 10),
+        htmlNoCacheRows: noCacheRows.slice(0, 10),
+        sampledAssetHeaderRows: assetCacheRows.length,
+        uncacheableAssetSamples: uncacheableAssets.slice(0, 10)
+      },
       findingType: 'best_practice',
-      confidence: rows.length >= 10 ? 'medium' : 'low',
-      reviewRecommended: true
+      confidence: clearAssetProblem ? 'medium' : 'low',
+      reviewRecommended: true,
+      reviewReason: 'CDN/cache findings depend on resource type, TTL intent and infrastructure context.',
+      dataBasis: 'compact response headers and resource header samples',
+      evidenceLevel: assetCacheRows.length ? 'sample' : 'aggregate',
+      automationCoverage: clearAssetProblem ? 'partial' : 'requires_external_data',
+      interpretation: 'CDN and cache evidence is documented separately from hard errors; only clear static-asset cache problems are raised.',
+      limitations: 'HTML Cache-Control alone does not prove CDN effectiveness or CONFIG_NOCACHE impact.'
     });
   }, { priority: 'Low', effort: 'S' });
 }
 
 function xRobotsTagCheck() {
-  return tech('x_robots_tag_unusual', 'Server & Infrastructure', 'x-robots-tag present/auffaellig', function run(ctx) {
-    const affectedCount = count(ctx.db, `
-      SELECT COUNT(*) AS count FROM pages
+  return tech('x_robots_tag_unusual', 'Server & Infrastructure', 'X-Robots-Tag directive review', function run(ctx) {
+    const directiveRows = all(ctx.db, `
+      SELECT url, pageType, contentType, metaRobots, xRobotsTag
+      FROM pages
       WHERE runId = ? AND xRobotsTag IS NOT NULL AND xRobotsTag <> ''
-        AND LOWER(xRobotsTag) GLOB '*noindex*'
-        AND ${NON_LEGAL_PAGE_WHERE}
+      ORDER BY id ASC
+      LIMIT 500
     `, [ctx.run.id]);
-    const legalNoindexCount = count(ctx.db, `
-      SELECT COUNT(*) AS count FROM pages
-      WHERE runId = ? AND xRobotsTag IS NOT NULL AND xRobotsTag <> ''
-        AND LOWER(xRobotsTag) GLOB '*noindex*'
-        AND ${LEGAL_PAGE_WHERE}
-    `, [ctx.run.id]);
-    const present = count(ctx.db, "SELECT COUNT(*) AS count FROM pages WHERE runId = ? AND xRobotsTag IS NOT NULL AND xRobotsTag <> ''", [ctx.run.id]);
-    const samples = affectedCount
-      ? sampleUrls(ctx.db, ctx.run.id, `xRobotsTag IS NOT NULL AND LOWER(xRobotsTag) LIKE "%noindex%" AND ${NON_LEGAL_PAGE_WHERE}`)
-      : [];
-    return makeResult(this, affectedCount ? 'Warning' : 'OK', {
+    const present = directiveRows.length;
+    const parsed = directiveRows.map((row) => ({
+      ...row,
+      directives: parseRobotsDirectives(row.xRobotsTag)
+    }));
+    const problematic = parsed.filter((row) =>
+      row.directives.some((directive) => ['noindex', 'none'].includes(directive)) &&
+      row.pageType !== 'legal' &&
+      row.pageType !== 'contact' &&
+      /html|xhtml/i.test(row.contentType || '')
+    );
+    const legalNoindexCount = parsed.filter((row) =>
+      row.pageType === 'legal' &&
+      row.directives.some((directive) => ['noindex', 'none'].includes(directive))
+    ).length;
+    const nonHtmlDirectiveRows = parsed.filter((row) => !/html|xhtml/i.test(row.contentType || ''));
+    const conflictRows = parsed.filter((row) => {
+      const meta = parseRobotsDirectives(row.metaRobots);
+      return meta.length && row.directives.length && meta.join(',') !== row.directives.join(',');
+    });
+    const affectedCount = problematic.length;
+    const samples = problematic.slice(0, 10).map((row) => row.url);
+    return makeResult(this, affectedCount ? 'Warning' : present ? 'OK' : 'NA', {
       affectedCount,
       sampleUrls: samples,
       finding: affectedCount
-        ? `${affectedCount} non-legal page(s) have auffaellige X-Robots-Tag noindex values.`
+        ? `${affectedCount} HTML content page(s) have X-Robots-Tag noindex/none directives that should be checked against indexing intent.`
         : legalNoindexCount
           ? `${present} page(s) include X-Robots-Tag; only legal noindex values were detected.`
-          : `${present} page(s) include X-Robots-Tag; no noindex value detected.`,
-      recommendation: 'Verify that X-Robots-Tag directives match indexing intent.',
-      evidence: { presentCount: present, contentNoindexCount: affectedCount, legalNoindexCount, sampleUrls: samples },
-      findingType: affectedCount ? 'core_issue' : 'info'
+          : present
+            ? `${present} page(s) include X-Robots-Tag; no problematic HTML noindex/none directive was detected.`
+            : 'No X-Robots-Tag directives are stored for this run.',
+      recommendation: affectedCount
+        ? 'Verify whether header-level noindex/none is intentional on the sampled content pages; document non-HTML directives separately.'
+        : 'Keep X-Robots-Tag evidence as an indexation fact. Non-HTML resource directives should not be over-weighted as page SEO issues.',
+      evidence: {
+        presentCount: present,
+        contentNoindexCount: affectedCount,
+        legalNoindexCount,
+        conflictCount: conflictRows.length,
+        nonHtmlDirectiveCount: nonHtmlDirectiveRows.length,
+        problematicSamples: problematic.slice(0, 10),
+        nonHtmlSamples: nonHtmlDirectiveRows.slice(0, 10),
+        conflictSamples: conflictRows.slice(0, 10)
+      },
+      findingType: affectedCount ? 'core_issue' : 'info',
+      confidence: present ? 'medium' : 'low',
+      reviewRecommended: affectedCount > 0 || conflictRows.length > 0,
+      reviewReason: affectedCount ? 'Header-level indexing directives need intent validation.' : null,
+      dataBasis: 'X-Robots-Tag response header and meta robots facts',
+      evidenceLevel: present ? 'sample' : 'none',
+      automationCoverage: present ? 'partial' : 'requires_external_data',
+      interpretation: 'Header directives are treated as indexation facts; only clear noindex/none on content HTML is raised as a technical finding.',
+      limitations: 'The check cannot know business intent for individual utility, legal or campaign URLs.'
     });
   });
 }
@@ -503,6 +600,68 @@ function sitemapUrlsNon200() {
   });
 }
 
+function internalSearchNoindexPolicy() {
+  return tech('internal_search_noindex_policy', 'Crawling & Indexing', 'Internal search indexation policy signal', function run(ctx) {
+    const searchWhere = `${HTML_WHERE} AND (
+      LOWER(url) LIKE '%/search%' OR
+      LOWER(url) LIKE '%/suche%' OR
+      LOWER(url) LIKE '%?q=%' OR
+      LOWER(url) LIKE '%?s=%' OR
+      LOWER(url) LIKE '%query=%' OR
+      LOWER(COALESCE(title, '')) LIKE '%suche%' OR
+      LOWER(COALESCE(title, '')) LIKE '%search%'
+    )`;
+    const total = count(ctx.db, `SELECT COUNT(*) AS count FROM pages WHERE runId = ? AND ${searchWhere}`, [ctx.run.id]);
+    if (!total) {
+      return makeResult(this, 'NA', {
+        finding: 'No internal-search URL/title patterns are stored in this run.',
+        recommendation: 'Validate internal-search indexation with a larger crawl or SF URL pattern export when this is in audit scope.',
+        evidence: { requiredData: ['url_patterns', 'meta_robots'], searchPatternPages: 0 },
+        findingType: 'info',
+        confidence: 'low',
+        dataBasis: 'stored URL/title facts',
+        evidenceLevel: 'none',
+        automationCoverage: 'requires_external_data',
+        limitations: 'A sample crawl may not include internal search result URLs.'
+      });
+    }
+    const indexableRows = all(ctx.db, `
+      SELECT url, title, metaRobots, xRobotsTag
+      FROM pages
+      WHERE runId = ? AND ${searchWhere}
+        AND COALESCE(noindex, 0) = 0
+        AND ${ROBOTS_TEXT_EXPR} NOT LIKE '%noindex%'
+      ORDER BY id ASC
+      LIMIT 10
+    `, [ctx.run.id]);
+    const affectedCount = count(ctx.db, `
+      SELECT COUNT(*) AS count
+      FROM pages
+      WHERE runId = ? AND ${searchWhere}
+        AND COALESCE(noindex, 0) = 0
+        AND ${ROBOTS_TEXT_EXPR} NOT LIKE '%noindex%'
+    `, [ctx.run.id]);
+    return makeResult(this, affectedCount ? 'Warning' : 'OK', {
+      priority: 'Low',
+      affectedCount,
+      sampleUrls: indexableRows.map((row) => row.url),
+      finding: affectedCount
+        ? `${affectedCount}/${total} stored internal-search candidate page(s) appear indexable.`
+        : `${total} stored internal-search candidate page(s) carry noindex or no problematic indexation signal was detected.`,
+      recommendation: 'Keep true internal-search result pages out of the index unless there is a deliberate landing-page strategy.',
+      evidence: { searchPatternPages: total, indexableSamples: indexableRows },
+      findingType: affectedCount ? 'core_issue' : 'info',
+      confidence: 'medium',
+      reviewRecommended: affectedCount > 0,
+      reviewReason: affectedCount ? 'Confirm that sampled URLs are true internal-search result pages, not intentional landing pages.' : null,
+      dataBasis: 'URL/title pattern and robots directives',
+      evidenceLevel: 'sample',
+      automationCoverage: 'partial',
+      limitations: 'This check cannot detect search pages if they are absent from the sampled crawl/import.'
+    });
+  }, { priority: 'Low', effort: 'S' });
+}
+
 function noindexPagesCheck() {
   return tech('noindex_pages', 'Crawling & Indexing', 'noindex pages present', function run(ctx) {
     const totalHtmlPages = htmlPageCount(ctx.db, ctx.run.id);
@@ -555,6 +714,73 @@ function nofollowPagesCheck() {
       confidence: 'high'
     });
   }, { priority: 'Low', effort: 'S' });
+}
+
+function htmlSemanticsSummary() {
+  return tech('html_semantics_summary', 'HTML Semantics & Accessibility Signals', 'HTML semantic structure summary', function run(ctx) {
+    const rows = all(ctx.db, `
+      SELECT url, h1Count, h2Json, featureFlagsJson
+      FROM pages
+      WHERE runId = ? AND ${HTML_WHERE}
+      ORDER BY id ASC
+      LIMIT 500
+    `, [ctx.run.id]);
+    if (!rows.length) {
+      return makeResult(this, 'NA', {
+        finding: 'No HTML page facts are available for semantic structure assessment.',
+        recommendation: 'Run a crawl or import HTML facts before assessing semantic structure.',
+        evidence: {},
+        findingType: 'info',
+        confidence: 'low',
+        automationCoverage: 'requires_external_data'
+      });
+    }
+    const parsed = rows.map((row) => ({
+      url: row.url,
+      h1Count: Number(row.h1Count || 0),
+      h2Count: safeJson(row.h2Json, []).length,
+      flags: safeJson(row.featureFlagsJson, {})
+    }));
+    const weak = parsed
+      .map((row) => {
+        const issues = [];
+        if (Number(row.flags.mainRegionCount || 0) !== 1) issues.push('main region count not exactly 1');
+        if (Number(row.flags.headerRegionCount || 0) < 1) issues.push('header/banner signal missing');
+        if (Number(row.flags.navRegionCount || 0) < 1) issues.push('nav/navigation signal missing');
+        if (Number(row.flags.footerRegionCount || 0) < 1) issues.push('footer/contentinfo signal missing');
+        if (Number(row.flags.emptyH1Count || 0) > 0 || Number(row.flags.emptyH2Count || 0) > 0) issues.push('empty H1/H2 detected');
+        if (Number(row.flags.headingHierarchySkips || 0) > 0) issues.push('heading hierarchy skips detected');
+        if (row.h1Count > 1) issues.push('multiple H1 requires review');
+        return { ...row, issues };
+      })
+      .filter((row) => row.issues.length);
+    const hard = weak.filter((row) => row.issues.some((issue) => /empty|main region/.test(issue)));
+    const status = hard.length ? 'Warning' : 'OK';
+    return makeResult(this, status, {
+      priority: 'Low',
+      affectedCount: weak.length,
+      sampleUrls: weak.slice(0, 10).map((row) => row.url),
+      finding: weak.length
+        ? `${weak.length}/${rows.length} sampled HTML page(s) have semantic structure signals that should be reviewed.`
+        : 'Basic semantic structure signals look plausible in sampled HTML pages.',
+      recommendation: 'Use this as a technical semantic-structure screen. Confirm accessibility and content semantics with a focused accessibility/content review.',
+      evidence: {
+        sampledPages: rows.length,
+        issuePages: weak.length,
+        strongerIssuePages: hard.length,
+        samples: weak.slice(0, 10)
+      },
+      findingType: 'best_practice',
+      confidence: 'medium',
+      reviewRecommended: weak.length > 0,
+      reviewReason: weak.length ? 'HTML semantics and accessibility need human review for intent and assistive-technology impact.' : null,
+      dataBasis: 'raw HTML landmarks and heading facts',
+      evidenceLevel: 'sample',
+      automationCoverage: 'requires_human_review',
+      interpretation: 'The check identifies structural HTML signals such as main/header/nav/footer landmarks and heading hierarchy. It does not claim full accessibility coverage.',
+      limitations: 'Rendered DOM, ARIA behaviour and screen-reader output may differ from stored raw HTML.'
+    });
+  }, { priority: 'Low', effort: 'M' });
 }
 
 function missingField(id, category, name, field, status = 'Warning', priority = 'Medium') {
@@ -621,25 +847,82 @@ function duplicateContentField(id, category, name, field, status = 'Warning', pr
 }
 
 function openGraphMissing() {
-  return tech('open_graph_basics_missing', 'HTML Head & Meta', 'Open Graph basics missing', function run(ctx) {
-    const where = `${INDEXABLE_CONTENT_HTML_WHERE} AND (
-      ogJson IS NULL OR
-      ogJson NOT LIKE '%"og:title":"%' OR
-      ogJson NOT LIKE '%"og:description":"%' OR
-      ogJson NOT LIKE '%"og:image":"%' OR
-      ogJson NOT LIKE '%"og:url":"%' OR
-      ogJson NOT LIKE '%"og:type":"%'
-    )`;
-    const affectedCount = count(ctx.db, `SELECT COUNT(*) AS count FROM pages WHERE runId = ? AND ${where}`, [ctx.run.id]);
-    const samples = affectedCount ? sampleUrls(ctx.db, ctx.run.id, where) : [];
+  return tech('open_graph_basics_missing', 'HTML Head & Meta Opportunity', 'Open Graph metadata completeness', function run(ctx) {
+    const rows = all(ctx.db, `
+      SELECT url, title, canonical, ogJson
+      FROM pages
+      WHERE runId = ? AND ${INDEXABLE_CONTENT_HTML_WHERE}
+      ORDER BY id ASC
+      LIMIT 1000
+    `, [ctx.run.id]);
+    const required = ['og:title', 'og:description', 'og:image', 'og:url', 'og:type'];
+    const affected = rows
+      .map((row) => {
+        const og = safeJson(row.ogJson, {});
+        const missingFields = required.filter((field) => !String(og[field] || '').trim());
+        const consistencyWarnings = [];
+        if (og['og:url'] && row.canonical && normalizeComparableUrl(og['og:url']) !== normalizeComparableUrl(row.canonical)) {
+          consistencyWarnings.push('og:url differs from canonical');
+        }
+        return { ...row, missingFields, consistencyWarnings };
+      })
+      .filter((row) => row.missingFields.length || row.consistencyWarnings.length);
+    const affectedCount = affected.length;
+    const samples = affected.slice(0, 10).map((row) => row.url);
     return makeResult(this, affectedCount ? 'Warning' : 'OK', {
       affectedCount,
       sampleUrls: samples,
-      finding: affectedCount ? `${affectedCount} page(s) miss one or more Open Graph basics.` : 'Open Graph basics are present on crawled HTML pages.',
-      recommendation: 'Add og:title, og:description, og:image, og:url and og:type where social previews matter.',
-      evidence: { affectedCount, sampleUrls: samples }
+      finding: affectedCount
+        ? `${affectedCount} indexable content page(s) have incomplete Open Graph metadata or a basic consistency warning.`
+        : 'Open Graph basics are present on checked indexable content pages.',
+      recommendation: 'Treat Open Graph as a social/entity/snippet opportunity, not as a classic indexing blocker. Add og:title, og:description, og:image, og:url and og:type where sharing or reusable snippets matter.',
+      evidence: { checkedPages: rows.length, requiredFields: required, affectedCount, samples: affected.slice(0, 10) },
+      findingType: 'opportunity',
+      confidence: affectedCount > 20 ? 'medium' : affectedCount ? 'low' : 'high',
+      reviewRecommended: affectedCount > 0,
+      reviewReason: affectedCount ? 'Open Graph impact depends on page type, sharing use case and brand requirements.' : null,
+      dataBasis: 'HTML head Open Graph meta tags',
+      evidenceLevel: 'sample',
+      automationCoverage: 'partial',
+      interpretation: 'Unvollständige Open-Graph-Metadaten sind kein klassischer Indexierungsfehler, können aber Social Sharing, Entity-Signale und wiederverwendbare Snippet-Kontexte schwächen.',
+      limitations: 'The check does not validate image dimensions, social crawler rendering or real sharing previews.'
     });
   }, { priority: 'Low' });
+}
+
+function faviconMissing() {
+  return tech('favicon_missing', 'Browser Metadata Opportunity', 'Favicon signal missing', function run(ctx) {
+    const rows = all(ctx.db, `
+      SELECT url, favicon, featureFlagsJson
+      FROM pages
+      WHERE runId = ? AND ${HTML_WHERE}
+      ORDER BY id ASC
+      LIMIT 500
+    `, [ctx.run.id]);
+    const affected = rows.filter((row) => !row.favicon);
+    return makeResult(this, affected.length ? 'Warning' : rows.length ? 'OK' : 'NA', {
+      priority: 'Low',
+      affectedCount: affected.length,
+      sampleUrls: affected.slice(0, 10).map((row) => row.url),
+      finding: affected.length
+        ? `${affected.length}/${rows.length} sampled HTML page(s) have no favicon link signal.`
+        : rows.length
+          ? 'Favicon link signals are present in sampled HTML pages.'
+          : 'No HTML pages are stored for favicon evaluation.',
+      recommendation: 'Use favicon metadata for browser UX and brand consistency; do not treat missing favicon data as a hard SEO error.',
+      evidence: { sampledPages: rows.length, missingSamples: affected.slice(0, 10) },
+      findingType: 'best_practice',
+      confidence: affected.length ? 'medium' : 'high',
+      reviewRecommended: affected.length > 0,
+      reviewReason: affected.length ? 'Brand/UX metadata impact should be reviewed by template/page type.' : null,
+      dataBasis: 'HTML head icon links',
+      evidenceLevel: 'sample',
+      automationCoverage: 'partial',
+      maturityImpact: affected.length ? 'low' : 'none',
+      interpretation: 'Favicon completeness is a UX and brand signal, not a critical SEO/indexing issue.',
+      limitations: 'The check only inspects stored HTML link signals and does not fetch icon assets.'
+    });
+  }, { priority: 'Low', effort: 'S' });
 }
 
 function appIconsIncomplete() {
@@ -660,10 +943,18 @@ function appIconsIncomplete() {
       affectedCount,
       sampleUrls: rows.map((row) => row.url),
       finding: affectedCount ? `${affectedCount} page(s) have incomplete favicon/app icon signals.` : 'Favicon/app icon signals are present where checked.',
-      recommendation: 'Provide favicon and Apple touch/app icon signals for robust browser and sharing metadata.',
+      recommendation: 'Provide favicon and Apple touch/app icon signals for browser UX and brand consistency; keep this as a low-severity best-practice item.',
       evidence: { samples: rows },
       findingType: 'best_practice',
-      confidence: 'medium'
+      confidence: affectedCount ? 'medium' : 'high',
+      reviewRecommended: affectedCount > 0,
+      reviewReason: affectedCount ? 'Icon requirements depend on product/PWA and brand standards.' : null,
+      dataBasis: 'HTML head favicon/apple-touch-icon/manifest facts',
+      evidenceLevel: 'sample',
+      automationCoverage: 'partial',
+      maturityImpact: affectedCount ? 'low' : 'none',
+      interpretation: 'Incomplete icon metadata is not SEO-critical, but weakens browser/app/share presentation.',
+      limitations: 'The check does not fetch or validate every icon size from the manifest.'
     });
   }, { priority: 'Low', effort: 'S' });
 }
@@ -683,9 +974,14 @@ function hreflangXDefaultMissing() {
     if (!hreflangRows.length) {
       return makeResult(this, 'NA', {
         finding: 'No hreflang data is stored for this run.',
-        recommendation: 'Import Screaming Frog hreflang exports or crawl pages with hreflang extraction before evaluating internationalisation.',
+        recommendation: 'Import Screaming Frog hreflang exports or crawl pages with hreflang extraction before evaluating internationalisation. Do not treat a DE-only site as faulty solely because hreflang is absent.',
         evidence: { requiredData: ['hreflang_export', 'html_head'] },
-        findingType: 'info'
+        findingType: 'info',
+        confidence: 'low',
+        dataBasis: 'no stored hreflang facts',
+        evidenceLevel: 'none',
+        automationCoverage: 'requires_external_data',
+        limitations: 'International targeting cannot be evaluated without hreflang clusters, return links and market intent.'
       });
     }
     const missing = hreflangRows.filter((row) => !safeJson(row.featureFlagsJson, {}).hasHreflangXDefault);
@@ -699,7 +995,12 @@ function hreflangXDefaultMissing() {
       evidence: { hreflangRows: hreflangRows.length, missingSamples: missing.slice(0, 10) },
       findingType: 'best_practice',
       confidence: 'medium',
-      reviewRecommended: true
+      reviewRecommended: true,
+      reviewReason: 'x-default relevance depends on international setup and market strategy.',
+      dataBasis: 'stored HTML/SF hreflang facts',
+      evidenceLevel: 'sample',
+      automationCoverage: 'partial',
+      limitations: 'This check does not validate full reciprocal hreflang clusters unless import data contains those relationships.'
     });
   }, { priority: 'Low', effort: 'M' });
 }
@@ -716,31 +1017,43 @@ function consentTechnicalSignals() {
       return makeResult(this, 'NA', {
         finding: 'No HTML pages are stored for consent technical signal detection.',
         recommendation: 'Run a crawl or import rendered/JavaScript facts before reviewing consent implementation.',
-        evidence: {}
+        evidence: {},
+        findingType: 'info',
+        confidence: 'low',
+        automationCoverage: 'requires_external_data',
+        limitations: 'No legal or consent-mode conclusion is possible without stored HTML/script facts.'
       });
     }
     const parsed = rows.map((row) => ({ url: row.url, flags: safeJson(row.featureFlagsJson, {}) }));
     const cmpRows = parsed.filter((row) => row.flags.hasConsentSignal || (row.flags.consentVendorSignals || []).length);
     const tagRows = parsed.filter((row) => row.flags.hasGoogleTagManager || row.flags.hasGtag || row.flags.hasDataLayer || row.flags.hasMetaPixel);
-    const status = tagRows.length && !cmpRows.length ? 'Warning' : cmpRows.length ? 'OK' : 'Warning';
+    const status = tagRows.length && !cmpRows.length ? 'Warning' : cmpRows.length ? 'OK' : 'NA';
     return makeResult(this, status, {
-      affectedCount: status === 'OK' ? 0 : Math.max(1, tagRows.length || rows.length),
+      affectedCount: status === 'Warning' ? tagRows.length : 0,
       sampleUrls: (tagRows.length ? tagRows : parsed).slice(0, 10).map((row) => row.url),
       finding: cmpRows.length
         ? `${cmpRows.length} sampled page(s) show CMP/consent technical signals; ${tagRows.length} show tag-manager/marketing signals.`
         : tagRows.length
           ? `${tagRows.length} sampled page(s) show tag-manager/marketing signals, but no CMP/consent signal was detected in stored HTML.`
-          : 'No CMP or tag-manager technical signals detected in stored HTML.',
-      recommendation: 'Treat this as technical detection only. Legal/GDPR assessment requires human review and consent-mode verification.',
+          : 'No CMP, consent-mode or tag-manager technical signals were detected in stored HTML.',
+      recommendation: 'Treat this as technical detection only. Legal/GDPR assessment requires human review and consent-mode verification; the tool should not be used as a legal verdict.',
       evidence: {
         sampledPages: rows.length,
         consentSignalSamples: cmpRows.slice(0, 10),
         tagSignalSamples: tagRows.slice(0, 10),
+        detectedConsentVendors: [...new Set(cmpRows.flatMap((row) => row.flags.consentVendorSignals || []))],
+        detectedMarketingSignals: [...new Set(tagRows.flatMap((row) => row.flags.thirdPartyMarketingSignals || []))],
         legalJudgment: 'needs_human_review'
       },
       findingType: 'best_practice',
       confidence: 'medium',
-      reviewRecommended: true
+      reviewRecommended: true,
+      reviewReason: 'Consent/GDPR evaluation is legal and implementation-specific; this check only inventories technical signals.',
+      dataBasis: 'HTML/script CMP and tag-manager signals',
+      evidenceLevel: 'sample',
+      automationCoverage: 'requires_human_review',
+      interpretation: 'Tracking-/Tag-Manager-Signale werden technisch erkannt. Eine rechtliche Bewertung kann das Tool nicht leisten; die Evidence gehoert in den Consent-/Datenschutz-Review.',
+      limitations: 'The check does not execute consent flows and cannot prove whether hits fire before consent.'
     });
   }, { priority: 'Low', effort: 'M' });
 }
@@ -868,9 +1181,17 @@ function resourceCountCheck(id, category, name, resourceType, threshold, status 
       affectedCount,
       sampleUrls: rows.map((row) => row.url),
       finding: affectedCount ? `${affectedCount} page(s) exceed the browser-captured ${resourceType} resource threshold.` : `No page exceeds ${threshold} browser-captured ${resourceType} resources.`,
-      recommendation: 'Reduce, defer or consolidate resources where possible.',
+      recommendation: 'Use this as a template prioritisation signal. Confirm byte size, render-blocking impact and Core Web Vitals before treating resource count alone as a defect.',
       details: 'Based on captured browser/network resource rows, not only static HTML tags.',
-      evidence: { threshold, resourceType, basis: 'browser_captured_resources', samples: rows }
+      evidence: { threshold, resourceType, basis: 'browser_captured_resources', samples: rows },
+      findingType: 'best_practice',
+      confidence: affectedCount ? 'medium' : 'high',
+      reviewRecommended: affectedCount > 0,
+      reviewReason: affectedCount ? 'Resource counts need size and render-impact context.' : null,
+      dataBasis: 'stored browser/resource facts',
+      evidenceLevel: 'sample',
+      automationCoverage: 'partial',
+      limitations: 'Count-based JS/CSS checks do not know byte weight or execution cost unless resource metrics are imported.'
     });
   });
 }
@@ -901,7 +1222,12 @@ function resourceBytesCheck(id, category, name, resourceType, threshold, status 
       sampleUrls: rows.map((row) => row.url),
       finding: affectedCount ? `${affectedCount} page(s) exceed known ${resourceType} byte totals.` : `No page exceeds known ${resourceType} byte threshold.`,
       recommendation: 'Audit large resources and reduce transfer size.',
-      evidence: { thresholdBytes: threshold, resourceType, samples: rows }
+      evidence: { thresholdBytes: threshold, resourceType, samples: rows },
+      findingType: 'best_practice',
+      confidence: affectedCount ? 'medium' : 'high',
+      dataBasis: 'stored resource byte facts',
+      evidenceLevel: 'sample',
+      automationCoverage: 'partial'
     });
   });
 }
@@ -928,9 +1254,19 @@ function thirdPartyScripts() {
     return makeResult(this, rows.length ? 'Warning' : 'OK', {
       affectedCount,
       sampleUrls: rows.map((row) => row.url),
-      finding: rows.length ? `${rows.length} page(s) load third-party scripts.` : 'No third-party scripts detected in stored resources.',
-      recommendation: 'Review third-party scripts for performance, privacy and necessity.',
-      evidence: { samples: rows }
+      finding: rows.length ? `${affectedCount} page(s) load third-party scripts in stored resource facts.` : 'No third-party scripts detected in stored resources.',
+      recommendation: 'Review third-party scripts for performance, privacy and necessity. Treat this as an opportunity/review signal unless size, blocking or consent evidence shows a concrete issue.',
+      evidence: { samples: rows },
+      findingType: 'opportunity',
+      confidence: rows.length >= 5 ? 'medium' : rows.length ? 'low' : 'high',
+      reviewRecommended: rows.length > 0,
+      reviewReason: rows.length ? 'Third-party impact depends on necessity, loading mode, consent state and byte/execution cost.' : null,
+      dataBasis: 'stored resource origin facts',
+      evidenceLevel: 'sample',
+      automationCoverage: 'requires_human_review',
+      maturityImpact: rows.length ? 'low' : 'none',
+      interpretation: 'Third-party scripts are surfaced as performance/privacy review evidence, not automatically as a JS optimisation defect.',
+      limitations: 'The check does not measure main-thread execution cost or consent behaviour.'
     });
   }, { priority: 'Low' });
 }
@@ -965,7 +1301,16 @@ function preloadMissing() {
       sampleUrls: rows.map((row) => row.url),
       finding: rows.length ? `${rows.length} page(s) have many resources and no stored preload hint.` : 'No strong preload-missing signal detected.',
       recommendation: 'Consider preload only for critical resources validated by performance testing.',
-      evidence: { samples: rows }
+      evidence: { samples: rows, thresholdResources: 10 },
+      findingType: 'opportunity',
+      confidence: rows.length ? 'low' : 'high',
+      reviewRecommended: rows.length > 0,
+      reviewReason: rows.length ? 'Preload is only useful for confirmed critical resources and can harm performance if overused.' : null,
+      dataBasis: 'stored resource counts and HTML head preload facts',
+      evidenceLevel: 'sample',
+      automationCoverage: 'partial',
+      maturityImpact: rows.length ? 'low' : 'none',
+      limitations: 'No critical-path or Lighthouse proof is implied by this check.'
     });
   }, { priority: 'Low' });
 }
@@ -979,6 +1324,7 @@ function preconnectMissing() {
       WHERE p.runId = ? AND r.isThirdParty = 1 AND r.resourceType IN ('script', 'stylesheet', 'font')
         AND COALESCE(p.featureFlagsJson, '') NOT LIKE '%"hasPreconnect":true%'
       GROUP BY p.url
+      HAVING COUNT(r.id) >= 3
       ORDER BY thirdPartyResources DESC
       LIMIT 10
     `, [ctx.run.id]);
@@ -991,14 +1337,24 @@ function preconnectMissing() {
         WHERE p.runId = ? AND r.isThirdParty = 1 AND r.resourceType IN ('script', 'stylesheet', 'font')
           AND COALESCE(p.featureFlagsJson, '') NOT LIKE '%"hasPreconnect":true%'
         GROUP BY p.url
+        HAVING COUNT(r.id) >= 3
       )
     `, [ctx.run.id]);
     return makeResult(this, rows.length ? 'Warning' : 'OK', {
       affectedCount,
       sampleUrls: rows.map((row) => row.url),
-      finding: rows.length ? `${rows.length} page(s) use external resources without stored preconnect/dns-prefetch hints.` : 'No preconnect-missing signal detected.',
-      recommendation: 'Consider preconnect or dns-prefetch for critical third-party origins only.',
-      evidence: { samples: rows }
+      finding: rows.length ? `${affectedCount} page(s) use multiple external script/style/font resources without stored preconnect/dns-prefetch hints.` : 'No strong preconnect-missing signal detected.',
+      recommendation: 'Consider preconnect or dns-prefetch only for validated critical third-party origins. Missing hints alone are an optimisation opportunity, not a defect.',
+      evidence: { samples: rows, minimumThirdPartyResources: 3 },
+      findingType: 'opportunity',
+      confidence: rows.length ? 'low' : 'high',
+      reviewRecommended: rows.length > 0,
+      reviewReason: rows.length ? 'Connection hints need critical-origin validation and can be unnecessary or harmful.' : null,
+      dataBasis: 'stored external resource counts and HTML head preconnect/dns-prefetch facts',
+      evidenceLevel: 'sample',
+      automationCoverage: 'partial',
+      maturityImpact: rows.length ? 'low' : 'none',
+      limitations: 'The check does not measure connection setup delay or actual Core Web Vitals improvement.'
     });
   }, { priority: 'Low' });
 }
@@ -1023,16 +1379,21 @@ function resourceHintsSummary() {
       const counts = row.flags.resourceHintCounts || {};
       return row.flags.hasPreload || row.flags.hasPreconnect || Number(counts.preload || 0) || Number(counts.preconnect || 0) || Number(counts.dnsPrefetch || 0) || Number(counts.prefetch || 0);
     });
-    return makeResult(this, withHints.length ? 'OK' : 'Warning', {
-      affectedCount: withHints.length ? 0 : rows.length,
+    return makeResult(this, withHints.length ? 'OK' : 'NA', {
+      affectedCount: 0,
       sampleUrls: withHints.length ? [] : rows.slice(0, 10).map((row) => row.url),
       finding: withHints.length
         ? `${withHints.length}/${rows.length} sampled page(s) include preload/preconnect/dns-prefetch/prefetch signals.`
-        : 'No resource hint signals detected in sampled pages.',
+        : 'No resource hint signals detected in sampled pages; absence alone is not treated as an issue.',
       recommendation: 'Use resource hints only for validated critical origins/assets; confirm with Lighthouse/field data before prioritizing.',
       evidence: { sampledPages: rows.length, withHints: withHints.slice(0, 10) },
       findingType: 'best_practice',
-      confidence: 'medium'
+      confidence: withHints.length ? 'medium' : 'low',
+      reviewRecommended: false,
+      dataBasis: 'HTML head resource-hint facts',
+      evidenceLevel: withHints.length ? 'sample' : 'none',
+      automationCoverage: withHints.length ? 'partial' : 'requires_external_data',
+      limitations: 'Missing resource hints cannot be evaluated without critical-origin and performance data.'
     });
   }, { priority: 'Low', effort: 'S' });
 }
@@ -1080,7 +1441,77 @@ function importedResourcePerformanceSignals() {
         largeCssTotalBytes: thresholds.largeCssTotalBytes
       }, samples: heavy.slice(0, 10) },
       findingType: 'best_practice',
-      confidence: 'medium'
+      confidence: 'medium',
+      reviewRecommended: heavy.length > 0,
+      reviewReason: heavy.length ? 'JS/CSS optimisation should be prioritised with byte, render-blocking and CWV context.' : null,
+      dataBasis: 'imported JS/CSS count and byte metrics',
+      evidenceLevel: 'sample',
+      automationCoverage: 'partial',
+      limitations: 'Counts/bytes do not prove render-blocking or user impact without Lighthouse/CrUX/field data.'
+    });
+  }, { priority: 'Medium', effort: 'M' });
+}
+
+function criticalContentRawHtmlSignal() {
+  return tech('critical_content_raw_html_signal', 'JavaScript & Rendering', 'Critical content in raw HTML signal', function run(ctx) {
+    const rows = all(ctx.db, `
+      SELECT url, pageType, h1Count, renderedH1Count, wordCountRaw, wordCountRendered,
+        internalLinksCount, renderedLinksCount, title
+      FROM pages
+      WHERE runId = ? AND ${HTML_WHERE}
+      ORDER BY id ASC
+      LIMIT 500
+    `, [ctx.run.id]);
+    if (!rows.length) {
+      return makeResult(this, 'NA', {
+        finding: 'No HTML page facts are available for raw HTML content review.',
+        recommendation: 'Run a crawl before evaluating whether critical content is present before rendering.',
+        evidence: {},
+        findingType: 'info',
+        confidence: 'low',
+        automationCoverage: 'requires_external_data'
+      });
+    }
+    const renderedRows = rows.filter((row) => row.wordCountRendered !== null || row.renderedH1Count !== null || row.renderedLinksCount !== null);
+    const jsDependentRows = renderedRows.filter((row) =>
+      (Number(row.h1Count || 0) === 0 && Number(row.renderedH1Count || 0) > 0) ||
+      (Number(row.wordCountRaw || 0) < 100 && Number(row.wordCountRendered || 0) > Number(row.wordCountRaw || 0) * 2 && Number(row.wordCountRendered || 0) > 200) ||
+      (Number(row.renderedLinksCount || 0) > Number(row.internalLinksCount || 0) * 1.5 && Number(row.renderedLinksCount || 0) - Number(row.internalLinksCount || 0) > 5)
+    );
+    const rawWeakRows = rows.filter((row) =>
+      Number(row.h1Count || 0) === 0 ||
+      (['article', 'product', 'category'].includes(row.pageType) && Number(row.wordCountRaw || 0) < 80)
+    );
+    const status = jsDependentRows.length ? 'Warning' : 'OK';
+    return makeResult(this, status, {
+      priority: jsDependentRows.length ? 'Medium' : 'Low',
+      affectedCount: jsDependentRows.length || rawWeakRows.length,
+      sampleUrls: (jsDependentRows.length ? jsDependentRows : rawWeakRows).slice(0, 10).map((row) => row.url),
+      finding: jsDependentRows.length
+        ? `${jsDependentRows.length} rendered sample(s) suggest critical content or links may depend on JavaScript.`
+        : rawWeakRows.length
+          ? `${rawWeakRows.length} raw HTML page(s) have weak raw H1/text signals, but no rendered comparison proves JS dependency.`
+          : 'Raw HTML contains basic critical-content signals in sampled pages.',
+      recommendation: jsDependentRows.length
+        ? 'Review affected templates to ensure critical SEO content, headings and crawlable links are present in initial HTML or reliably rendered for crawlers.'
+        : 'Use rendered sampling or SF rendered exports before claiming JavaScript-dependent critical content.',
+      evidence: {
+        sampledPages: rows.length,
+        renderedComparisonPages: renderedRows.length,
+        jsDependentSamples: jsDependentRows.slice(0, 10),
+        rawWeakSamples: rawWeakRows.slice(0, 10)
+      },
+      findingType: jsDependentRows.length ? 'core_issue' : 'best_practice',
+      confidence: jsDependentRows.length ? 'medium' : rawWeakRows.length ? 'low' : 'high',
+      reviewRecommended: jsDependentRows.length > 0 || rawWeakRows.length > 0,
+      reviewReason: rawWeakRows.length && !jsDependentRows.length ? 'Raw-only signals need rendered comparison before a JS dependency claim.' : 'Rendering differences need template-level review.',
+      dataBasis: renderedRows.length ? 'raw HTML facts plus rendered comparison samples' : 'raw HTML facts only',
+      evidenceLevel: renderedRows.length ? 'sample' : 'fact',
+      automationCoverage: renderedRows.length ? 'partial' : 'requires_external_data',
+      interpretation: renderedRows.length
+        ? 'The check compares raw and rendered facts where available and only raises a clear issue when rendered evidence exists.'
+        : 'Only raw-HTML presence is checked; no hard JavaScript-dependency claim is made without rendered data.',
+      limitations: 'Product names, prices and category copy are inferred from generic URL facts unless richer rendered/body facts are stored.'
     });
   }, { priority: 'Medium', effort: 'M' });
 }
@@ -1529,12 +1960,20 @@ function pageTypeSchemaCoverage(check, ctx, pageType, schemaType) {
     affectedCount,
     sampleUrls: rows.map((row) => row.url),
     finding: total ? `${affectedCount}/${total} ${pageType} page(s) lack ${schemaType} schema.` : `No ${pageType} pages detected by stored heuristics.`,
-    recommendation: `Add ${schemaType} schema only to matching pages.`,
+    recommendation: `Add ${schemaType} schema only to pages that visibly match the ${pageType} intent; review heuristic page-type samples before treating this as a template defect.`,
     details: `Evaluated only pages classified as pageType=${pageType}.`,
     evidence: { pageType, schemaType, totalCandidatePages: total, affectedCount, sampleUrls: rows.map((row) => row.url) },
     reportGroupingKey: `schema.${schemaType.toLowerCase()}`,
     relatedCheckIds: schemaType === 'Article' ? ['geo.article_blog_pages_article_schema'] : [],
-    confidence: 'high'
+    findingType: 'opportunity',
+    confidence: total >= 20 ? 'high' : total ? 'medium' : 'low',
+    reviewRecommended: affectedCount > 0,
+    reviewReason: affectedCount ? 'Schema eligibility depends on visible page content and template intent.' : null,
+    dataBasis: 'pageType heuristic and stored schema types',
+    evidenceLevel: 'sample',
+    automationCoverage: 'partial',
+    maturityImpact: affectedCount ? 'low' : 'none',
+    limitations: 'Heuristic pageType classification can include edge-case utility or recall pages.'
   });
 }
 
@@ -1812,14 +2251,46 @@ function imageAttributeCheck(id, category, name, where, status = 'Warning', prio
         ignoredHeroImages
       },
       findingType: options.findingType,
-      confidence: 'medium',
-      reviewRecommended: ignoredDecorative > 0 || ignoredSmallImages > 0 || ignoredHeroImages > 0
+      confidence: options.confidence || 'medium',
+      reviewRecommended: Boolean(options.reviewRecommended ?? (affectedCount > 0 || ignoredDecorative > 0 || ignoredSmallImages > 0 || ignoredHeroImages > 0)),
+      reviewReason: affectedCount && options.findingType === 'best_practice' ? 'Image markup impact should be confirmed against layout/CWV evidence.' : null,
+      dataBasis: 'stored image markup facts',
+      evidenceLevel: 'sample',
+      automationCoverage: 'partial',
+      maturityImpact: options.findingType === 'best_practice' && affectedCount ? 'low' : undefined
     });
   }, { priority });
 }
 
 function sqlString(value) {
   return `'${String(value || '').replaceAll("'", "''")}'`;
+}
+
+function parseRobotsDirectives(value) {
+  return String(value || '')
+    .toLowerCase()
+    .split(/[;,]/)
+    .map((item) => item.trim().split(/\s+/)[0])
+    .filter(Boolean);
+}
+
+function hasCdnOrCacheSignal(headers = {}) {
+  const haystack = Object.entries(headers || {})
+    .map(([key, value]) => `${key}: ${value}`)
+    .join('\n')
+    .toLowerCase();
+  return /cache-control|age:|expires:|etag:|last-modified:|vary:|via:|x-cache|x-cache-hits|cf-cache-status|x-azure-ref|x-served-by|cloudflare|akamai|fastly|azure|frontdoor|cdn/.test(haystack);
+}
+
+function normalizeComparableUrl(value) {
+  try {
+    const url = new URL(value);
+    url.hash = '';
+    if (url.pathname !== '/') url.pathname = url.pathname.replace(/\/+$/, '');
+    return url.toString().toLowerCase();
+  } catch {
+    return String(value || '').trim().toLowerCase().replace(/\/+$/, '');
+  }
 }
 
 function largeImages() {

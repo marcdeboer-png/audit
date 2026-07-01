@@ -13,6 +13,17 @@ export function classifyManualItemCoverage(item, mapping, toolFindings = [], opt
     const coverageStatus = best.matchScore >= 55 ? 'covered' : 'partially_covered';
     return manualResult(item, mapping, best, coverageStatus, confidenceFromScore(best.matchScore), 'Manual audit marks this point OK and the related tool check is not active.');
   }
+  if (item.status === 'ok' && activeBest && isAdvisoryNonContradictory(activeBest.finding)) {
+    const coverageStatus = activeBest.matchScore >= 55 ? 'covered' : 'partially_covered';
+    return manualResult(
+      item,
+      mapping,
+      activeBest,
+      coverageStatus,
+      confidenceFromScore(activeBest.matchScore),
+      'Manual audit marks this point OK; the related tool finding is advisory/review-oriented and does not contradict the manual OK.'
+    );
+  }
   if (item.status === 'ok' && activeBest) {
     return manualResult(item, mapping, activeBest, 'false_positive_candidate', confidenceFromScore(activeBest.matchScore), 'Manual audit marks this point OK, but the current tool run has an active related finding.');
   }
@@ -104,6 +115,8 @@ export function classifyToolExtraFindings(toolFindings = [], matchedToolFindingI
 }
 
 function classifyExtra({ finding, affectedCount, priority, confidence, indirectlyCoveredCheckIds }) {
+  const findingType = finding.normalizedFindingType || finding.findingType || '';
+  const reviewRecommended = Boolean(finding.reviewRecommended);
   if (affectedCount === 0 || (confidence === 'low' && priority === 'Low')) {
     return {
       extraClassification: 'false_positive_candidate',
@@ -116,6 +129,20 @@ function classifyExtra({ finding, affectedCount, priority, confidence, indirectl
       extraClassification: 'already_covered_indirectly',
       reason: 'Check belongs to a family already matched to a manual audit item.',
       suggestedAction: 'Group with the matched manual item or keep as supporting evidence.'
+    };
+  }
+  if (reviewRecommended && ['opportunity', 'best_practice'].includes(findingType)) {
+    return {
+      extraClassification: 'needs_review',
+      reason: 'Advisory finding should be reviewed before using it as tool-only audit value.',
+      suggestedAction: 'Keep as review evidence; do not present as a hard additional defect without validation.'
+    };
+  }
+  if (findingType === 'opportunity') {
+    return {
+      extraClassification: 'low_priority',
+      reason: 'Tool-only finding is an opportunity rather than a hard issue.',
+      suggestedAction: 'Keep separate from executive risks unless repeated across important templates.'
     };
   }
   if (confidence === 'low') {
@@ -238,6 +265,18 @@ function priorityAligned(manualPriority, toolPriority) {
   const manual = normalizePriority(manualPriority);
   const tool = normalizePriority(toolPriority);
   return manual && tool && manual === tool;
+}
+
+function isAdvisoryNonContradictory(finding = {}) {
+  const findingType = finding.normalizedFindingType || finding.findingType || '';
+  const priority = finding.effectivePriority || finding.priority || 'Medium';
+  const confidence = finding.confidence || 'medium';
+  const automationCoverage = finding.automationCoverage || '';
+  return ['opportunity', 'best_practice', 'info'].includes(findingType)
+    || priority === 'Low'
+    || confidence === 'low'
+    || Boolean(finding.reviewRecommended)
+    || /^requires_/.test(automationCoverage);
 }
 
 function searchableText(values) {

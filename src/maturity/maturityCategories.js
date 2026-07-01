@@ -92,6 +92,7 @@ const rawMaturityCategories = [
       'tech.sitemap_present',
       'tech.sitemap_in_robots',
       'tech.sitemap_urls_non_200',
+      'tech.internal_search_noindex_policy',
       'tech.noindex_pages',
       'tech.nofollow_pages',
       'tech.canonical_missing',
@@ -122,6 +123,7 @@ const rawMaturityCategories = [
       'tech.duplicate_meta_descriptions',
       'tech.h1_missing',
       'tech.multiple_h1',
+      'tech.html_semantics_summary',
       'tech.html_lang_missing',
       'tech.viewport_missing',
       'tech.open_graph_basics_missing',
@@ -144,6 +146,8 @@ const rawMaturityCategories = [
       'geo.source_or_external_links_present',
       'geo.visible_dates_present',
       'geo.author_hints_present',
+      'trust.eeat_signal_summary',
+      'trust.ymyl_review_signal',
       'geo.low_structured_sections'
     ]
   },
@@ -224,16 +228,19 @@ const rawMaturityCategories = [
   {
     id: 'ai-crawler-policy',
     name: 'AI Crawler Policy',
-    description: 'Explizite robots.txt-Signale für GPTBot, OAI-SearchBot, ChatGPT-User, ClaudeBot, PerplexityBot, Google-Extended und CCBot.',
+    description: 'Explizite robots.txt-Signale für GPTBot, OAI-SearchBot, ChatGPT-User, Claude, Perplexity, Google-Extended, CCBot, Applebot und Bytespider.',
     recommendation: 'Dokumentiere die gewünschte AI-Crawler-Policy explizit, wenn sie strategisch relevant ist.',
     checkIds: [
       'geo.robots_mentions_gptbot',
       'geo.robots_mentions_oai_searchbot',
       'geo.robots_mentions_chatgpt_user',
       'geo.robots_mentions_claudebot',
+      'geo.robots_mentions_claude_web',
       'geo.robots_mentions_perplexitybot',
       'geo.robots_mentions_google_extended',
       'geo.robots_mentions_ccbot',
+      'geo.robots_mentions_applebot',
+      'geo.robots_mentions_bytespider',
       'geo.ai_bots_policy_summary'
     ]
   },
@@ -270,6 +277,7 @@ const rawMaturityCategories = [
     description: 'Rendering-Sampling, JS-Abhängigkeit, Konsolenfehler und lokale Tooling-Verfügbarkeit.',
     recommendation: 'Prüfe JS-abhängige Templates und Konsolenfehler dort, wo Rendering-Sampling Auffälligkeiten zeigt.',
     checkIds: [
+      'tech.critical_content_raw_html_signal',
       'tech.rendered_word_count_delta',
       'tech.raw_h1_missing_rendered_present',
       'tech.raw_internal_links_fewer_rendered',

@@ -21,7 +21,18 @@ const geo = (id, category, name, run, options = {}) => ({
   run
 });
 
-const AI_BOTS = ['GPTBot', 'OAI-SearchBot', 'ChatGPT-User', 'ClaudeBot', 'PerplexityBot', 'Google-Extended', 'CCBot'];
+const trust = (id, category, name, run, options = {}) => ({
+  id: `trust.${id}`,
+  category,
+  name,
+  auditType: 'geo',
+  priority: options.priority || 'Medium',
+  effort: options.effort || 'M',
+  recommendation: options.recommendation || '',
+  run
+});
+
+const AI_BOTS = ['GPTBot', 'OAI-SearchBot', 'ChatGPT-User', 'ClaudeBot', 'Claude-Web', 'PerplexityBot', 'Google-Extended', 'CCBot', 'Applebot', 'Bytespider'];
 const ABOUT_TARGET_PATTERNS = [
   { needle: '/about', pattern: /(^|\/)about(\/|$)/i },
   { needle: '/about-us', pattern: /(^|\/)about-us(\/|$)/i },
@@ -67,6 +78,8 @@ export function geoChecks() {
     internalNavLink('datenschutz_linked', 'Trust & Contact Signals', 'Datenschutz internally linked', ['datenschutz', 'privacy']),
     internalNavLink('about_linked', 'Trust & Contact Signals', 'About/Über-uns page internally linked', ['about', 'ueber-uns', 'über-uns', 'company', 'unternehmen']),
     internalNavLink('contact_linked', 'Trust & Contact Signals', 'Contact page internally linked', ['contact', 'kontakt']),
+    eeatSignalSummary(),
+    ymylReviewSignal(),
     organizationSameAs(),
     breadcrumbPresence(),
     schemaPresence('speakable_present', 'GEO Opportunities', 'Speakable Schema vorhanden', 'SpeakableSpecification', 'Low'),
@@ -227,23 +240,164 @@ function aiBotsPolicySummary() {
     }
     const summary = summarizeAiBotRules(robots.url, robots.content);
     const blocked = summary.filter((item) => item.status === 'blocked');
-    const unmentioned = summary.filter((item) => !item.mentioned);
-    const status = blocked.length || unmentioned.length ? 'Warning' : 'OK';
+    const explicitAllowed = summary.filter((item) => item.policyStatus === 'allowed_explicitly');
+    const explicitBlocked = summary.filter((item) => item.policyStatus === 'blocked_explicitly');
+    const inheritedWildcard = summary.filter((item) => item.inheritedWildcard);
+    const unmentioned = summary.filter((item) => item.policyStatus === 'not_mentioned');
+    const status = blocked.length || unmentioned.length || inheritedWildcard.length ? 'Warning' : 'OK';
     return makeResult(this, status, {
       priority: blocked.length ? 'Medium' : 'Low',
-      affectedCount: blocked.length + unmentioned.length,
+      affectedCount: blocked.length + unmentioned.length + inheritedWildcard.length,
       finding: blocked.length
-        ? `${blocked.length} tracked AI bot(s) appear blocked at root.`
+        ? `${blocked.length} tracked AI bot(s) appear blocked at root; ${explicitAllowed.length} are explicitly allowed.`
         : unmentioned.length
-          ? `${unmentioned.length} tracked AI bot(s) are not explicitly mentioned.`
-          : 'Tracked AI bots are explicitly mentioned and not blocked at root.',
-      recommendation: 'Make AI crawler policy explicit in robots.txt where business policy requires it.',
-      evidence: { summary },
+          ? `${unmentioned.length} tracked AI bot(s) are not explicitly mentioned; ${inheritedWildcard.length} inherit wildcard handling.`
+          : inheritedWildcard.length
+            ? `${inheritedWildcard.length} tracked AI bot(s) inherit wildcard handling but are not explicitly mentioned.`
+            : 'Tracked AI bots are explicitly mentioned and are not blocked at root.',
+      recommendation: 'Make AI crawler policy explicit only where business policy requires unambiguous AI-crawler handling; review explicit blocks before treating them as a GEO risk.',
+      evidence: { summary, explicitAllowed, explicitBlocked, inheritedWildcard, notMentioned: unmentioned },
       findingType: status === 'OK' ? 'info' : 'opportunity',
       confidence: blocked.length ? 'high' : 'medium',
-      reportGroupingKey: 'ai_crawler_policy.summary'
+      reportGroupingKey: 'ai_crawler_policy.summary',
+      dataBasis: 'robots.txt user-agent rules',
+      evidenceLevel: 'fact',
+      automationCoverage: 'partial',
+      interpretation: 'This is a technical policy inventory, not a recommendation to allow or block every AI crawler.',
+      limitations: 'Business strategy, licensing and content policy determine whether explicit allow/block rules are desirable.'
     });
   });
+}
+
+function eeatSignalSummary() {
+  return trust('eeat_signal_summary', 'Trust & Review Signals', 'E-E-A-T technical signal summary', function run(ctx) {
+    const totalHtmlPages = htmlPageCount(ctx.db, ctx.run.id);
+    const rows = all(ctx.db, `
+      SELECT url, pageType, hasAuthorPattern, hasVisibleDate, externalSourceLinksCount, schemaTypesJson
+      FROM pages
+      WHERE runId = ? AND ${HTML_WHERE}
+      ORDER BY id ASC
+      LIMIT 500
+    `, [ctx.run.id]);
+    if (!rows.length) {
+      return makeResult(this, 'NA', {
+        finding: 'No HTML page facts are available for E-E-A-T signal review.',
+        recommendation: 'Run a crawl or import URL facts before reviewing trust signals.',
+        evidence: { totalHtmlPages },
+        findingType: 'info',
+        confidence: 'low',
+        automationCoverage: 'requires_external_data'
+      });
+    }
+    const presentTrustLinks = trustLinkSignals(ctx.db, ctx.run.id);
+    const articleRows = rows.filter((row) => row.pageType === 'article');
+    const articleAuthorRows = articleRows.filter((row) => Number(row.hasAuthorPattern || 0) > 0);
+    const articleSourceRows = articleRows.filter((row) => Number(row.externalSourceLinksCount || 0) > 0);
+    const schemaRows = rows.filter((row) => /Organization|LocalBusiness|Person/i.test(row.schemaTypesJson || ''));
+    const weakArticleRows = articleRows
+      .filter((row) => !Number(row.hasAuthorPattern || 0) && !Number(row.externalSourceLinksCount || 0))
+      .slice(0, 10);
+    const status = weakArticleRows.length ? 'Warning' : 'OK';
+    return makeResult(this, status, {
+      priority: 'Low',
+      affectedCount: weakArticleRows.length,
+      sampleUrls: weakArticleRows.map((row) => row.url),
+      finding: status === 'Warning'
+        ? `${weakArticleRows.length}/${articleRows.length} sampled article page(s) have weak visible author/source signals.`
+        : `Technical trust signals were inventoried across ${rows.length} sampled HTML page(s).`,
+      recommendation: 'Use this as a technical trust-signal inventory. Final E-E-A-T quality needs editorial or optional LLM review.',
+      evidence: {
+        sampledPages: rows.length,
+        articlePages: articleRows.length,
+        articleAuthorSignalPages: articleAuthorRows.length,
+        articleExternalSourcePages: articleSourceRows.length,
+        schemaTrustSignalPages: schemaRows.length,
+        presentTrustLinks,
+        weakArticleSamples: weakArticleRows
+      },
+      findingType: 'best_practice',
+      confidence: articleRows.length ? 'medium' : 'low',
+      reviewRecommended: true,
+      reviewReason: 'E-E-A-T cannot be judged from technical signals alone.',
+      dataBasis: 'URL facts, internal trust links, author/source/schema signals',
+      evidenceLevel: 'sample',
+      automationCoverage: 'requires_human_review',
+      interpretation: 'The tool identifies trust signals that can support a human E-E-A-T review.',
+      limitations: 'It does not judge topical expertise, factual accuracy or legal compliance.'
+    });
+  }, { priority: 'Low', effort: 'S' });
+}
+
+function trustLinkSignals(db, runId) {
+  const rows = all(db, `
+    SELECT targetUrl, anchorText
+    FROM page_links
+    WHERE runId = ? AND linkType = 'internal'
+    LIMIT 1000
+  `, [runId]);
+  const text = rows.map((row) => `${row.targetUrl || ''} ${row.anchorText || ''}`).join('\n').toLowerCase();
+  return [
+    /impressum|legal notice/.test(text) && 'impressum',
+    /datenschutz|privacy/.test(text) && 'privacy',
+    /(^|[\/\s-])(about|about-us|ueber|über|unternehmen|company|team)([\/\s-]|$)/.test(text) && 'about_company',
+    /kontakt|contact/.test(text) && 'contact'
+  ].filter(Boolean);
+}
+
+function ymylReviewSignal() {
+  return trust('ymyl_review_signal', 'Trust & Review Signals', 'YMYL topical review signal', function run(ctx) {
+    const ymylWhere = `(
+      LOWER(COALESCE(url, '') || ' ' || COALESCE(title, '')) LIKE '%gesundheit%' OR
+      LOWER(COALESCE(url, '') || ' ' || COALESCE(title, '')) LIKE '%health%' OR
+      LOWER(COALESCE(url, '') || ' ' || COALESCE(title, '')) LIKE '%krankheit%' OR
+      LOWER(COALESCE(url, '') || ' ' || COALESCE(title, '')) LIKE '%tierarzt%' OR
+      LOWER(COALESCE(url, '') || ' ' || COALESCE(title, '')) LIKE '%veterinaer%' OR
+      LOWER(COALESCE(url, '') || ' ' || COALESCE(title, '')) LIKE '%veterinär%' OR
+      LOWER(COALESCE(url, '') || ' ' || COALESCE(title, '')) LIKE '%futterberatung%' OR
+      LOWER(COALESCE(url, '') || ' ' || COALESCE(title, '')) LIKE '%ernaehrung%' OR
+      LOWER(COALESCE(url, '') || ' ' || COALESCE(title, '')) LIKE '%ernährung%' OR
+      LOWER(COALESCE(url, '') || ' ' || COALESCE(title, '')) LIKE '%versicherung%' OR
+      LOWER(COALESCE(url, '') || ' ' || COALESCE(title, '')) LIKE '%recht%' OR
+      LOWER(COALESCE(url, '') || ' ' || COALESCE(title, '')) LIKE '%law%' OR
+      LOWER(COALESCE(url, '') || ' ' || COALESCE(title, '')) LIKE '%finanz%' OR
+      LOWER(COALESCE(url, '') || ' ' || COALESCE(title, '')) LIKE '%finance%' OR
+      LOWER(COALESCE(url, '') || ' ' || COALESCE(title, '')) LIKE '%medikament%' OR
+      LOWER(COALESCE(url, '') || ' ' || COALESCE(title, '')) LIKE '%symptom%'
+    )`;
+    const rows = all(ctx.db, `
+      SELECT url, title, pageType
+      FROM pages
+      WHERE runId = ? AND ${HTML_WHERE}
+        AND ${ymylWhere}
+      ORDER BY id ASC
+      LIMIT 25
+    `, [ctx.run.id]);
+    const totalCandidates = count(ctx.db, `
+      SELECT COUNT(*) AS count
+      FROM pages
+      WHERE runId = ? AND ${HTML_WHERE}
+        AND ${ymylWhere}
+    `, [ctx.run.id]);
+    return makeResult(this, totalCandidates ? 'Warning' : 'OK', {
+      priority: 'Low',
+      affectedCount: totalCandidates,
+      sampleUrls: rows.map((row) => row.url),
+      finding: totalCandidates
+        ? `${totalCandidates} sampled/stored page(s) have possible YMYL-sensitive topical signals.`
+        : 'No obvious YMYL-sensitive topical signals were detected in stored URL/title facts.',
+      recommendation: 'Route possible YMYL pages to human review; optional LLM sampling can help prepare the review but should not replace editorial judgment.',
+      evidence: { totalCandidates, samples: rows },
+      findingType: 'best_practice',
+      confidence: totalCandidates ? 'medium' : 'low',
+      reviewRecommended: totalCandidates > 0,
+      reviewReason: 'YMYL relevance and content quality require human editorial judgment.',
+      dataBasis: 'URL and title keyword heuristics',
+      evidenceLevel: 'sample',
+      automationCoverage: totalCandidates ? 'requires_human_review' : 'partial',
+      interpretation: 'This flags pages that may deserve stronger trust and accuracy review.',
+      limitations: 'Keyword heuristics can miss or over-include topics and do not assess correctness.'
+    });
+  }, { priority: 'Low', effort: 'S' });
 }
 
 function markdownTwinCheck() {

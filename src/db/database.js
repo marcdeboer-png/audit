@@ -432,6 +432,13 @@ export function initDatabase(database = getDb()) {
       findingType TEXT,
       confidence TEXT,
       reviewRecommended INTEGER NOT NULL DEFAULT 0,
+      maturityImpact TEXT,
+      dataBasis TEXT,
+      evidenceLevel TEXT,
+      reviewReason TEXT,
+      automationCoverage TEXT,
+      interpretation TEXT,
+      limitations TEXT,
       relatedCheckIdsJson TEXT,
       createdAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (runId) REFERENCES runs(id)
@@ -792,6 +799,13 @@ export function initDatabase(database = getDb()) {
     ['findingType', 'TEXT'],
     ['confidence', 'TEXT'],
     ['reviewRecommended', 'INTEGER NOT NULL DEFAULT 0'],
+    ['maturityImpact', 'TEXT'],
+    ['dataBasis', 'TEXT'],
+    ['evidenceLevel', 'TEXT'],
+    ['reviewReason', 'TEXT'],
+    ['automationCoverage', 'TEXT'],
+    ['interpretation', 'TEXT'],
+    ['limitations', 'TEXT'],
     ['relatedCheckIdsJson', 'TEXT']
   ]);
 

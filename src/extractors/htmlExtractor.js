@@ -359,10 +359,12 @@ function extractFeatureFlags($, bodyText, links, h2Count, pageUrl) {
     .filter((item) => item.hreflang);
   const resourceHintCounts = {
     preload: $('link[rel~="preload"]').length,
+    modulepreload: $('link[rel~="modulepreload"]').length,
     preconnect: $('link[rel~="preconnect"]').length,
     dnsPrefetch: $('link[rel~="dns-prefetch"]').length,
     prefetch: $('link[rel~="prefetch"]').length
   };
+  const semanticSignals = extractSemanticSignals($);
 
   return {
     tablesCount: $('table').length,
@@ -379,9 +381,10 @@ function extractFeatureFlags($, bodyText, links, h2Count, pageUrl) {
     hasVisibleDate,
     hasAuthorHint: hasAuthorPattern,
     hasAuthorPattern,
-    hasPreload: resourceHintCounts.preload > 0,
+    hasPreload: resourceHintCounts.preload > 0 || resourceHintCounts.modulepreload > 0,
     hasPreconnect: resourceHintCounts.preconnect > 0 || resourceHintCounts.dnsPrefetch > 0,
     resourceHintCounts,
+    ...semanticSignals,
     hreflangCount: hreflangLinks.length,
     hreflangLanguages: [...new Set(hreflangLinks.map((item) => item.hreflang.toLowerCase()))].slice(0, 50),
     hasHreflangXDefault: hreflangLinks.some((item) => item.hreflang.toLowerCase() === 'x-default'),
@@ -406,10 +409,12 @@ function detectConsentSignals(text) {
     ['usercentrics', /usercentrics|uc_settings|uc_ui/i],
     ['cookiebot', /cookiebot|cookieconsent/i],
     ['didomi', /didomi/i],
-    ['consentmanager', /consentmanager/i]
+    ['consentmanager', /consentmanager/i],
+    ['cookiefirst', /cookiefirst/i],
+    ['borlabs', /borlabs/i]
   ];
   const matchedVendors = vendors.filter(([, pattern]) => pattern.test(value)).map(([vendor]) => vendor);
-  const hasGoogleConsentMode = /gtag\(['"]consent|google consent mode|ad_storage|analytics_storage/i.test(text);
+  const hasGoogleConsentMode = /gtag\(['"]consent|google consent mode|ad_storage|analytics_storage|denied['"]\s*,\s*['"]granted|default_consent/i.test(text);
   const hasGoogleTagManager = /googletagmanager\.com\/gtm\.js|gtm-[a-z0-9]+|google tag manager/i.test(text);
   const hasGtag = /gtag\(/i.test(text) || /googletagmanager\.com\/gtag\/js/i.test(text);
   const hasDataLayer = /datalayer/i.test(text);
@@ -423,6 +428,33 @@ function detectConsentSignals(text) {
     hasDataLayer,
     hasMetaPixel,
     thirdPartyMarketingSignals: [hasGoogleTagManager && 'google_tag_manager', hasGtag && 'gtag', hasMetaPixel && 'meta_pixel'].filter(Boolean)
+  };
+}
+
+function extractSemanticSignals($) {
+  const headingLevels = $('h1,h2,h3,h4,h5,h6')
+    .map((_, element) => Number(element.tagName?.replace(/^h/i, '') || 0))
+    .get()
+    .filter(Boolean);
+  let headingHierarchySkips = 0;
+  for (let index = 1; index < headingLevels.length; index += 1) {
+    if (headingLevels[index] - headingLevels[index - 1] > 1) headingHierarchySkips += 1;
+  }
+  const emptyH1Count = $('h1').filter((_, element) => !cleanText($(element).text())).length;
+  const emptyH2Count = $('h2').filter((_, element) => !cleanText($(element).text())).length;
+  const ariaLandmarkCount = $('[role="main"], [role="navigation"], [role="banner"], [role="contentinfo"], [role="complementary"], [role="search"]').length;
+  return {
+    mainRegionCount: $('main, [role="main"]').length,
+    headerRegionCount: $('header, [role="banner"]').length,
+    navRegionCount: $('nav, [role="navigation"]').length,
+    footerRegionCount: $('footer, [role="contentinfo"]').length,
+    articleElementCount: $('article').length,
+    ariaLandmarkCount,
+    emptyH1Count,
+    emptyH2Count,
+    headingLevels: headingLevels.slice(0, 80),
+    headingHierarchySkips,
+    firstHeadingLevel: headingLevels[0] || null
   };
 }
 

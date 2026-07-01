@@ -94,7 +94,9 @@ export const legitCheckGuardrails = {
     'geo.robots_mentions_gptbot',
     'geo.markdown_twin_homepage',
     'tech.faqpage_missing_low_coverage',
-    'geo.faq_html_present_schema_missing'
+    'geo.faq_html_present_schema_missing',
+    'tech.article_coverage_on_article_like_pages',
+    'tech.product_coverage_on_product_like_pages'
   ],
   bestPracticesAreNotCore: [
     'tech.hsts_header',
@@ -102,7 +104,8 @@ export const legitCheckGuardrails = {
     'tech.x_frame_options',
     'tech.x_content_type_options',
     'tech.referrer_policy',
-    'tech.permissions_policy'
+    'tech.permissions_policy',
+    'tech.images_without_width_height'
   ],
   unavailableToolingIsNotCore: [
     'template.lighthouse_unavailable',
@@ -277,6 +280,8 @@ export const legitCheckExpectations = [
   expectation('tech.images_without_width_height', {
     expectedScope: 'Likely content images without width or height attributes; decorative, badge, icon and tracking images excluded.',
     allowedStatuses: ['OK', 'Warning', 'NA'],
+    allowedFindingTypes: BEST_PRACTICE_TYPES,
+    hardIssueAllowed: false,
     detailHandlerExpected: true
   }),
   expectation('tech.images_without_lazy_loading', {
@@ -329,6 +334,8 @@ export const legitCheckExpectations = [
   expectation('tech.article_coverage_on_article_like_pages', {
     expectedScope: 'Only pages classified as pageType=article are expected to carry Article schema.',
     allowedStatuses: ['OK', 'Warning', 'NA'],
+    allowedFindingTypes: OPPORTUNITY_TYPES,
+    hardIssueAllowed: false,
     pageTypeScope: ['article'],
     detailHandlerExpected: true
   }),
@@ -343,6 +350,8 @@ export const legitCheckExpectations = [
   expectation('tech.product_coverage_on_product_like_pages', {
     expectedScope: 'Only pages classified as pageType=product are expected to carry Product schema.',
     allowedStatuses: ['OK', 'Warning', 'NA'],
+    allowedFindingTypes: OPPORTUNITY_TYPES,
+    hardIssueAllowed: false,
     pageTypeScope: ['product'],
     detailHandlerExpected: true
   }),

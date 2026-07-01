@@ -24,9 +24,14 @@ const IMPLICIT_AI_POLICY_CHECKS = new Set([
   'geo.ai_bots_policy_summary',
   'geo.robots_mentions_gptbot',
   'geo.robots_mentions_oai_searchbot',
+  'geo.robots_mentions_chatgpt_user',
   'geo.robots_mentions_claudebot',
+  'geo.robots_mentions_claude_web',
   'geo.robots_mentions_perplexitybot',
-  'geo.robots_mentions_google_extended'
+  'geo.robots_mentions_google_extended',
+  'geo.robots_mentions_ccbot',
+  'geo.robots_mentions_applebot',
+  'geo.robots_mentions_bytespider'
 ]);
 
 const MATURITY_LABELS = [
