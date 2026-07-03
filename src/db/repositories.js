@@ -1659,6 +1659,8 @@ export function deleteRun(db, runId) {
     db.prepare('DELETE FROM playwright_results WHERE runId = ?').run(runId);
     db.prepare('DELETE FROM lighthouse_results WHERE runId = ?').run(runId);
     db.prepare('DELETE FROM template_performance_summary WHERE runId = ?').run(runId);
+    db.prepare('DELETE FROM targeted_evidence_facts WHERE runId = ?').run(runId);
+    db.prepare('DELETE FROM evidence_jobs WHERE runId = ?').run(runId);
     db.prepare('DELETE FROM validation_reports WHERE runId = ?').run(runId);
     db.prepare('DELETE FROM run_comparisons WHERE baseRunId = ? OR compareRunId = ?').run(runId, runId);
     db.prepare('DELETE FROM check_results WHERE runId = ?').run(runId);

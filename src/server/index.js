@@ -60,6 +60,12 @@ import { buildBenchmarkSummary } from '../analysis/benchmarkSummary.js';
 import { getLatestValidationReport, validateRunAgainstReference } from '../validation/referenceAudit/validationService.js';
 import { buildValidationExportPayload } from '../validation/referenceAudit/validationExportService.js';
 import { buildUnresolvedAuditQueue } from '../validation/unresolved/unresolvedAuditPointService.js';
+import {
+  createEvidenceJobExecution,
+  dryRunEvidenceJob,
+  getEvidenceJobDetails,
+  listEvidenceJobsForRun
+} from '../evidenceJobs/evidenceJobRunner.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -318,6 +324,42 @@ app.get('/api/audits/:runId/evidence-job-plan', (req, res) => {
   const payload = latestUnresolvedPayload(Number(req.params.runId));
   if (!payload) return res.status(404).json({ error: 'Validation report not found for run' });
   res.json(payload.evidenceJobPlan);
+});
+
+app.post('/api/audits/:runId/evidence-jobs/dry-run', async (req, res) => {
+  const run = getRunWithProject(db, Number(req.params.runId));
+  if (!run) return res.status(404).json({ error: 'Run not found' });
+  try {
+    res.json(await dryRunEvidenceJob(db, run.id, req.body || {}));
+  } catch (error) {
+    res.status(error.statusCode || 400).json({ error: error.message });
+  }
+});
+
+app.post('/api/audits/:runId/evidence-jobs', (req, res) => {
+  const run = getRunWithProject(db, Number(req.params.runId));
+  if (!run) return res.status(404).json({ error: 'Run not found' });
+  try {
+    const execution = createEvidenceJobExecution(db, run.id, req.body || {});
+    execution.run().catch((error) => {
+      console.error('Evidence job failed', { runId: run.id, jobId: execution.job.jobId, error });
+    });
+    res.status(202).json({ job: execution.job, dryRun: execution.dryRun });
+  } catch (error) {
+    res.status(error.statusCode || 400).json({ error: error.message });
+  }
+});
+
+app.get('/api/audits/:runId/evidence-jobs', (req, res) => {
+  const run = getRunWithProject(db, Number(req.params.runId));
+  if (!run) return res.status(404).json({ error: 'Run not found' });
+  res.json(listEvidenceJobsForRun(db, run.id));
+});
+
+app.get('/api/evidence-jobs/:jobId', (req, res) => {
+  const details = getEvidenceJobDetails(db, Number(req.params.jobId), { limit: Number(req.query.limit || 1000) });
+  if (!details) return res.status(404).json({ error: 'Evidence job not found' });
+  res.json(details);
 });
 
 app.get('/api/audits/:runId/samples', (req, res) => {

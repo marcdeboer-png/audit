@@ -1834,18 +1834,22 @@ async function renderReviewQueue(runId) {
     </section>
   `;
   try {
-    const queue = await fetchJson(`/api/audits/${runId}/unresolved`);
-    renderReviewQueueReport(runId, queue);
+    const [queue, jobs] = await Promise.all([
+      fetchJson(`/api/audits/${runId}/unresolved`),
+      fetchJson(`/api/audits/${runId}/evidence-jobs`).catch(() => ({ jobs: [] }))
+    ]);
+    renderReviewQueueReport(runId, queue, jobs);
   } catch (error) {
     document.querySelector('#review-queue-panel').innerHTML = `<div class="empty">${escapeHtml(error.message)}</div>`;
   }
 }
 
-function renderReviewQueueReport(runId, queue) {
+function renderReviewQueueReport(runId, queue, jobsPayload = { jobs: [] }) {
   const panel = document.querySelector('#review-queue-panel');
   if (!panel) return;
   const summary = queue.summary || {};
   const plan = queue.evidenceJobPlan || {};
+  const executableJobs = executableEvidenceJobs(plan.jobs || []);
   panel.innerHTML = `
     <div class="actions" style="justify-content: space-between;">
       <h3>Evidence Queue Summary</h3>
@@ -1867,6 +1871,33 @@ function renderReviewQueueReport(runId, queue) {
       ${metric('Job Types', plan.recommendedJobCount || 0)}
       ${score('Coverage', summary.coveragePercent ?? null)}
     </div>
+    <section class="panel nested-panel">
+      <div class="actions" style="justify-content: space-between;">
+        <div>
+          <h3>Targeted Evidence Jobs</h3>
+          <p class="muted">Batch 10.8 fuehrt nur Low-Risk Facts aus: Title, Meta Description, H1, Canonical/Robots. Kein Raw HTML, kein Rendered HTML, kein Playwright.</p>
+        </div>
+        <label class="inline-field">maxUrls
+          <input id="evidence-job-max-urls" type="number" min="1" max="10000" value="20">
+        </label>
+      </div>
+      <div id="evidence-job-feedback" class="muted"></div>
+      <div class="table-scroll">
+        <table class="validation-matrix">
+          <thead><tr><th>Job</th><th>Points</th><th>Storage</th><th>URL Source</th><th>Actions</th></tr></thead>
+          <tbody>
+            ${executableJobs.length ? executableJobs.map((job) => evidenceJobPlanRow(job)).join('') : '<tr><td colspan="5" class="muted">Keine ausführbaren Low-Risk-Jobs im aktuellen Plan.</td></tr>'}
+          </tbody>
+        </table>
+      </div>
+      <h3>Evidence Job History</h3>
+      <div class="table-scroll">
+        <table class="validation-matrix">
+          <thead><tr><th>ID</th><th>Job</th><th>Status</th><th>Processed</th><th>Stored</th><th>Started</th></tr></thead>
+          <tbody id="evidence-job-history-body">${renderEvidenceJobHistoryRows(jobsPayload.jobs || [])}</tbody>
+        </table>
+      </div>
+    </section>
     <div class="validation-filters actions">
       ${reviewQueueFilterButton('', 'Alle')}
       ${reviewQueueFilterButton('targeted_crawl', 'Targeted Crawl')}
@@ -1892,7 +1923,107 @@ function renderReviewQueueReport(runId, queue) {
       renderReviewQueueRows(queue, button.getAttribute('data-review-filter'));
     });
   }
+  wireEvidenceJobButtons(runId);
   renderReviewQueueRows(queue, '');
+}
+
+function executableEvidenceJobs(jobs = []) {
+  const supported = new Set(['title_facts', 'meta_description_facts', 'h1_facts', 'canonical_robots_facts']);
+  return jobs.filter((job) => supported.has(job.jobType));
+}
+
+function evidenceJobPlanRow(job) {
+  const storage = job.storageEstimate
+    ? `${job.storageEstimate.estimated50kHuman} / 50k · ${job.storageEstimate.riskLevel}`
+    : 'n/a';
+  return `<tr>
+    <td><strong>${escapeHtml(job.jobType)}</strong><div class="muted">${escapeHtml(job.label || '')}</div></td>
+    <td>${escapeHtml(job.pointCount || 0)}</td>
+    <td>${escapeHtml(storage)}</td>
+    <td>${escapeHtml(job.requiredUrlSet || 'current_run_urls')}</td>
+    <td>
+      <button class="button" type="button" data-evidence-dry-run="${escapeHtml(job.jobType)}">Dry Run</button>
+      <button class="button primary" type="button" data-evidence-start="${escapeHtml(job.jobType)}">Job starten</button>
+    </td>
+  </tr>`;
+}
+
+function renderEvidenceJobHistoryRows(jobs = []) {
+  if (!jobs.length) return '<tr><td colspan="6" class="muted">Noch keine Evidence Jobs.</td></tr>';
+  return jobs.map((job) => `<tr>
+    <td><a href="/api/evidence-jobs/${escapeHtml(job.jobId)}" target="_blank" rel="noreferrer">${escapeHtml(job.jobId)}</a></td>
+    <td>${escapeHtml(job.jobType)}</td>
+    <td><span class="status ${escapeHtml(job.status)}">${escapeHtml(job.status)}</span></td>
+    <td>${escapeHtml(job.urlCountProcessed || 0)} / ${escapeHtml(job.urlCountPlanned || 0)} · ok ${escapeHtml(job.urlCountSucceeded || 0)} · fail ${escapeHtml(job.urlCountFailed || 0)}</td>
+    <td>${escapeHtml(formatBytes(job.actualStoredBytesEstimate || job.estimatedTotalBytes || 0))}</td>
+    <td>${escapeHtml(formatDateTime(job.startedAt || job.createdAt))}</td>
+  </tr>`).join('');
+}
+
+function wireEvidenceJobButtons(runId) {
+  for (const button of document.querySelectorAll('[data-evidence-dry-run]')) {
+    button.addEventListener('click', async () => {
+      const jobType = button.getAttribute('data-evidence-dry-run');
+      await runEvidenceJobAction(runId, jobType, true);
+    });
+  }
+  for (const button of document.querySelectorAll('[data-evidence-start]')) {
+    button.addEventListener('click', async () => {
+      const jobType = button.getAttribute('data-evidence-start');
+      await runEvidenceJobAction(runId, jobType, false);
+    });
+  }
+}
+
+async function runEvidenceJobAction(runId, jobType, dryRun) {
+  const feedback = document.querySelector('#evidence-job-feedback');
+  const maxUrls = Number(document.querySelector('#evidence-job-max-urls')?.value || 20);
+  const payload = {
+    jobType,
+    urlSource: 'current_run_urls',
+    maxUrls,
+    concurrency: 3
+  };
+  if (feedback) feedback.textContent = dryRun ? `Dry Run ${jobType} laeuft...` : `${jobType} wird gestartet...`;
+  try {
+    const endpoint = dryRun
+      ? `/api/audits/${runId}/evidence-jobs/dry-run`
+      : `/api/audits/${runId}/evidence-jobs`;
+    const result = await fetchJson(endpoint, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    if (dryRun) {
+      if (feedback) feedback.textContent = `Dry Run ${result.jobType}: ${result.effectiveUrlCount}/${result.plannedUrlCount} URLs, ${result.estimatedTotalHuman || formatBytes(result.estimatedTotalBytes)}, canRun=${result.canRun ? 'yes' : 'no'}.`;
+      return;
+    }
+    if (feedback) feedback.textContent = `Job ${result.job.jobId} gestartet. Status wird aktualisiert...`;
+    await pollEvidenceJob(runId, result.job.jobId);
+  } catch (error) {
+    if (feedback) feedback.textContent = error.message;
+  }
+}
+
+async function pollEvidenceJob(runId, jobId) {
+  let lastJob = null;
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    lastJob = await fetchJson(`/api/evidence-jobs/${jobId}`);
+    await refreshEvidenceJobHistory(runId);
+    if (['completed', 'failed', 'cancelled'].includes(lastJob.status)) break;
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+  }
+  const feedback = document.querySelector('#evidence-job-feedback');
+  if (feedback && lastJob) {
+    feedback.textContent = `Job ${lastJob.jobId}: ${lastJob.status}, processed ${lastJob.urlCountProcessed}/${lastJob.urlCountPlanned}, facts ${lastJob.factCount || 0}, Raw HTML gespeichert: nein.`;
+  }
+}
+
+async function refreshEvidenceJobHistory(runId) {
+  const body = document.querySelector('#evidence-job-history-body');
+  if (!body) return;
+  const jobs = await fetchJson(`/api/audits/${runId}/evidence-jobs`);
+  body.innerHTML = renderEvidenceJobHistoryRows(jobs.jobs || []);
 }
 
 function renderReviewQueueRows(queue, filter) {
@@ -3149,6 +3280,19 @@ function formatCell(value) {
 
 function formatMs(value) {
   return value === null || value === undefined || value === '' ? '' : `${Math.round(Number(value))}ms`;
+}
+
+function formatBytes(value) {
+  const bytes = Number(value || 0);
+  if (bytes < 1024) return `${bytes} B`;
+  const units = ['KB', 'MB', 'GB', 'TB'];
+  let size = bytes / 1024;
+  let index = 0;
+  while (size >= 1024 && index < units.length - 1) {
+    size /= 1024;
+    index += 1;
+  }
+  return `${size >= 10 ? size.toFixed(0) : size.toFixed(1)} ${units[index]}`;
 }
 
 async function fetchJson(url, options = {}) {

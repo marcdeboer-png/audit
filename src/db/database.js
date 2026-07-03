@@ -588,6 +588,61 @@ export function initDatabase(database = getDb()) {
       FOREIGN KEY (runId) REFERENCES runs(id)
     );
 
+    CREATE TABLE IF NOT EXISTS evidence_jobs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      runId INTEGER NOT NULL,
+      validationId INTEGER,
+      jobType TEXT NOT NULL,
+      label TEXT,
+      status TEXT NOT NULL,
+      createdAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      startedAt TEXT,
+      completedAt TEXT,
+      urlSource TEXT NOT NULL,
+      urlCountPlanned INTEGER NOT NULL DEFAULT 0,
+      urlCountProcessed INTEGER NOT NULL DEFAULT 0,
+      urlCountSucceeded INTEGER NOT NULL DEFAULT 0,
+      urlCountFailed INTEGER NOT NULL DEFAULT 0,
+      maxUrls INTEGER NOT NULL DEFAULT 0,
+      dryRun INTEGER NOT NULL DEFAULT 0,
+      storageProfile TEXT NOT NULL DEFAULT 'targeted_minimal',
+      factsToExtractJson TEXT,
+      storesRawHtml INTEGER NOT NULL DEFAULT 0,
+      storesRenderedHtml INTEGER NOT NULL DEFAULT 0,
+      estimatedBytesPerUrl INTEGER NOT NULL DEFAULT 0,
+      estimatedTotalBytes INTEGER NOT NULL DEFAULT 0,
+      actualStoredBytesEstimate INTEGER NOT NULL DEFAULT 0,
+      closesGapTypesJson TEXT,
+      relatedManualItemIdsJson TEXT,
+      relatedCheckIdsJson TEXT,
+      summaryJson TEXT,
+      warningsJson TEXT,
+      errorsJson TEXT,
+      configJson TEXT,
+      FOREIGN KEY (runId) REFERENCES runs(id),
+      FOREIGN KEY (validationId) REFERENCES validation_reports(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS targeted_evidence_facts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      jobId INTEGER NOT NULL,
+      runId INTEGER NOT NULL,
+      jobType TEXT NOT NULL,
+      url TEXT NOT NULL,
+      normalizedUrl TEXT NOT NULL,
+      finalUrl TEXT,
+      statusCode INTEGER,
+      contentType TEXT,
+      indexability TEXT,
+      factsJson TEXT,
+      error TEXT,
+      storedBytesEstimate INTEGER NOT NULL DEFAULT 0,
+      createdAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (jobId) REFERENCES evidence_jobs(id),
+      FOREIGN KEY (runId) REFERENCES runs(id),
+      UNIQUE(jobId, normalizedUrl, jobType)
+    );
+
     CREATE TABLE IF NOT EXISTS run_logs (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       runId INTEGER NOT NULL,
@@ -644,6 +699,14 @@ export function initDatabase(database = getDb()) {
       ON run_comparisons(baseRunId, compareRunId);
     CREATE INDEX IF NOT EXISTS idx_validation_reports_run
       ON validation_reports(runId, id);
+    CREATE INDEX IF NOT EXISTS idx_evidence_jobs_run
+      ON evidence_jobs(runId, id);
+    CREATE INDEX IF NOT EXISTS idx_evidence_jobs_status
+      ON evidence_jobs(status);
+    CREATE INDEX IF NOT EXISTS idx_targeted_evidence_facts_job
+      ON targeted_evidence_facts(jobId);
+    CREATE INDEX IF NOT EXISTS idx_targeted_evidence_facts_run_type
+      ON targeted_evidence_facts(runId, jobType, normalizedUrl);
   `);
 
   ensureColumns(database, 'pages', [
@@ -863,6 +926,14 @@ export function initDatabase(database = getDb()) {
       ON llm_results(runId, checkId);
     CREATE INDEX IF NOT EXISTS idx_validation_reports_run
       ON validation_reports(runId, id);
+    CREATE INDEX IF NOT EXISTS idx_evidence_jobs_run
+      ON evidence_jobs(runId, id);
+    CREATE INDEX IF NOT EXISTS idx_evidence_jobs_status
+      ON evidence_jobs(status);
+    CREATE INDEX IF NOT EXISTS idx_targeted_evidence_facts_job
+      ON targeted_evidence_facts(jobId);
+    CREATE INDEX IF NOT EXISTS idx_targeted_evidence_facts_run_type
+      ON targeted_evidence_facts(runId, jobType, normalizedUrl);
   `);
 }
 

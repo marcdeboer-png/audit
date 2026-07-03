@@ -18,6 +18,11 @@ import { buildBenchmarkSummary } from '../analysis/benchmarkSummary.js';
 import { getLatestValidationReport } from '../validation/referenceAudit/validationService.js';
 import { buildValidationExportPayload } from '../validation/referenceAudit/validationExportService.js';
 import { buildUnresolvedAuditQueue } from '../validation/unresolved/unresolvedAuditPointService.js';
+import {
+  buildEvidenceJobImpactSummary,
+  getEvidenceJobDetails,
+  listEvidenceJobsForRun
+} from '../evidenceJobs/evidenceJobRunner.js';
 
 export function collectCheckDetailCsv(db, runId, checkResultId) {
   const detail = getCheckDetail(db, runId, checkResultId);
@@ -204,6 +209,11 @@ export function collectFullAuditZip(db, runId, exportTypes) {
       warn('validation/', error);
     }
   }
+  try {
+    addEvidenceJobZipEntries(db, runId, addJson, addText);
+  } catch (error) {
+    warn('evidence-jobs/', error);
+  }
 
   try {
     const reportPath = generateReport(db, runId);
@@ -295,6 +305,7 @@ export function collectFullAuditJson(db, runId, exportTypes) {
       maturity: buildMaturityModel(db, runId),
       benchmarkSummary: benchmarkSummaryForRun(db, runId, run),
       validation: latestValidationReportWithDerivedUnresolved(db, runId),
+      evidenceJobs: evidenceJobsForJson(db, runId),
       samplingSummary: getSamplingSummary(db, runId),
       runConfig: buildRunConfig(run),
       reviewSummary: getReviewSummary(db, runId),
@@ -313,6 +324,32 @@ export function collectFullAuditJson(db, runId, exportTypes) {
       files,
       checkExports
     }, null, 2)
+  };
+}
+
+function addEvidenceJobZipEntries(db, runId, addJson, addText) {
+  const list = listEvidenceJobsForRun(db, runId);
+  if (!list.jobs.length) return;
+  addJson('evidence-jobs/jobs.json', list);
+  addJson('validation/evidence-job-impact.json', buildEvidenceJobImpactSummary(db, runId));
+  for (const job of list.jobs) {
+    const details = getEvidenceJobDetails(db, job.jobId, { limit: 1000, includeCsv: true });
+    addJson(`evidence-jobs/job-${job.jobId}-summary.json`, {
+      ...details,
+      facts: undefined,
+      factsCsv: undefined
+    });
+    addText(`evidence-jobs/job-${job.jobId}-facts.csv`, details.factsCsv || '');
+  }
+}
+
+function evidenceJobsForJson(db, runId) {
+  const list = listEvidenceJobsForRun(db, runId);
+  if (!list.jobs.length) return { runId, jobs: [] };
+  return {
+    ...list,
+    impact: buildEvidenceJobImpactSummary(db, runId),
+    jobs: list.jobs.map((job) => getEvidenceJobDetails(db, job.jobId, { limit: 100 }))
   };
 }
 
