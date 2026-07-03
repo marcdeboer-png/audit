@@ -3,6 +3,11 @@ import path from 'node:path';
 import { csvEscape } from '../../reports/csvExporter.js';
 import { renderStorageRealityMarkdown } from '../../analysis/storageRealityCheck.js';
 import { renderPartialCoverageDiagnosticsMarkdown } from './partialCoverageDiagnostics.js';
+import {
+  renderEvidenceJobPlanMarkdown,
+  renderEvidencePacksMarkdown,
+  renderUnresolvedAuditQueueMarkdown
+} from '../unresolved/unresolvedAuditPointService.js';
 
 export function buildValidationExportPayload(report) {
   const coverageCsv = coverageMatrixCsv(report.coverageMatrix || []);
@@ -15,6 +20,12 @@ export function buildValidationExportPayload(report) {
     'coverage-matrix.json': `${JSON.stringify(report.coverageMatrix || [], null, 2)}\n`,
     'partial-coverage-diagnostics.md': renderPartialCoverageDiagnosticsMarkdown(report.partialCoverageDiagnostics || {}),
     'partial-coverage-diagnostics.json': `${JSON.stringify(report.partialCoverageDiagnostics || {}, null, 2)}\n`,
+    'unresolved-audit-points.md': renderUnresolvedAuditQueueMarkdown(report.unresolvedAuditQueue || {}),
+    'unresolved-audit-points.json': `${JSON.stringify(report.unresolvedAuditQueue || {}, null, 2)}\n`,
+    'evidence-packs.md': renderEvidencePacksMarkdown(report.evidencePacks || report.unresolvedAuditQueue?.evidencePacks || {}),
+    'evidence-packs.json': `${JSON.stringify(report.evidencePacks || report.unresolvedAuditQueue?.evidencePacks || {}, null, 2)}\n`,
+    'evidence-job-plan.md': renderEvidenceJobPlanMarkdown(report.evidenceJobPlan || report.unresolvedAuditQueue?.evidenceJobPlan || {}),
+    'evidence-job-plan.json': `${JSON.stringify(report.evidenceJobPlan || report.unresolvedAuditQueue?.evidenceJobPlan || {}, null, 2)}\n`,
     'reference-import-summary.md': renderReferenceImportSummaryMarkdown(report.referenceImportSummary || report.referenceAudit?.importSummary || {}),
     'reference-import-summary.json': `${JSON.stringify(report.referenceImportSummary || report.referenceAudit?.importSummary || {}, null, 2)}\n`,
     'mapping-confidence-summary.json': `${JSON.stringify(report.mappingConfidenceSummary || {}, null, 2)}\n`,
@@ -126,6 +137,7 @@ export function renderValidationMarkdown(report) {
     `- Estimated coverage: ${summary.coveragePercent ?? 0}%`,
     `- Data basis: ${summary.dataBasisLabel || report.executiveValidationSummary?.sampleNote || 'n/a'}`,
     `- Partial limitations: larger crawl ${summary.partialLimitations?.needsLargerCrawl || 0}, external data ${summary.partialLimitations?.needsExternalData || 0}, human review ${summary.partialLimitations?.needsHumanReview || 0}`,
+    `- Unresolved queue: ${report.unresolvedAuditQueue?.summary?.unresolvedCount || 0} point(s), ${report.evidenceJobPlan?.recommendedJobCount || report.unresolvedAuditQueue?.evidenceJobPlan?.recommendedJobCount || 0} recommended job type(s)`,
     '',
     '## Data Basis',
     '',
@@ -158,6 +170,10 @@ export function renderValidationMarkdown(report) {
     '## Next Automation Steps',
     '',
     ...nextAutomationLines(report.checkRoadmap),
+    '',
+    '## Unresolved Evidence Queue',
+    '',
+    ...unresolvedQueueLines(report.unresolvedAuditQueue),
     '',
     '## Coverage Matrix',
     '',
@@ -207,6 +223,12 @@ function nextAutomationLines(rows = [], limit = 8) {
   return selected.map((row) => `- **${md(row.title)}** (${md(row.roadmapCategory || '')}): ${md(row.suggestedImplementation || '')}`);
 }
 
+function unresolvedQueueLines(queue = {}, limit = 10) {
+  const points = (queue.points || []).slice(0, limit);
+  if (!points.length) return ['- No unresolved evidence queue entries.'];
+  return points.map((point) => `- **${md(point.manualTitle)}** (${md(point.currentCoverageStatus)}): ${md(point.nextBestAction)}; jobs: ${md((point.recommendedJobTypes || []).join(', ') || 'none')}`);
+}
+
 export function renderBacklogMarkdown(backlog = []) {
   if (!backlog.length) return 'No backlog items generated.\n';
   return `${backlog.map((item) => [
@@ -240,6 +262,7 @@ export function renderExecutiveSummaryMarkdown(report) {
     `- Covered in sample: ${validation.coveredInSample || 0}`,
     `- Partial deepening analysed: ${validation.partialDeepening?.analyzedItems || 0}`,
     `- Partial limitations: larger crawl ${validation.partialLimitations?.needsLargerCrawl || 0}, external data ${validation.partialLimitations?.needsExternalData || 0}, human review ${validation.partialLimitations?.needsHumanReview || 0}`,
+    `- Evidence queue: ${summary.unresolvedQueue?.unresolvedCount || 0} unresolved point(s), ${summary.unresolvedQueue?.recommendedJobCount || 0} targeted job type(s)`,
     `- Gaps to close: ${summary.gapsToClose ?? 0}`,
     `- External/review-dependent points: ${summary.externalOrReviewDependent ?? 0}`,
     `- Needs larger crawl: ${validation.needsLargerCrawl || 0}`,
@@ -279,6 +302,21 @@ export function renderChefDemoSummaryMarkdown(summary = {}) {
       `- Covered in sample: ${summary.partialDeepening.coveredInSample || 0}`,
       `- Still partial: ${summary.partialDeepening.currentPartiallyCovered || 0}`
     );
+  }
+  if (summary.unresolvedQueue) {
+    lines.push(
+      '',
+      '## Evidence Queue',
+      '',
+      `- Unresolved points: ${summary.unresolvedQueue.unresolvedCount || 0}`,
+      `- Targeted crawl candidates: ${summary.unresolvedQueue.needsTargetedCrawl || 0}`,
+      `- External-data candidates: ${summary.unresolvedQueue.needsExternalData || 0}`,
+      `- Review candidates: ${summary.unresolvedQueue.needsHumanReview || 0}`,
+      `- Recommended job types: ${summary.unresolvedQueue.recommendedJobCount || 0}`
+    );
+    for (const job of summary.unresolvedQueue.topJobTypes || []) {
+      lines.push(`- ${job.jobType}: ${job.pointCount || 0} point(s), ${job.riskLevel || 'unknown'} risk, 50k ${job.estimated50kHuman || 'n/a'}`);
+    }
   }
   lines.push('', '## Top Tool Extras', '');
   const extras = summary.topToolExtras || [];
@@ -416,6 +454,8 @@ export function renderValidationHtml(report) {
       ${metricCard('LLM Review', summary.needsLlmReview)}
       ${metricCard('Tool Extras', summary.toolExtras)}
       ${metricCard('False Positives', summary.falsePositiveCandidates)}
+      ${metricCard('Unresolved Queue', report.unresolvedAuditQueue?.summary?.unresolvedCount)}
+      ${metricCard('Evidence Jobs', report.evidenceJobPlan?.recommendedJobCount || report.unresolvedAuditQueue?.evidenceJobPlan?.recommendedJobCount)}
       ${metricCard('Coverage', `${summary.coveragePercent ?? 0}%`)}
     </section>
     <h2>Executive Summary</h2>
@@ -432,6 +472,8 @@ export function renderValidationHtml(report) {
     ${htmlList(topToolExtraLines(report.unmatchedToolFindings))}
     <h2>Next Automation Steps</h2>
     ${htmlList(nextAutomationLines(report.checkRoadmap))}
+    <h2>Unresolved Evidence Queue</h2>
+    ${htmlList(unresolvedQueueLines(report.unresolvedAuditQueue))}
     <h2>Coverage Matrix</h2>
     <table>
       <thead><tr><th>Manual Item</th><th>Status</th><th>Confidence</th><th>Matched Check</th><th>Partial Reason</th><th>Match Reasons</th><th>Missing Reasons</th><th>Rationale</th></tr></thead>

@@ -59,6 +59,7 @@ import { importScreamingFrogAudit } from '../importers/screamingFrog/screamingFr
 import { buildBenchmarkSummary } from '../analysis/benchmarkSummary.js';
 import { getLatestValidationReport, validateRunAgainstReference } from '../validation/referenceAudit/validationService.js';
 import { buildValidationExportPayload } from '../validation/referenceAudit/validationExportService.js';
+import { buildUnresolvedAuditQueue } from '../validation/unresolved/unresolvedAuditPointService.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -299,6 +300,24 @@ app.get('/api/audits/:runId/validation/export/:file', (req, res) => {
   const run = getRunWithProject(db, Number(req.params.runId));
   if (!run) return res.status(404).json({ error: 'Run not found' });
   return sendValidationExport(res, run.id, req.params.file);
+});
+
+app.get('/api/audits/:runId/unresolved', (req, res) => {
+  const payload = latestUnresolvedPayload(Number(req.params.runId));
+  if (!payload) return res.status(404).json({ error: 'Validation report not found for run' });
+  res.json(payload.queue);
+});
+
+app.get('/api/audits/:runId/evidence-packs', (req, res) => {
+  const payload = latestUnresolvedPayload(Number(req.params.runId));
+  if (!payload) return res.status(404).json({ error: 'Validation report not found for run' });
+  res.json(payload.evidencePacks);
+});
+
+app.get('/api/audits/:runId/evidence-job-plan', (req, res) => {
+  const payload = latestUnresolvedPayload(Number(req.params.runId));
+  if (!payload) return res.status(404).json({ error: 'Validation report not found for run' });
+  res.json(payload.evidenceJobPlan);
 });
 
 app.get('/api/audits/:runId/samples', (req, res) => {
@@ -942,7 +961,7 @@ function sendComparisonCsv(res, comparison, requestedFile) {
 function sendValidationExport(res, runId, requestedFile) {
   const validation = getLatestValidationReport(db, runId);
   if (!validation?.report) return res.status(404).json({ error: 'Validation report not found for run' });
-  const files = buildValidationExportPayload(validation.report);
+  const files = buildValidationExportPayload(withDerivedUnresolved(validation.report));
   const requested = String(requestedFile || '');
   const content = files[requested];
   if (content === undefined) return res.status(404).json({ error: 'Validation export not found' });
@@ -964,11 +983,43 @@ function isValidationExportFile(file) {
     'validation-report.md',
     'coverage-matrix.csv',
     'coverage-matrix.json',
+    'partial-coverage-diagnostics.md',
+    'partial-coverage-diagnostics.json',
+    'unresolved-audit-points.md',
+    'unresolved-audit-points.json',
+    'evidence-packs.md',
+    'evidence-packs.json',
+    'evidence-job-plan.md',
+    'evidence-job-plan.json',
     'tool-gap-backlog.md',
     'tool-gap-backlog.json',
     'validation-summary.json',
     'benchmark-summary.json'
   ].includes(String(file || ''));
+}
+
+function latestUnresolvedPayload(runId) {
+  const run = getRunWithProject(db, runId);
+  if (!run) return null;
+  const validation = getLatestValidationReport(db, run.id);
+  if (!validation?.report) return null;
+  const report = withDerivedUnresolved(validation.report);
+  return {
+    queue: report.unresolvedAuditQueue,
+    evidencePacks: report.evidencePacks || report.unresolvedAuditQueue?.evidencePacks,
+    evidenceJobPlan: report.evidenceJobPlan || report.unresolvedAuditQueue?.evidenceJobPlan
+  };
+}
+
+function withDerivedUnresolved(report = {}) {
+  if (report.unresolvedAuditQueue && report.evidencePacks && report.evidenceJobPlan) return report;
+  const queue = buildUnresolvedAuditQueue(report);
+  return {
+    ...report,
+    unresolvedAuditQueue: report.unresolvedAuditQueue || queue,
+    evidencePacks: report.evidencePacks || queue.evidencePacks,
+    evidenceJobPlan: report.evidenceJobPlan || queue.evidenceJobPlan
+  };
 }
 
 function httpError(statusCode, message) {

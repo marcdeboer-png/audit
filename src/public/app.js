@@ -65,6 +65,7 @@ async function route() {
   }
   if ((view === 'maturity' || view === 'reifegrad') && id) return renderMaturity(Number(id));
   if (view === 'validation' && id) return renderValidation(Number(id));
+  if ((view === 'review-queue' || view === 'evidence-queue') && id) return renderReviewQueue(Number(id));
   if (view === 'schedules') return renderSchedules();
   return renderHomeV2();
 }
@@ -1333,6 +1334,7 @@ async function renderResults(runId, options = {}) {
           <div class="actions">
             <a class="button" href="#maturity/${runId}">Reifegrad ansehen</a>
             <a class="button" href="#validation/${runId}">Enterprise Validation</a>
+            <a class="button" href="#review-queue/${runId}">Evidence Queue</a>
             <a class="button primary" data-export-download href="/api/audits/${runId}/export/full.zip" download="audit-${runId}-full-audit.zip">Full Audit Export ZIP</a>
             <a class="button" data-export-download href="/api/audits/${runId}/export/full.json" download="audit-${runId}-full-audit.json">Full Audit JSON</a>
           </div>
@@ -1627,6 +1629,7 @@ async function renderValidation(runId) {
           <div class="actions">
             <a class="button" href="#results/${runId}">Audit Workspace</a>
             <a class="button" href="#maturity/${runId}">Reifegrad</a>
+            <a class="button" href="#review-queue/${runId}">Evidence Queue</a>
           </div>
         </div>
         <form id="validation-form" class="validation-upload">
@@ -1697,6 +1700,9 @@ function renderValidationReport(report) {
         <a class="button" href="/api/audits/${report.runId}/validation/export/coverage-matrix.csv">Matrix CSV</a>
         <a class="button" href="/api/audits/${report.runId}/validation/export/coverage-matrix.json">Matrix JSON</a>
         <a class="button" href="/api/audits/${report.runId}/validation/export/partial-coverage-diagnostics.md">Partial Diagnostics</a>
+        <a class="button" href="/api/audits/${report.runId}/validation/export/unresolved-audit-points.md">Unresolved</a>
+        <a class="button" href="/api/audits/${report.runId}/validation/export/evidence-packs.md">Evidence Packs</a>
+        <a class="button" href="/api/audits/${report.runId}/validation/export/evidence-job-plan.md">Job Plan</a>
         <a class="button" href="/api/audits/${report.runId}/validation/export/false-negatives.md">False Negatives</a>
         <a class="button" href="/api/audits/${report.runId}/validation/export/false-positives.md">False Positives</a>
         <a class="button" href="/api/audits/${report.runId}/validation/export/tool-gap-backlog.md">Backlog</a>
@@ -1802,6 +1808,132 @@ function renderValidationRows(report, filter) {
 
 function validationFilterButton(value, label) {
   return `<button class="quick-filter${value ? '' : ' active'}" data-validation-filter="${escapeHtml(value)}" type="button">${escapeHtml(label)}</button>`;
+}
+
+async function renderReviewQueue(runId) {
+  currentRunId = runId;
+  app.innerHTML = `
+    <section class="validation-page review-queue-page">
+      <section class="panel">
+        <div class="actions" style="justify-content: space-between;">
+          <div>
+            <div class="eyebrow">Evidence Queue</div>
+            <h2>Unresolved Audit Points · Run ${runId}</h2>
+            <p class="muted">Arbeitsliste fuer Partial-, Sample-, External-Data- und Human-Review-Limits.</p>
+          </div>
+          <div class="actions">
+            <a class="button" href="#validation/${runId}">Validation</a>
+            <a class="button" href="#results/${runId}">Audit Workspace</a>
+            <a class="button" href="#maturity/${runId}">Reifegrad</a>
+          </div>
+        </div>
+      </section>
+      <section id="review-queue-panel" class="panel">
+        <div class="empty">Lade Evidence Queue...</div>
+      </section>
+    </section>
+  `;
+  try {
+    const queue = await fetchJson(`/api/audits/${runId}/unresolved`);
+    renderReviewQueueReport(runId, queue);
+  } catch (error) {
+    document.querySelector('#review-queue-panel').innerHTML = `<div class="empty">${escapeHtml(error.message)}</div>`;
+  }
+}
+
+function renderReviewQueueReport(runId, queue) {
+  const panel = document.querySelector('#review-queue-panel');
+  if (!panel) return;
+  const summary = queue.summary || {};
+  const plan = queue.evidenceJobPlan || {};
+  panel.innerHTML = `
+    <div class="actions" style="justify-content: space-between;">
+      <h3>Evidence Queue Summary</h3>
+      <div class="actions validation-export-links">
+        <a class="button" href="/api/audits/${runId}/validation/export/unresolved-audit-points.md">Unresolved MD</a>
+        <a class="button" href="/api/audits/${runId}/validation/export/unresolved-audit-points.json">Unresolved JSON</a>
+        <a class="button" href="/api/audits/${runId}/validation/export/evidence-packs.md">Evidence Packs</a>
+        <a class="button" href="/api/audits/${runId}/validation/export/evidence-job-plan.md">Job Plan</a>
+      </div>
+    </div>
+    <div class="grid metrics validation-metrics">
+      ${metric('Unresolved', summary.unresolvedCount || 0)}
+      ${metric('Covered Sample', summary.coveredInSample || 0)}
+      ${metric('Partial', summary.partiallyCovered || 0)}
+      ${metric('Targeted Crawl', summary.needsTargetedCrawl || 0)}
+      ${metric('External Data', summary.needsExternalData || 0)}
+      ${metric('Human Review', summary.needsHumanReview || 0)}
+      ${metric('High Priority', summary.highPriority || 0)}
+      ${metric('Job Types', plan.recommendedJobCount || 0)}
+      ${score('Coverage', summary.coveragePercent ?? null)}
+    </div>
+    <div class="validation-filters actions">
+      ${reviewQueueFilterButton('', 'Alle')}
+      ${reviewQueueFilterButton('targeted_crawl', 'Targeted Crawl')}
+      ${reviewQueueFilterButton('external_data', 'External Data')}
+      ${reviewQueueFilterButton('human_review', 'Human Review')}
+      ${reviewQueueFilterButton('covered_in_sample', 'Covered Sample')}
+      ${reviewQueueFilterButton('partially_covered', 'Partial')}
+      ${reviewQueueFilterButton('high_impact', 'High Impact')}
+    </div>
+    <div class="table-scroll">
+      <table class="validation-matrix">
+        <thead>
+          <tr><th>Audit Point</th><th>Status</th><th>Priority</th><th>Primary Gap</th><th>Jobs</th><th>Storage</th><th>Next Step</th><th>Evidence</th></tr>
+        </thead>
+        <tbody id="review-queue-body"></tbody>
+      </table>
+    </div>
+  `;
+  for (const button of panel.querySelectorAll('[data-review-filter]')) {
+    button.addEventListener('click', () => {
+      panel.querySelectorAll('[data-review-filter]').forEach((item) => item.classList.remove('active'));
+      button.classList.add('active');
+      renderReviewQueueRows(queue, button.getAttribute('data-review-filter'));
+    });
+  }
+  renderReviewQueueRows(queue, '');
+}
+
+function renderReviewQueueRows(queue, filter) {
+  const body = document.querySelector('#review-queue-body');
+  if (!body) return;
+  const rows = (queue.points || []).filter((point) => {
+    if (!filter) return true;
+    if (filter === 'targeted_crawl') return point.canBeClosedByTargetedCrawl;
+    if (filter === 'external_data') return point.canBeClosedByExternalImport;
+    if (filter === 'human_review') return point.canBeClosedByHumanReview;
+    if (filter === 'covered_in_sample') return point.currentCoverageStatus === 'covered_in_sample';
+    if (filter === 'partially_covered') return point.currentCoverageStatus === 'partially_covered';
+    if (filter === 'high_impact') return point.priority === 'High' || point.riskIfIgnored === 'high';
+    return true;
+  });
+  if (!rows.length) {
+    body.innerHTML = '<tr><td colspan="8" class="muted">Keine Einträge für diesen Filter.</td></tr>';
+    return;
+  }
+  body.innerHTML = rows.map((point) => {
+    const firstJob = point.recommendedJobs?.[0];
+    const storage = firstJob?.storageEstimate
+      ? `${firstJob.storageEstimate.estimated50kHuman} / 50k · ${firstJob.storageEstimate.riskLevel}`
+      : 'n/a';
+    return `
+      <tr data-coverage-status="${escapeHtml(point.currentCoverageStatus)}">
+        <td>${escapeHtml(point.manualTitle)}</td>
+        <td><span class="status ${escapeHtml(point.currentCoverageStatus)}">${escapeHtml(point.currentCoverageStatus)}</span></td>
+        <td>${escapeHtml(point.priority || '')}</td>
+        <td>${escapeHtml(point.primaryGapType || '')}</td>
+        <td>${escapeHtml((point.recommendedJobTypes || []).join(', ') || 'none')}</td>
+        <td>${escapeHtml(storage)}</td>
+        <td>${escapeHtml(point.nextBestAction || '')}</td>
+        <td>${escapeHtml((point.missingReasons || []).join(', ') || point.currentLimitation || '')}</td>
+      </tr>
+    `;
+  }).join('');
+}
+
+function reviewQueueFilterButton(value, label) {
+  return `<button class="quick-filter${value ? '' : ' active'}" data-review-filter="${escapeHtml(value)}" type="button">${escapeHtml(label)}</button>`;
 }
 
 function renderMaturityPage(maturity) {

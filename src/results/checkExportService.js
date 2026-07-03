@@ -17,6 +17,7 @@ import { buildEnterpriseSummary } from '../analysis/enterpriseSummary.js';
 import { buildBenchmarkSummary } from '../analysis/benchmarkSummary.js';
 import { getLatestValidationReport } from '../validation/referenceAudit/validationService.js';
 import { buildValidationExportPayload } from '../validation/referenceAudit/validationExportService.js';
+import { buildUnresolvedAuditQueue } from '../validation/unresolved/unresolvedAuditPointService.js';
 
 export function collectCheckDetailCsv(db, runId, checkResultId) {
   const detail = getCheckDetail(db, runId, checkResultId);
@@ -195,7 +196,7 @@ export function collectFullAuditZip(db, runId, exportTypes) {
   const validation = getLatestValidationReport(db, runId);
   if (validation?.report) {
     try {
-      const validationFiles = buildValidationExportPayload(validation.report);
+      const validationFiles = buildValidationExportPayload(withDerivedUnresolved(validation.report));
       for (const [filename, content] of Object.entries(validationFiles)) {
         addText(`validation/${filename}`, content);
       }
@@ -228,6 +229,17 @@ export function collectFullAuditZip(db, runId, exportTypes) {
     filename: fullAuditZipFilename(runId),
     buffer: createZipBuffer(entries),
     warnings
+  };
+}
+
+function withDerivedUnresolved(report = {}) {
+  if (report.unresolvedAuditQueue && report.evidencePacks && report.evidenceJobPlan) return report;
+  const queue = buildUnresolvedAuditQueue(report);
+  return {
+    ...report,
+    unresolvedAuditQueue: report.unresolvedAuditQueue || queue,
+    evidencePacks: report.evidencePacks || queue.evidencePacks,
+    evidenceJobPlan: report.evidenceJobPlan || queue.evidenceJobPlan
   };
 }
 
@@ -282,7 +294,7 @@ export function collectFullAuditJson(db, runId, exportTypes) {
       enterpriseSummary: buildEnterpriseSummary(db, runId, run),
       maturity: buildMaturityModel(db, runId),
       benchmarkSummary: benchmarkSummaryForRun(db, runId, run),
-      validation: getLatestValidationReport(db, runId)?.report || null,
+      validation: latestValidationReportWithDerivedUnresolved(db, runId),
       samplingSummary: getSamplingSummary(db, runId),
       runConfig: buildRunConfig(run),
       reviewSummary: getReviewSummary(db, runId),
@@ -302,6 +314,11 @@ export function collectFullAuditJson(db, runId, exportTypes) {
       checkExports
     }, null, 2)
   };
+}
+
+function latestValidationReportWithDerivedUnresolved(db, runId) {
+  const validation = getLatestValidationReport(db, runId);
+  return validation?.report ? withDerivedUnresolved(validation.report) : null;
 }
 
 export function fullAuditZipFilename(runId) {

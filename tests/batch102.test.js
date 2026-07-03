@@ -216,6 +216,8 @@ test('Batch 10.2 validation exports include executive, false-positive/negative, 
   assert.ok(zipEntries['validation/executive-validation-summary.md']);
   assert.ok(zipEntries['validation/storage-reality-check.json']);
   assert.ok(zipEntries['validation/check-roadmap.md']);
+  assert.ok(zipEntries['validation/evidence-packs.json']);
+  assert.ok(zipEntries['validation/evidence-job-plan.md']);
   db.close();
   fs.rmSync(outDir, { recursive: true, force: true });
 });

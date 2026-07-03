@@ -11,6 +11,7 @@ import { classifyManualItemCoverage, classifyToolExtraFindings } from './coverag
 import { buildPartialCoverageDiagnostics } from './partialCoverageDiagnostics.js';
 import { buildGapBacklog, gapAnalysisFromCoverage } from './gapClassifier.js';
 import { writeValidationExports } from './validationExportService.js';
+import { buildUnresolvedAuditQueue } from '../unresolved/unresolvedAuditPointService.js';
 
 export async function validateRunAgainstReference(db, input = {}) {
   const runId = Number(input.runId);
@@ -59,12 +60,19 @@ export async function validateRunAgainstReference(db, input = {}) {
     falsePositiveCandidates,
     partialCoverageDiagnostics
   });
+  const unresolvedAuditQueue = buildUnresolvedAuditQueue({
+    runId,
+    run: summarizeRun(run),
+    validationSummary,
+    coverageMatrix
+  });
   const executiveValidationSummary = buildExecutiveValidationSummary(validationSummary, {
     falseNegativeCandidates,
     falsePositiveCandidates,
     nextCheckBacklog,
     storageRealityCheck,
-    partialCoverageDiagnostics
+    partialCoverageDiagnostics,
+    unresolvedAuditQueue
   });
   const report = {
     validationVersion: 2,
@@ -84,6 +92,9 @@ export async function validateRunAgainstReference(db, input = {}) {
     referenceImportSummary: referenceAudit.importSummary,
     mappingConfidenceSummary,
     partialCoverageDiagnostics,
+    unresolvedAuditQueue,
+    evidencePacks: unresolvedAuditQueue.evidencePacks,
+    evidenceJobPlan: unresolvedAuditQueue.evidenceJobPlan,
     coverageMatrix,
     manualItems: referenceAudit.items,
     toolFindings: toolFindings.map(compactToolFinding),
@@ -98,7 +109,7 @@ export async function validateRunAgainstReference(db, input = {}) {
     checkRoadmap,
     scoreCalibrationNotes,
     executiveValidationSummary,
-    chefDemoSummary: buildChefDemoSummary(validationSummary, toolExtras, falseNegativeCandidates, partialCoverageDiagnostics),
+    chefDemoSummary: buildChefDemoSummary(validationSummary, toolExtras, falseNegativeCandidates, partialCoverageDiagnostics, unresolvedAuditQueue),
     benchmarkSummary,
     storageRealityCheck
   };
@@ -425,6 +436,13 @@ function buildExecutiveValidationSummary(summary, context = {}) {
     falsePositiveCandidates: context.falsePositiveCandidates?.length || 0,
     coveredInSample: summary.coveredInSample || 0,
     partialLimitations: summary.partialLimitations || {},
+    unresolvedQueue: context.unresolvedAuditQueue ? {
+      unresolvedCount: context.unresolvedAuditQueue.summary?.unresolvedCount || 0,
+      needsTargetedCrawl: context.unresolvedAuditQueue.summary?.needsTargetedCrawl || 0,
+      needsExternalData: context.unresolvedAuditQueue.summary?.needsExternalData || 0,
+      needsHumanReview: context.unresolvedAuditQueue.summary?.needsHumanReview || 0,
+      recommendedJobCount: context.unresolvedAuditQueue.evidenceJobPlan?.recommendedJobCount || 0
+    } : null,
     partialDeepening: context.partialCoverageDiagnostics ? {
       analyzedItems: context.partialCoverageDiagnostics.analyzedItems || 0,
       currentPartiallyCovered: context.partialCoverageDiagnostics.currentPartiallyCovered || 0,
@@ -449,7 +467,7 @@ function dataBasisLabel(run = {}) {
   return sourceType;
 }
 
-function buildChefDemoSummary(summary, toolExtras = [], falseNegativeCandidates = [], partialDiagnostics = {}) {
+function buildChefDemoSummary(summary, toolExtras = [], falseNegativeCandidates = [], partialDiagnostics = {}, unresolvedQueue = {}) {
   const topExtras = toolExtras
     .filter((row) => row.extraClassification === 'likely_relevant')
     .slice(0, 10)
@@ -467,6 +485,8 @@ function buildChefDemoSummary(summary, toolExtras = [], falseNegativeCandidates 
       `${summary.covered || 0} manual point(s) fully covered, ${summary.coveredInSample || 0} covered in the current sample, ${summary.partiallyCovered || 0} partially covered.`,
       `${summary.needsExternalData || 0} point(s) need external data; ${summary.needsLargerCrawl || 0} need a larger crawl; ${summary.needsHumanReview || 0} need human review; ${summary.needsLlmReview || 0} need optional LLM review.`,
       `Remaining partial/sample limitations: ${summary.partialLimitations?.needsLargerCrawl || 0} need larger crawl/full import, ${summary.partialLimitations?.needsExternalData || 0} need external data, ${summary.partialLimitations?.needsHumanReview || 0} need human review.`,
+      `Unresolved queue organises ${unresolvedQueue.summary?.unresolvedCount || 0} point(s): ${unresolvedQueue.summary?.needsTargetedCrawl || 0} targeted crawl candidates, ${unresolvedQueue.summary?.needsExternalData || 0} external-data candidates, ${unresolvedQueue.summary?.needsHumanReview || 0} review candidates.`,
+      `Evidence planner proposes ${unresolvedQueue.evidenceJobPlan?.recommendedJobCount || 0} targeted job type(s) with explicit storage estimates instead of a blind full crawl.`,
       `Partial deepening analysed ${partialDiagnostics.analyzedItems || 0} item(s): ${partialDiagnostics.coveredInSample || 0} sample-covered, ${partialDiagnostics.currentPartiallyCovered || 0} still partial with explicit reasons.`,
       `${falseNegativeCandidates.length} likely false-negative/manual-gap candidate(s) should drive the next implementation batch.`,
       `${topExtras.length} high-signal tool extra(s) can demonstrate value beyond the manual audit after review.`
@@ -478,6 +498,19 @@ function buildChefDemoSummary(summary, toolExtras = [], falseNegativeCandidates 
       coveredInSample: partialDiagnostics.coveredInSample || 0,
       upgradeEligible: partialDiagnostics.upgradeEligible || 0,
       byReason: partialDiagnostics.byReason || {}
+    },
+    unresolvedQueue: {
+      unresolvedCount: unresolvedQueue.summary?.unresolvedCount || 0,
+      needsTargetedCrawl: unresolvedQueue.summary?.needsTargetedCrawl || 0,
+      needsExternalData: unresolvedQueue.summary?.needsExternalData || 0,
+      needsHumanReview: unresolvedQueue.summary?.needsHumanReview || 0,
+      recommendedJobCount: unresolvedQueue.evidenceJobPlan?.recommendedJobCount || 0,
+      topJobTypes: (unresolvedQueue.evidenceJobPlan?.jobs || []).slice(0, 8).map((job) => ({
+        jobType: job.jobType,
+        pointCount: job.pointCount,
+        riskLevel: job.storageEstimate?.riskLevel,
+        estimated50kHuman: job.storageEstimate?.estimated50kHuman
+      }))
     }
   };
 }
