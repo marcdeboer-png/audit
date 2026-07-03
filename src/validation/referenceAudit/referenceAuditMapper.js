@@ -254,6 +254,15 @@ function refineMatchedRules(rules, haystack) {
   if (hasRule('cache-cdn') && !/ai search|answerability|\bgeo\b|generative engine/.test(haystack)) {
     output = output.filter((mappingRule) => mappingRule.id !== 'geo-quality');
   }
+  if (hasRule('security-headers') && !/e-?e-?a-?t|entity|brand|author|about|kontakt|contact|impressum|datenschutz|quellenhinweis|source link/.test(haystack)) {
+    output = output.filter((mappingRule) => !['trust-entity', 'geo-quality'].includes(mappingRule.id));
+  }
+  if ((hasRule('llms') || hasRule('ai-bots')) && !/e-?e-?a-?t|trust|entity|brand|author|helpful|content quality|search intent|answerability|answer.?fähig/.test(haystack)) {
+    output = output.filter((mappingRule) => !['trust-entity', 'geo-quality'].includes(mappingRule.id));
+  }
+  if (hasRule('robots-sitemap-pagination') && !/e-?e-?a-?t|trust|entity|brand|author|about|kontakt|contact|impressum|datenschutz|answerability|answer.?fähig/.test(haystack)) {
+    output = output.filter((mappingRule) => !['trust-entity', 'geo-quality'].includes(mappingRule.id));
+  }
   return output;
 }
 

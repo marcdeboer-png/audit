@@ -1696,6 +1696,7 @@ function renderValidationReport(report) {
         <a class="button" href="/api/audits/${report.runId}/validation/export/validation-report.md">MD</a>
         <a class="button" href="/api/audits/${report.runId}/validation/export/coverage-matrix.csv">Matrix CSV</a>
         <a class="button" href="/api/audits/${report.runId}/validation/export/coverage-matrix.json">Matrix JSON</a>
+        <a class="button" href="/api/audits/${report.runId}/validation/export/partial-coverage-diagnostics.md">Partial Diagnostics</a>
         <a class="button" href="/api/audits/${report.runId}/validation/export/false-negatives.md">False Negatives</a>
         <a class="button" href="/api/audits/${report.runId}/validation/export/false-positives.md">False Positives</a>
         <a class="button" href="/api/audits/${report.runId}/validation/export/tool-gap-backlog.md">Backlog</a>
@@ -1706,12 +1707,16 @@ function renderValidationReport(report) {
     <div class="grid metrics validation-metrics">
       ${metric('Manual Items', summary.manualItemCount || 0)}
       ${metric('Covered', summary.covered || 0)}
+      ${metric('Covered Sample', summary.coveredInSample || 0)}
       ${metric('Partial', summary.partiallyCovered || 0)}
       ${metric('Not Covered', (summary.notCovered || 0) + (summary.falseNegativeCandidates || 0))}
       ${metric('External Data', summary.needsExternalData || 0)}
       ${metric('Larger Crawl', summary.needsLargerCrawl || 0)}
       ${metric('Human Review', summary.needsHumanReview || 0)}
       ${metric('LLM Review', summary.needsLlmReview || 0)}
+      ${metric('Partial Sample', summary.partialLimitations?.needsLargerCrawl || 0)}
+      ${metric('Partial Data', summary.partialLimitations?.needsExternalData || 0)}
+      ${metric('Partial Review', summary.partialLimitations?.needsHumanReview || 0)}
       ${metric('Tool Extras', summary.toolExtras || 0)}
       ${metric('False Positives', summary.falsePositiveCandidates || 0)}
       ${score('Coverage', summary.coveragePercent ?? 0)}
@@ -1719,7 +1724,14 @@ function renderValidationReport(report) {
     <div class="validation-filters actions">
       ${validationFilterButton('', 'Alle')}
       ${validationFilterButton('covered', 'Covered')}
+      ${validationFilterButton('covered_in_sample', 'Covered Sample')}
       ${validationFilterButton('partially_covered', 'Partial')}
+      ${validationFilterButton('partial:sample_too_small', 'Partial: Sample')}
+      ${validationFilterButton('partial:evidence_too_weak', 'Partial: Evidence')}
+      ${validationFilterButton('partial:human_review_needed', 'Partial: Human')}
+      ${validationFilterButton('partial:missing_data_source', 'Partial: Data')}
+      ${validationFilterButton('partial:already_covered_but_mapping_too_strict', 'Partial: Mapping')}
+      ${validationFilterButton('upgrade:eligible', 'Upgrade eligible')}
       ${validationFilterButton('false_negative_candidate', 'False Negatives')}
       ${validationFilterButton('needs_external_data', 'External Data')}
       ${validationFilterButton('needs_larger_crawl', 'Larger Crawl')}
@@ -1731,7 +1743,7 @@ function renderValidationReport(report) {
     <div class="table-scroll">
       <table class="validation-matrix">
         <thead>
-          <tr><th>Manual Item</th><th>Status</th><th>Confidence</th><th>Matched Check</th><th>Rationale</th></tr>
+          <tr><th>Manual Item</th><th>Status</th><th>Confidence</th><th>Matched Checks</th><th>Partial Reason</th><th>Match Reasons</th><th>Missing Reasons</th><th>Rationale</th></tr>
         </thead>
         <tbody id="validation-matrix-body"></tbody>
       </table>
@@ -1763,10 +1775,15 @@ function renderValidationRows(report, filter) {
   const rows = [...manualRows, ...extraRows].filter((row) => {
     if (!filter) return true;
     if (filter.startsWith('extra:')) return row.extraClassification === filter.replace('extra:', '');
+    if (filter.startsWith('partial:')) {
+      const reason = filter.replace('partial:', '');
+      return row.coverageStatus === 'partially_covered' && (row.partialReason === reason || (row.missingReasons || []).includes(reason));
+    }
+    if (filter === 'upgrade:eligible') return Boolean(row.upgradeEligible || row.sampleUpgradeEligible);
     return row.coverageStatus === filter;
   });
   if (!rows.length) {
-    body.innerHTML = '<tr><td colspan="5" class="muted">Keine Einträge für diesen Filter.</td></tr>';
+    body.innerHTML = '<tr><td colspan="8" class="muted">Keine Einträge für diesen Filter.</td></tr>';
     return;
   }
   body.innerHTML = rows.map((row) => `
@@ -1774,7 +1791,10 @@ function renderValidationRows(report, filter) {
       <td>${escapeHtml(row.manualItem?.title || row.manualItemId || '')}</td>
       <td><span class="status ${escapeHtml(row.coverageStatus)}">${escapeHtml(row.coverageStatus)}</span></td>
       <td>${escapeHtml(row.confidence || '')}</td>
-      <td><code>${escapeHtml(row.matchedCheckId || '')}</code></td>
+      <td><code>${escapeHtml((row.matchedCheckIds || [row.matchedCheckId]).filter(Boolean).join(', '))}</code></td>
+      <td>${escapeHtml(row.partialReason || '')}</td>
+      <td>${escapeHtml((row.matchReasons || []).join(', '))}</td>
+      <td>${escapeHtml((row.missingReasons || []).join(', '))}</td>
       <td>${escapeHtml(row.rationale || '')}</td>
     </tr>
   `).join('');

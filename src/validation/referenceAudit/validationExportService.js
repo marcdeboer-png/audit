@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { csvEscape } from '../../reports/csvExporter.js';
 import { renderStorageRealityMarkdown } from '../../analysis/storageRealityCheck.js';
+import { renderPartialCoverageDiagnosticsMarkdown } from './partialCoverageDiagnostics.js';
 
 export function buildValidationExportPayload(report) {
   const coverageCsv = coverageMatrixCsv(report.coverageMatrix || []);
@@ -12,6 +13,8 @@ export function buildValidationExportPayload(report) {
     'validation-report.md': renderValidationMarkdown(report),
     'coverage-matrix.csv': coverageCsv,
     'coverage-matrix.json': `${JSON.stringify(report.coverageMatrix || [], null, 2)}\n`,
+    'partial-coverage-diagnostics.md': renderPartialCoverageDiagnosticsMarkdown(report.partialCoverageDiagnostics || {}),
+    'partial-coverage-diagnostics.json': `${JSON.stringify(report.partialCoverageDiagnostics || {}, null, 2)}\n`,
     'reference-import-summary.md': renderReferenceImportSummaryMarkdown(report.referenceImportSummary || report.referenceAudit?.importSummary || {}),
     'reference-import-summary.json': `${JSON.stringify(report.referenceImportSummary || report.referenceAudit?.importSummary || {}, null, 2)}\n`,
     'mapping-confidence-summary.json': `${JSON.stringify(report.mappingConfidenceSummary || {}, null, 2)}\n`,
@@ -53,9 +56,18 @@ export function coverageMatrixCsv(rows = []) {
     'coverageStatus',
     'confidence',
     'matchedCheckId',
+    'matchedCheckIds',
     'matchScore',
+    'evidenceMatchScore',
     'urlOverlap',
     'affectedCount',
+    'affectedInSample',
+    'partialReason',
+    'matchReasons',
+    'missingReasons',
+    'upgradeEligible',
+    'sampleBased',
+    'compositeRelatedFindingCount',
     'expectedCheckIds',
     'requiredData',
     'rationale'
@@ -71,9 +83,18 @@ export function coverageMatrixCsv(rows = []) {
       coverageStatus: row.coverageStatus,
       confidence: row.confidence,
       matchedCheckId: row.matchedCheckId || '',
+      matchedCheckIds: (row.matchedCheckIds || []).join('|'),
       matchScore: row.matchScore || 0,
+      evidenceMatchScore: row.evidenceMatchScore || row.matchScore || 0,
       urlOverlap: row.urlOverlap || 0,
       affectedCount: item.affectedCount ?? '',
+      affectedInSample: row.affectedInSample ?? '',
+      partialReason: row.partialReason || '',
+      matchReasons: (row.matchReasons || []).join('|'),
+      missingReasons: (row.missingReasons || []).join('|'),
+      upgradeEligible: row.upgradeEligible ? 'true' : 'false',
+      sampleBased: row.sampleBased ? 'true' : 'false',
+      compositeRelatedFindingCount: row.compositeCoverage?.relatedFindingCount || 0,
       expectedCheckIds: (row.expectedCheckIds || []).join('|'),
       requiredData: (row.requiredData || []).join('|'),
       rationale: row.rationale || ''
@@ -94,6 +115,7 @@ export function renderValidationMarkdown(report) {
     '',
     `- Manual audit points: ${summary.manualItemCount || 0}`,
     `- Covered: ${summary.covered || 0}`,
+    `- Covered in sample: ${summary.coveredInSample || 0}`,
     `- Partially covered: ${summary.partiallyCovered || 0}`,
     `- Not covered: ${summary.notCovered || 0}`,
     `- Needs external data: ${summary.needsExternalData || 0}`,
@@ -103,6 +125,7 @@ export function renderValidationMarkdown(report) {
     `- Tool extras: ${summary.toolExtras || 0}`,
     `- Estimated coverage: ${summary.coveragePercent ?? 0}%`,
     `- Data basis: ${summary.dataBasisLabel || report.executiveValidationSummary?.sampleNote || 'n/a'}`,
+    `- Partial limitations: larger crawl ${summary.partialLimitations?.needsLargerCrawl || 0}, external data ${summary.partialLimitations?.needsExternalData || 0}, human review ${summary.partialLimitations?.needsHumanReview || 0}`,
     '',
     '## Data Basis',
     '',
@@ -111,6 +134,10 @@ export function renderValidationMarkdown(report) {
     '## Top Covered',
     '',
     ...topCoverageLines(report.coverageMatrix, 'covered'),
+    '',
+    '## Covered In Sample',
+    '',
+    ...topCoverageLines(report.coverageMatrix, 'covered_in_sample'),
     '',
     '## Top Partial',
     '',
@@ -134,11 +161,11 @@ export function renderValidationMarkdown(report) {
     '',
     '## Coverage Matrix',
     '',
-    '| Manual Item | Status | Confidence | Matched Check | Rationale |',
-    '| --- | --- | --- | --- | --- |'
+    '| Manual Item | Status | Confidence | Matched Check | Partial Reason | Match Reasons | Missing Reasons | Rationale |',
+    '| --- | --- | --- | --- | --- | --- | --- | --- |'
   ];
   for (const row of (report.coverageMatrix || []).slice(0, 200)) {
-    lines.push(`| ${md(row.manualItem?.title || row.manualItemId)} | ${md(row.coverageStatus)} | ${md(row.confidence)} | ${md(row.matchedCheckId || '')} | ${md(row.rationale || '')} |`);
+    lines.push(`| ${md(row.manualItem?.title || row.manualItemId)} | ${md(row.coverageStatus)} | ${md(row.confidence)} | ${md((row.matchedCheckIds || [row.matchedCheckId]).filter(Boolean).join(', '))} | ${md(row.partialReason || '')} | ${md((row.matchReasons || []).join(', '))} | ${md((row.missingReasons || []).join(', '))} | ${md(row.rationale || '')} |`);
   }
   lines.push('', '## Tool Extras', '');
   for (const extra of report.unmatchedToolFindings || []) {
@@ -210,6 +237,9 @@ export function renderExecutiveSummaryMarkdown(report) {
     `- Manual audit points: ${validation.manualItemCount || 0}`,
     `- Weighted coverage: ${validation.coveragePercent ?? 0}%`,
     `- Full or partial coverage: ${summary.fullOrPartialCoverage ?? 0}`,
+    `- Covered in sample: ${validation.coveredInSample || 0}`,
+    `- Partial deepening analysed: ${validation.partialDeepening?.analyzedItems || 0}`,
+    `- Partial limitations: larger crawl ${validation.partialLimitations?.needsLargerCrawl || 0}, external data ${validation.partialLimitations?.needsExternalData || 0}, human review ${validation.partialLimitations?.needsHumanReview || 0}`,
     `- Gaps to close: ${summary.gapsToClose ?? 0}`,
     `- External/review-dependent points: ${summary.externalOrReviewDependent ?? 0}`,
     `- Needs larger crawl: ${validation.needsLargerCrawl || 0}`,
@@ -240,6 +270,16 @@ export function renderChefDemoSummaryMarkdown(summary = {}) {
     ''
   ];
   for (const point of summary.talkingPoints || []) lines.push(`- ${point}`);
+  if (summary.partialDeepening) {
+    lines.push(
+      '',
+      '## Partial Deepening',
+      '',
+      `- Analysed items: ${summary.partialDeepening.analyzedItems || 0}`,
+      `- Covered in sample: ${summary.partialDeepening.coveredInSample || 0}`,
+      `- Still partial: ${summary.partialDeepening.currentPartiallyCovered || 0}`
+    );
+  }
   lines.push('', '## Top Tool Extras', '');
   const extras = summary.topToolExtras || [];
   if (!extras.length) lines.push('- No high-signal tool extras ready for demo without review.');
@@ -367,6 +407,7 @@ export function renderValidationHtml(report) {
     <section class="grid">
       ${metricCard('Manual Items', summary.manualItemCount)}
       ${metricCard('Covered', summary.covered)}
+      ${metricCard('Covered In Sample', summary.coveredInSample)}
       ${metricCard('Partial', summary.partiallyCovered)}
       ${metricCard('Not Covered', summary.notCovered)}
       ${metricCard('External Data', summary.needsExternalData)}
@@ -381,6 +422,8 @@ export function renderValidationHtml(report) {
     <p>${escapeHtml(report.executiveValidationSummary?.answer || '')}</p>
     <h2>Top Covered</h2>
     ${htmlList(topCoverageLines(report.coverageMatrix, 'covered'))}
+    <h2>Covered In Sample</h2>
+    ${htmlList(topCoverageLines(report.coverageMatrix, 'covered_in_sample'))}
     <h2>Top Partial</h2>
     ${htmlList(topCoverageLines(report.coverageMatrix, 'partially_covered'))}
     <h2>Top Gaps</h2>
@@ -391,13 +434,16 @@ export function renderValidationHtml(report) {
     ${htmlList(nextAutomationLines(report.checkRoadmap))}
     <h2>Coverage Matrix</h2>
     <table>
-      <thead><tr><th>Manual Item</th><th>Status</th><th>Confidence</th><th>Matched Check</th><th>Rationale</th></tr></thead>
+      <thead><tr><th>Manual Item</th><th>Status</th><th>Confidence</th><th>Matched Check</th><th>Partial Reason</th><th>Match Reasons</th><th>Missing Reasons</th><th>Rationale</th></tr></thead>
       <tbody>
         ${(report.coverageMatrix || []).map((row) => `<tr>
           <td>${escapeHtml(row.manualItem?.title || row.manualItemId)}</td>
           <td><span class="tag">${escapeHtml(row.coverageStatus)}</span></td>
           <td>${escapeHtml(row.confidence)}</td>
-          <td><code>${escapeHtml(row.matchedCheckId || '')}</code></td>
+          <td><code>${escapeHtml((row.matchedCheckIds || [row.matchedCheckId]).filter(Boolean).join(', '))}</code></td>
+          <td>${escapeHtml(row.partialReason || '')}</td>
+          <td>${escapeHtml((row.matchReasons || []).join(', '))}</td>
+          <td>${escapeHtml((row.missingReasons || []).join(', '))}</td>
           <td>${escapeHtml(row.rationale || '')}</td>
         </tr>`).join('')}
       </tbody>

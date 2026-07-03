@@ -3,6 +3,7 @@ import { normalizeUrl } from '../../utils/url.js';
 
 export const COVERAGE_STATUSES = Object.freeze([
   'covered',
+  'covered_in_sample',
   'partially_covered',
   'not_covered',
   'not_applicable',

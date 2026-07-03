@@ -543,7 +543,8 @@ button:disabled {
 
 .status.OK,
 .status.completed,
-.status.healthy {
+.status.healthy,
+.status.covered {
   color: var(--ok);
   background: var(--soft-ok);
 }
@@ -552,14 +553,20 @@ button:disabled {
 .status.running,
 .status.paused,
 .status.stale,
-.status.ToDo {
+.status.ToDo,
+.status.covered_in_sample,
+.status.partially_covered,
+.status.needs_larger_crawl {
   color: var(--warn);
   background: var(--soft-warn);
 }
 
 .status.Error,
 .status.failed,
-.status.cancelled {
+.status.cancelled,
+.status.not_covered,
+.status.false_negative_candidate,
+.status.false_positive_candidate {
   color: var(--err);
   background: var(--soft-err);
 }
@@ -571,6 +578,14 @@ button:disabled {
 
 .status.NA {
   color: var(--muted);
+  background: var(--rg-none);
+}
+
+.status.needs_external_data,
+.status.needs_human_review,
+.status.needs_llm_review,
+.status.tool_finds_extra {
+  color: var(--ink);
   background: var(--rg-none);
 }
 

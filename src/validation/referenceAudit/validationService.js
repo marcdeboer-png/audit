@@ -8,6 +8,7 @@ import { buildStorageRealityCheck } from '../../analysis/storageRealityCheck.js'
 import { parseReferenceAuditFile, parseReferenceAuditFiles, parseReferenceAuditInput, parseReferenceAuditInputs } from './referenceAuditParser.js';
 import { mapReferenceItemToChecks } from './referenceAuditMapper.js';
 import { classifyManualItemCoverage, classifyToolExtraFindings } from './coverageClassifier.js';
+import { buildPartialCoverageDiagnostics } from './partialCoverageDiagnostics.js';
 import { buildGapBacklog, gapAnalysisFromCoverage } from './gapClassifier.js';
 import { writeValidationExports } from './validationExportService.js';
 
@@ -27,13 +28,16 @@ export async function validateRunAgainstReference(db, input = {}) {
     const mapping = mapReferenceItemToChecks(item, input.mappingOptions || {});
     const coverage = classifyManualItemCoverage(item, mapping, toolFindings, { run });
     coverageMatrix.push(compactCoverageRow(coverage));
-    if (coverage.matchedToolFindingId) {
-      matchedToolFindingIds.add(Number(coverage.matchedToolFindingId));
+    for (const findingId of coverage.matchedToolFindingIds || [coverage.matchedToolFindingId].filter(Boolean)) {
+      matchedToolFindingIds.add(Number(findingId));
+    }
+    if (coverage.matchedToolFindingId || coverage.matchedToolFindingIds?.length) {
       matchedItems.push(compactCoverageRow(coverage));
     }
   }
 
   const toolExtras = classifyToolExtraFindings(toolFindings, matchedToolFindingIds, coverageMatrix);
+  const partialCoverageDiagnostics = buildPartialCoverageDiagnostics(coverageMatrix);
   const nextCheckBacklog = buildGapBacklog(coverageMatrix);
   const gapAnalysis = gapAnalysisFromCoverage(coverageMatrix, toolExtras);
   const benchmarkSummary = storeBenchmarkSummary(db, runId) || buildBenchmarkSummary(db, runId);
@@ -52,13 +56,15 @@ export async function validateRunAgainstReference(db, input = {}) {
     coverageMatrix,
     toolExtras,
     gapAnalysis,
-    falsePositiveCandidates
+    falsePositiveCandidates,
+    partialCoverageDiagnostics
   });
   const executiveValidationSummary = buildExecutiveValidationSummary(validationSummary, {
     falseNegativeCandidates,
     falsePositiveCandidates,
     nextCheckBacklog,
-    storageRealityCheck
+    storageRealityCheck,
+    partialCoverageDiagnostics
   });
   const report = {
     validationVersion: 2,
@@ -77,11 +83,12 @@ export async function validateRunAgainstReference(db, input = {}) {
     validationSummary,
     referenceImportSummary: referenceAudit.importSummary,
     mappingConfidenceSummary,
+    partialCoverageDiagnostics,
     coverageMatrix,
     manualItems: referenceAudit.items,
     toolFindings: toolFindings.map(compactToolFinding),
     matchedItems,
-    unmatchedManualItems: coverageMatrix.filter((row) => !['covered', 'partially_covered'].includes(row.coverageStatus)),
+    unmatchedManualItems: coverageMatrix.filter((row) => !['covered', 'covered_in_sample', 'partially_covered'].includes(row.coverageStatus)),
     unmatchedToolFindings: toolExtras,
     falseNegativeCandidates,
     falsePositiveCandidates,
@@ -91,7 +98,7 @@ export async function validateRunAgainstReference(db, input = {}) {
     checkRoadmap,
     scoreCalibrationNotes,
     executiveValidationSummary,
-    chefDemoSummary: buildChefDemoSummary(validationSummary, toolExtras, falseNegativeCandidates),
+    chefDemoSummary: buildChefDemoSummary(validationSummary, toolExtras, falseNegativeCandidates, partialCoverageDiagnostics),
     benchmarkSummary,
     storageRealityCheck
   };
@@ -189,8 +196,20 @@ function compactCoverageRow(row) {
     rationale: row.rationale,
     matchedToolFindingId: row.matchedToolFindingId,
     matchedCheckId: row.matchedCheckId,
+    matchedToolFindingIds: row.matchedToolFindingIds || [],
+    matchedCheckIds: row.matchedCheckIds || [],
     matchScore: row.matchScore,
+    evidenceMatchScore: row.evidenceMatchScore || row.matchScore || 0,
     urlOverlap: row.urlOverlap,
+    matchReasons: row.matchReasons || [],
+    missingReasons: row.missingReasons || [],
+    partialReason: row.partialReason || null,
+    coverageDecision: row.coverageDecision || null,
+    upgradeEligible: Boolean(row.upgradeEligible),
+    sampleUpgradeEligible: Boolean(row.sampleUpgradeEligible),
+    sampleBased: Boolean(row.sampleBased),
+    affectedInSample: row.affectedInSample || row.toolFinding?.affectedCount || 0,
+    compositeCoverage: row.compositeCoverage || null,
     expectedCheckIds: row.expectedCheckIds,
     requiredData: row.requiredData,
     requiresExternalData: row.requiresExternalData,
@@ -198,6 +217,7 @@ function compactCoverageRow(row) {
     requiresLlmJudgment: row.requiresLlmJudgment,
     manualItem: row.manualItem,
     toolFinding: row.toolFinding ? compactToolFinding(row.toolFinding) : null,
+    matchedToolFindings: (row.matchedToolFindings || []).map(compactToolFinding),
     mapping: row.mapping
   };
 }
@@ -216,14 +236,21 @@ function compactToolFinding(row) {
     finding: row.effectiveFinding || row.finding,
     recommendation: row.effectiveRecommendation || row.recommendation,
     sampleUrls: safeJson(row.sampleUrlsJson, row.sampleUrls || []),
-    reportSection: row.reportSection || null
+    reportSection: row.reportSection || null,
+    dataBasis: row.dataBasis || null,
+    evidenceLevel: row.evidenceLevel || null,
+    reviewRecommended: row.reviewRecommended || 0
   };
 }
 
-function buildValidationSummary({ run, referenceAudit, coverageMatrix, toolExtras, gapAnalysis, falsePositiveCandidates = [] }) {
+function buildValidationSummary({ run, referenceAudit, coverageMatrix, toolExtras, gapAnalysis, falsePositiveCandidates = [], partialCoverageDiagnostics = {} }) {
   const counts = countCoverage(coverageMatrix);
   const manualItemCount = referenceAudit.items.length;
-  const weightedCoverage = ((counts.covered || 0) + (counts.partially_covered || 0) * 0.5) / Math.max(1, manualItemCount);
+  const weightedCoverage = (
+    (counts.covered || 0)
+    + (counts.covered_in_sample || 0) * 0.75
+    + (counts.partially_covered || 0) * 0.5
+  ) / Math.max(1, manualItemCount);
   return {
     runId: run.id,
     domain: run.finalDomain || run.inputDomain,
@@ -233,6 +260,7 @@ function buildValidationSummary({ run, referenceAudit, coverageMatrix, toolExtra
     referenceFilename: referenceAudit.filename || null,
     manualItemCount,
     covered: counts.covered || 0,
+    coveredInSample: counts.covered_in_sample || 0,
     partiallyCovered: counts.partially_covered || 0,
     notCovered: counts.not_covered || 0,
     falseNegativeCandidates: counts.false_negative_candidate || 0,
@@ -243,6 +271,27 @@ function buildValidationSummary({ run, referenceAudit, coverageMatrix, toolExtra
     toolExtras: toolExtras.length,
     falsePositiveCandidates: falsePositiveCandidates.length,
     coveragePercent: Number((weightedCoverage * 100).toFixed(1)),
+    coverageFormula: 'covered + covered_in_sample*0.75 + partially_covered*0.5',
+    partialDeepening: {
+      analyzedItems: partialCoverageDiagnostics.analyzedItems || 0,
+      currentPartiallyCovered: partialCoverageDiagnostics.currentPartiallyCovered || 0,
+      coveredInSample: partialCoverageDiagnostics.coveredInSample || 0,
+      upgradeEligible: partialCoverageDiagnostics.upgradeEligible || 0,
+      byReason: partialCoverageDiagnostics.byReason || {}
+    },
+    partialLimitations: {
+      needsLargerCrawl: partialCoverageDiagnostics.byReason?.sample_too_small || 0,
+      needsExternalData: partialCoverageDiagnostics.byReason?.missing_data_source || 0,
+      needsHumanReview: partialCoverageDiagnostics.byReason?.human_review_needed || 0,
+      needsBetterEvidence: (partialCoverageDiagnostics.byReason?.evidence_too_weak || 0)
+        + (partialCoverageDiagnostics.byReason?.missing_url_overlap || 0)
+        + (partialCoverageDiagnostics.byReason?.missing_template_context || 0)
+        + (partialCoverageDiagnostics.byReason?.missing_page_type_context || 0),
+      needsBetterMapping: (partialCoverageDiagnostics.byReason?.weak_title_match || 0)
+        + (partialCoverageDiagnostics.byReason?.weak_category_match || 0)
+        + (partialCoverageDiagnostics.byReason?.already_covered_but_mapping_too_strict || 0)
+        + (partialCoverageDiagnostics.byReason?.tool_finding_too_granular || 0)
+    },
     coverageByCategory: coverageBreakdown(coverageMatrix, (row) => row.manualItem?.category || 'uncategorized'),
     coverageByPriority: coverageBreakdown(coverageMatrix, (row) => row.manualItem?.priority || 'unknown'),
     coverageByDataSource: coverageBreakdownByDataSource(coverageMatrix),
@@ -369,11 +418,20 @@ function buildExecutiveValidationSummary(summary, context = {}) {
     sampleNote,
     coveragePercent: summary.coveragePercent,
     manualItemCount: summary.manualItemCount,
-    fullOrPartialCoverage: (summary.covered || 0) + (summary.partiallyCovered || 0),
+    fullOrPartialCoverage: (summary.covered || 0) + (summary.coveredInSample || 0) + (summary.partiallyCovered || 0),
     gapsToClose: (summary.notCovered || 0) + (summary.falseNegativeCandidates || 0),
     externalOrReviewDependent: (summary.needsExternalData || 0) + (summary.needsLargerCrawl || 0) + (summary.needsHumanReview || 0) + (summary.needsLlmReview || 0),
     toolExtras: summary.toolExtras || 0,
     falsePositiveCandidates: context.falsePositiveCandidates?.length || 0,
+    coveredInSample: summary.coveredInSample || 0,
+    partialLimitations: summary.partialLimitations || {},
+    partialDeepening: context.partialCoverageDiagnostics ? {
+      analyzedItems: context.partialCoverageDiagnostics.analyzedItems || 0,
+      currentPartiallyCovered: context.partialCoverageDiagnostics.currentPartiallyCovered || 0,
+      coveredInSample: context.partialCoverageDiagnostics.coveredInSample || 0,
+      upgradeEligible: context.partialCoverageDiagnostics.upgradeEligible || 0,
+      byReason: context.partialCoverageDiagnostics.byReason || {}
+    } : null,
     storageRiskLevel: context.storageRealityCheck?.riskLevel || null,
     mostImportantGaps,
     managementMessage: summary.manualItemCount
@@ -391,7 +449,7 @@ function dataBasisLabel(run = {}) {
   return sourceType;
 }
 
-function buildChefDemoSummary(summary, toolExtras = [], falseNegativeCandidates = []) {
+function buildChefDemoSummary(summary, toolExtras = [], falseNegativeCandidates = [], partialDiagnostics = {}) {
   const topExtras = toolExtras
     .filter((row) => row.extraClassification === 'likely_relevant')
     .slice(0, 10)
@@ -406,12 +464,21 @@ function buildChefDemoSummary(summary, toolExtras = [], falseNegativeCandidates 
       ? `Automated audit coverage: ${summary.coveragePercent}% weighted, plus ${summary.toolExtras || 0} tool-only findings.`
       : 'Original manual audit missing: validation pipeline is ready, but real Fressnapf coverage cannot be claimed yet.',
     talkingPoints: [
-      `${summary.covered || 0} manual point(s) fully covered, ${summary.partiallyCovered || 0} partially covered.`,
+      `${summary.covered || 0} manual point(s) fully covered, ${summary.coveredInSample || 0} covered in the current sample, ${summary.partiallyCovered || 0} partially covered.`,
       `${summary.needsExternalData || 0} point(s) need external data; ${summary.needsLargerCrawl || 0} need a larger crawl; ${summary.needsHumanReview || 0} need human review; ${summary.needsLlmReview || 0} need optional LLM review.`,
+      `Remaining partial/sample limitations: ${summary.partialLimitations?.needsLargerCrawl || 0} need larger crawl/full import, ${summary.partialLimitations?.needsExternalData || 0} need external data, ${summary.partialLimitations?.needsHumanReview || 0} need human review.`,
+      `Partial deepening analysed ${partialDiagnostics.analyzedItems || 0} item(s): ${partialDiagnostics.coveredInSample || 0} sample-covered, ${partialDiagnostics.currentPartiallyCovered || 0} still partial with explicit reasons.`,
       `${falseNegativeCandidates.length} likely false-negative/manual-gap candidate(s) should drive the next implementation batch.`,
       `${topExtras.length} high-signal tool extra(s) can demonstrate value beyond the manual audit after review.`
     ],
-    topToolExtras: topExtras
+    topToolExtras: topExtras,
+    partialDeepening: {
+      analyzedItems: partialDiagnostics.analyzedItems || 0,
+      currentPartiallyCovered: partialDiagnostics.currentPartiallyCovered || 0,
+      coveredInSample: partialDiagnostics.coveredInSample || 0,
+      upgradeEligible: partialDiagnostics.upgradeEligible || 0,
+      byReason: partialDiagnostics.byReason || {}
+    }
   };
 }
 
@@ -426,9 +493,10 @@ function coverageBreakdown(rows, keyFn) {
   const groups = {};
   for (const row of rows) {
     const key = keyFn(row);
-    groups[key] = groups[key] || { total: 0, covered: 0, partiallyCovered: 0, notCovered: 0 };
+    groups[key] = groups[key] || { total: 0, covered: 0, coveredInSample: 0, partiallyCovered: 0, notCovered: 0 };
     groups[key].total += 1;
     if (row.coverageStatus === 'covered') groups[key].covered += 1;
+    else if (row.coverageStatus === 'covered_in_sample') groups[key].coveredInSample += 1;
     else if (row.coverageStatus === 'partially_covered') groups[key].partiallyCovered += 1;
     else if (!['needs_external_data', 'needs_larger_crawl', 'needs_human_review', 'needs_llm_review', 'not_applicable'].includes(row.coverageStatus)) groups[key].notCovered += 1;
   }
@@ -440,9 +508,10 @@ function coverageBreakdownByDataSource(rows) {
   for (const row of rows) {
     const dataSources = row.requiredData?.length ? row.requiredData : ['url_facts'];
     for (const source of dataSources) {
-      groups[source] = groups[source] || { total: 0, covered: 0, partiallyCovered: 0, gaps: 0 };
+      groups[source] = groups[source] || { total: 0, covered: 0, coveredInSample: 0, partiallyCovered: 0, gaps: 0 };
       groups[source].total += 1;
       if (row.coverageStatus === 'covered') groups[source].covered += 1;
+      else if (row.coverageStatus === 'covered_in_sample') groups[source].coveredInSample += 1;
       else if (row.coverageStatus === 'partially_covered') groups[source].partiallyCovered += 1;
       else groups[source].gaps += 1;
     }
