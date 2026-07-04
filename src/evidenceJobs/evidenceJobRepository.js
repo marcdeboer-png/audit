@@ -131,6 +131,30 @@ export function listTargetedEvidenceFacts(db, jobId, options = {}) {
   `).all(jobId, limit).map(normalizeFactRow);
 }
 
+export function listTargetedEvidenceFactsForRun(db, runId, options = {}) {
+  const limit = Math.min(50000, Math.max(1, Number(options.limit || 10000)));
+  const jobTypes = Array.isArray(options.jobTypes)
+    ? options.jobTypes.map((value) => String(value || '').trim()).filter(Boolean)
+    : [];
+  if (jobTypes.length) {
+    const placeholders = jobTypes.map(() => '?').join(', ');
+    return db.prepare(`
+      SELECT *
+      FROM targeted_evidence_facts
+      WHERE runId = ? AND jobType IN (${placeholders})
+      ORDER BY jobId ASC, id ASC
+      LIMIT ?
+    `).all(runId, ...jobTypes, limit).map(normalizeFactRow);
+  }
+  return db.prepare(`
+    SELECT *
+    FROM targeted_evidence_facts
+    WHERE runId = ?
+    ORDER BY jobId ASC, id ASC
+    LIMIT ?
+  `).all(runId, limit).map(normalizeFactRow);
+}
+
 export function countTargetedEvidenceFacts(db, jobId) {
   return db.prepare(`
     SELECT COUNT(*) AS count,

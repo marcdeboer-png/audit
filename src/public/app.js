@@ -1834,17 +1834,18 @@ async function renderReviewQueue(runId) {
     </section>
   `;
   try {
-    const [queue, jobs] = await Promise.all([
+    const [queue, jobs, impact] = await Promise.all([
       fetchJson(`/api/audits/${runId}/unresolved`),
-      fetchJson(`/api/audits/${runId}/evidence-jobs`).catch(() => ({ jobs: [] }))
+      fetchJson(`/api/audits/${runId}/evidence-jobs`).catch(() => ({ jobs: [] })),
+      fetchJson(`/api/audits/${runId}/evidence-impact`).catch(() => null)
     ]);
-    renderReviewQueueReport(runId, queue, jobs);
+    renderReviewQueueReport(runId, queue, jobs, impact);
   } catch (error) {
     document.querySelector('#review-queue-panel').innerHTML = `<div class="empty">${escapeHtml(error.message)}</div>`;
   }
 }
 
-function renderReviewQueueReport(runId, queue, jobsPayload = { jobs: [] }) {
+function renderReviewQueueReport(runId, queue, jobsPayload = { jobs: [] }, impact = null) {
   const panel = document.querySelector('#review-queue-panel');
   if (!panel) return;
   const summary = queue.summary || {};
@@ -1893,10 +1894,13 @@ function renderReviewQueueReport(runId, queue, jobsPayload = { jobs: [] }) {
       <h3>Evidence Job History</h3>
       <div class="table-scroll">
         <table class="validation-matrix">
-          <thead><tr><th>ID</th><th>Job</th><th>Status</th><th>Processed</th><th>Stored</th><th>Started</th></tr></thead>
-          <tbody id="evidence-job-history-body">${renderEvidenceJobHistoryRows(jobsPayload.jobs || [])}</tbody>
+          <thead><tr><th>ID</th><th>Job</th><th>Status</th><th>Processed</th><th>Impact</th><th>Stored</th><th>Started</th></tr></thead>
+          <tbody id="evidence-job-history-body">${renderEvidenceJobHistoryRows(jobsPayload.jobs || [], impact)}</tbody>
         </table>
       </div>
+    </section>
+    <section id="evidence-impact-panel" class="panel nested-panel">
+      ${renderEvidenceImpactPanel(impact)}
     </section>
     <div class="validation-filters actions">
       ${reviewQueueFilterButton('', 'Alle')}
@@ -1948,16 +1952,99 @@ function evidenceJobPlanRow(job) {
   </tr>`;
 }
 
-function renderEvidenceJobHistoryRows(jobs = []) {
-  if (!jobs.length) return '<tr><td colspan="6" class="muted">Noch keine Evidence Jobs.</td></tr>';
+function renderEvidenceJobHistoryRows(jobs = [], impact = null) {
+  return renderEvidenceJobHistoryRowsWithImpact(jobs, impact);
+}
+
+function renderEvidenceJobHistoryRowsWithImpact(jobs = [], impact = null) {
+  if (!jobs.length) return '<tr><td colspan="7" class="muted">Noch keine Evidence Jobs.</td></tr>';
   return jobs.map((job) => `<tr>
     <td><a href="/api/evidence-jobs/${escapeHtml(job.jobId)}" target="_blank" rel="noreferrer">${escapeHtml(job.jobId)}</a></td>
     <td>${escapeHtml(job.jobType)}</td>
     <td><span class="status ${escapeHtml(job.status)}">${escapeHtml(job.status)}</span></td>
     <td>${escapeHtml(job.urlCountProcessed || 0)} / ${escapeHtml(job.urlCountPlanned || 0)} · ok ${escapeHtml(job.urlCountSucceeded || 0)} · fail ${escapeHtml(job.urlCountFailed || 0)}</td>
+    <td>${escapeHtml(evidenceJobImpactLabel(job, impact))}</td>
     <td>${escapeHtml(formatBytes(job.actualStoredBytesEstimate || job.estimatedTotalBytes || 0))}</td>
     <td>${escapeHtml(formatDateTime(job.startedAt || job.createdAt))}</td>
   </tr>`).join('');
+}
+
+function renderEvidenceImpactPanel(impact = null) {
+  if (!impact || !impact.generatedAt) {
+    return `
+      <div class="actions" style="justify-content: space-between;">
+        <h3>Evidence Job Impact</h3>
+        <span class="muted">Noch kein Impact berechnet.</span>
+      </div>
+      <p class="muted">Sobald Targeted Evidence Jobs Facts geliefert haben, zeigt dieser Abschnitt Before/After, geschlossene Missing Reasons und nächste sinnvolle Jobs.</p>
+    `;
+  }
+  const before = impact.coverageBefore || {};
+  const after = impact.coverageAfter || {};
+  return `
+    <div class="actions" style="justify-content: space-between;">
+      <div>
+        <h3>Evidence Job Impact</h3>
+        <p class="muted">Targeted Facts werden additiv in die Validation einbezogen. Kleine URL-Sets werden als Sample-Limit gekennzeichnet.</p>
+      </div>
+      <div class="actions">
+        <a class="button" href="/api/audits/${impact.runId}/evidence-impact" target="_blank" rel="noreferrer">JSON</a>
+        <a class="button" href="/api/audits/${impact.runId}/validation/export/evidence-job-impact.md">MD</a>
+      </div>
+    </div>
+    <div class="grid metrics validation-metrics">
+      ${metric('Jobs', (impact.jobsConsidered || []).length)}
+      ${metric('Facts', impact.factsConsidered || 0)}
+      ${metric('Impacted', impact.manualItemsImpacted || 0)}
+      ${metric('Changed', (impact.changedItems || []).length)}
+      ${metric('Upgrades', (impact.upgradedItems || []).length)}
+      ${score('Before', before.coveragePercent ?? null)}
+      ${score('After', after.coveragePercent ?? null)}
+    </div>
+    <div class="table-scroll">
+      <table class="validation-matrix">
+        <thead><tr><th>Audit Point</th><th>Before</th><th>After</th><th>Impact</th><th>New Match Reasons</th><th>Removed Missing</th><th>Remaining</th></tr></thead>
+        <tbody>
+          ${renderEvidenceImpactRows(impact.changedItems || [])}
+        </tbody>
+      </table>
+    </div>
+    <h3>Next Recommended Jobs</h3>
+    <div class="table-scroll">
+      <table class="validation-matrix">
+        <thead><tr><th>Job</th><th>Points</th><th>Status</th><th>Reason</th></tr></thead>
+        <tbody>
+          ${(impact.nextRecommendedJobs || []).length ? (impact.nextRecommendedJobs || []).map((job) => `<tr>
+            <td><code>${escapeHtml(job.jobType)}</code></td>
+            <td>${escapeHtml(job.pointCount || 0)}</td>
+            <td>${escapeHtml(job.alreadyExecuted ? 'executed' : 'recommended')}</td>
+            <td>${escapeHtml(job.reason || '')}</td>
+          </tr>`).join('') : '<tr><td colspan="4" class="muted">Keine weiteren Low-Risk-Jobs aus dem aktuellen Impact abgeleitet.</td></tr>'}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+function renderEvidenceImpactRows(rows = []) {
+  if (!rows.length) return '<tr><td colspan="7" class="muted">Noch keine geänderten Auditpunkte.</td></tr>';
+  return rows.slice(0, 50).map((item) => `<tr>
+    <td><strong>${escapeHtml(item.title || item.manualItemId)}</strong><div class="muted">${escapeHtml((item.evidenceJobsUsed || []).join(', ') || 'n/a')}</div></td>
+    <td>${escapeHtml(item.previousStatus)}<div class="muted">${escapeHtml(item.previousConfidence || '')}</div></td>
+    <td><span class="tag">${escapeHtml(item.newStatus)}</span><div class="muted">${escapeHtml(item.newConfidence || '')}</div></td>
+    <td>${escapeHtml(item.impactType || '')}<div class="muted">${escapeHtml(item.impactExplanation || '')}</div></td>
+    <td>${escapeHtml((item.newMatchReasons || []).join(', '))}</td>
+    <td>${escapeHtml((item.removedMissingReasons || []).join(', '))}</td>
+    <td>${escapeHtml((item.remainingMissingReasons || []).join(', '))}</td>
+  </tr>`).join('');
+}
+
+function evidenceJobImpactLabel(job, impact = null) {
+  if (!impact || !impact.changedItems) return `${(job.relatedManualItemIds || []).length || 0} planned point(s)`;
+  const changed = (impact.changedItems || []).filter((item) => (item.evidenceJobsUsed || []).includes(job.jobType));
+  const upgraded = changed.filter((item) => item.previousStatus !== item.newStatus);
+  if (changed.length) return `${changed.length} changed, ${upgraded.length} upgrade(s)`;
+  return `${(job.relatedManualItemIds || []).length || 0} planned point(s)`;
 }
 
 function wireEvidenceJobButtons(runId) {
@@ -2022,8 +2109,13 @@ async function pollEvidenceJob(runId, jobId) {
 async function refreshEvidenceJobHistory(runId) {
   const body = document.querySelector('#evidence-job-history-body');
   if (!body) return;
-  const jobs = await fetchJson(`/api/audits/${runId}/evidence-jobs`);
-  body.innerHTML = renderEvidenceJobHistoryRows(jobs.jobs || []);
+  const [jobs, impact] = await Promise.all([
+    fetchJson(`/api/audits/${runId}/evidence-jobs`),
+    fetchJson(`/api/audits/${runId}/evidence-impact`).catch(() => null)
+  ]);
+  body.innerHTML = renderEvidenceJobHistoryRowsWithImpact(jobs.jobs || [], impact);
+  const impactPanel = document.querySelector('#evidence-impact-panel');
+  if (impactPanel) impactPanel.innerHTML = renderEvidenceImpactPanel(impact);
 }
 
 function renderReviewQueueRows(queue, filter) {

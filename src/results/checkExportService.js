@@ -19,10 +19,10 @@ import { getLatestValidationReport } from '../validation/referenceAudit/validati
 import { buildValidationExportPayload } from '../validation/referenceAudit/validationExportService.js';
 import { buildUnresolvedAuditQueue } from '../validation/unresolved/unresolvedAuditPointService.js';
 import {
-  buildEvidenceJobImpactSummary,
   getEvidenceJobDetails,
   listEvidenceJobsForRun
 } from '../evidenceJobs/evidenceJobRunner.js';
+import { buildEvidenceImpactForRun, renderEvidenceImpactMarkdown } from '../evidenceJobs/evidenceImpactService.js';
 
 export function collectCheckDetailCsv(db, runId, checkResultId) {
   const detail = getCheckDetail(db, runId, checkResultId);
@@ -201,7 +201,8 @@ export function collectFullAuditZip(db, runId, exportTypes) {
   const validation = getLatestValidationReport(db, runId);
   if (validation?.report) {
     try {
-      const validationFiles = buildValidationExportPayload(withDerivedUnresolved(validation.report));
+      const report = withEvidenceImpact(db, runId, withDerivedUnresolved(validation.report));
+      const validationFiles = buildValidationExportPayload(report);
       for (const [filename, content] of Object.entries(validationFiles)) {
         addText(`validation/${filename}`, content);
       }
@@ -331,7 +332,11 @@ function addEvidenceJobZipEntries(db, runId, addJson, addText) {
   const list = listEvidenceJobsForRun(db, runId);
   if (!list.jobs.length) return;
   addJson('evidence-jobs/jobs.json', list);
-  addJson('validation/evidence-job-impact.json', buildEvidenceJobImpactSummary(db, runId));
+  if (!getLatestValidationReport(db, runId)?.report) {
+    const impact = buildEvidenceImpactForRun(db, runId);
+    addJson('validation/evidence-job-impact.json', impact);
+    addText('validation/evidence-job-impact.md', renderEvidenceImpactMarkdown(impact));
+  }
   for (const job of list.jobs) {
     const details = getEvidenceJobDetails(db, job.jobId, { limit: 1000, includeCsv: true });
     addJson(`evidence-jobs/job-${job.jobId}-summary.json`, {
@@ -348,14 +353,25 @@ function evidenceJobsForJson(db, runId) {
   if (!list.jobs.length) return { runId, jobs: [] };
   return {
     ...list,
-    impact: buildEvidenceJobImpactSummary(db, runId),
+    impact: buildEvidenceImpactForRun(db, runId),
     jobs: list.jobs.map((job) => getEvidenceJobDetails(db, job.jobId, { limit: 100 }))
   };
 }
 
 function latestValidationReportWithDerivedUnresolved(db, runId) {
   const validation = getLatestValidationReport(db, runId);
-  return validation?.report ? withDerivedUnresolved(validation.report) : null;
+  return validation?.report ? withEvidenceImpact(db, runId, withDerivedUnresolved(validation.report)) : null;
+}
+
+function withEvidenceImpact(db, runId, report = {}) {
+  try {
+    return {
+      ...report,
+      evidenceJobImpact: report.evidenceJobImpact || buildEvidenceImpactForRun(db, runId, { validationReport: report })
+    };
+  } catch {
+    return report;
+  }
 }
 
 export function fullAuditZipFilename(runId) {

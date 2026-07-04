@@ -8,6 +8,7 @@ import {
   renderEvidencePacksMarkdown,
   renderUnresolvedAuditQueueMarkdown
 } from '../unresolved/unresolvedAuditPointService.js';
+import { renderEvidenceImpactMarkdown } from '../../evidenceJobs/evidenceImpactService.js';
 
 export function buildValidationExportPayload(report) {
   const coverageCsv = coverageMatrixCsv(report.coverageMatrix || []);
@@ -26,6 +27,8 @@ export function buildValidationExportPayload(report) {
     'evidence-packs.json': `${JSON.stringify(report.evidencePacks || report.unresolvedAuditQueue?.evidencePacks || {}, null, 2)}\n`,
     'evidence-job-plan.md': renderEvidenceJobPlanMarkdown(report.evidenceJobPlan || report.unresolvedAuditQueue?.evidenceJobPlan || {}),
     'evidence-job-plan.json': `${JSON.stringify(report.evidenceJobPlan || report.unresolvedAuditQueue?.evidenceJobPlan || {}, null, 2)}\n`,
+    'evidence-job-impact.md': renderEvidenceImpactMarkdown(report.evidenceJobImpact || {}),
+    'evidence-job-impact.json': `${JSON.stringify(report.evidenceJobImpact || {}, null, 2)}\n`,
     'reference-import-summary.md': renderReferenceImportSummaryMarkdown(report.referenceImportSummary || report.referenceAudit?.importSummary || {}),
     'reference-import-summary.json': `${JSON.stringify(report.referenceImportSummary || report.referenceAudit?.importSummary || {}, null, 2)}\n`,
     'mapping-confidence-summary.json': `${JSON.stringify(report.mappingConfidenceSummary || {}, null, 2)}\n`,
@@ -175,6 +178,10 @@ export function renderValidationMarkdown(report) {
     '',
     ...unresolvedQueueLines(report.unresolvedAuditQueue),
     '',
+    '## Evidence Job Impact',
+    '',
+    ...evidenceImpactLines(report.evidenceJobImpact),
+    '',
     '## Coverage Matrix',
     '',
     '| Manual Item | Status | Confidence | Matched Check | Partial Reason | Match Reasons | Missing Reasons | Rationale |',
@@ -227,6 +234,24 @@ function unresolvedQueueLines(queue = {}, limit = 10) {
   const points = (queue.points || []).slice(0, limit);
   if (!points.length) return ['- No unresolved evidence queue entries.'];
   return points.map((point) => `- **${md(point.manualTitle)}** (${md(point.currentCoverageStatus)}): ${md(point.nextBestAction)}; jobs: ${md((point.recommendedJobTypes || []).join(', ') || 'none')}`);
+}
+
+function evidenceImpactLines(impact = {}, limit = 10) {
+  if (!impact || !impact.generatedAt) return ['- No targeted evidence impact calculated for this validation export.'];
+  const lines = [
+    `- Jobs considered: ${(impact.jobsConsidered || []).length}`,
+    `- Facts considered: ${impact.factsConsidered || 0}`,
+    `- Impacted manual items: ${impact.manualItemsImpacted || 0}`,
+    `- Coverage before/after: ${impact.coverageBefore?.coveragePercent ?? 0}% -> ${impact.coverageAfter?.coveragePercent ?? 0}%`,
+    `- Upgrades: ${(impact.upgradedItems || []).length}`,
+    `- Changed items: ${(impact.changedItems || []).length}`
+  ];
+  const changed = (impact.changedItems || []).slice(0, limit);
+  if (changed.length) lines.push('');
+  for (const item of changed) {
+    lines.push(`- **${md(item.title)}**: ${md(item.previousStatus)} -> ${md(item.newStatus)} (${md(item.impactType)}), jobs ${md((item.evidenceJobsUsed || []).join(', ') || 'n/a')}`);
+  }
+  return lines;
 }
 
 export function renderBacklogMarkdown(backlog = []) {
@@ -456,6 +481,7 @@ export function renderValidationHtml(report) {
       ${metricCard('False Positives', summary.falsePositiveCandidates)}
       ${metricCard('Unresolved Queue', report.unresolvedAuditQueue?.summary?.unresolvedCount)}
       ${metricCard('Evidence Jobs', report.evidenceJobPlan?.recommendedJobCount || report.unresolvedAuditQueue?.evidenceJobPlan?.recommendedJobCount)}
+      ${metricCard('Impact Items', report.evidenceJobImpact?.manualItemsImpacted || 0)}
       ${metricCard('Coverage', `${summary.coveragePercent ?? 0}%`)}
     </section>
     <h2>Executive Summary</h2>
@@ -474,6 +500,8 @@ export function renderValidationHtml(report) {
     ${htmlList(nextAutomationLines(report.checkRoadmap))}
     <h2>Unresolved Evidence Queue</h2>
     ${htmlList(unresolvedQueueLines(report.unresolvedAuditQueue))}
+    <h2>Evidence Job Impact</h2>
+    ${htmlList(evidenceImpactLines(report.evidenceJobImpact))}
     <h2>Coverage Matrix</h2>
     <table>
       <thead><tr><th>Manual Item</th><th>Status</th><th>Confidence</th><th>Matched Check</th><th>Partial Reason</th><th>Match Reasons</th><th>Missing Reasons</th><th>Rationale</th></tr></thead>

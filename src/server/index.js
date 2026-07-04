@@ -66,6 +66,7 @@ import {
   getEvidenceJobDetails,
   listEvidenceJobsForRun
 } from '../evidenceJobs/evidenceJobRunner.js';
+import { buildEvidenceImpactForRun } from '../evidenceJobs/evidenceImpactService.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -324,6 +325,18 @@ app.get('/api/audits/:runId/evidence-job-plan', (req, res) => {
   const payload = latestUnresolvedPayload(Number(req.params.runId));
   if (!payload) return res.status(404).json({ error: 'Validation report not found for run' });
   res.json(payload.evidenceJobPlan);
+});
+
+app.get('/api/audits/:runId/evidence-impact', (req, res) => {
+  const run = getRunWithProject(db, Number(req.params.runId));
+  if (!run) return res.status(404).json({ error: 'Run not found' });
+  res.json(buildEvidenceImpactForRun(db, run.id));
+});
+
+app.post('/api/audits/:runId/evidence-impact/recompute', (req, res) => {
+  const run = getRunWithProject(db, Number(req.params.runId));
+  if (!run) return res.status(404).json({ error: 'Run not found' });
+  res.json(buildEvidenceImpactForRun(db, run.id));
 });
 
 app.post('/api/audits/:runId/evidence-jobs/dry-run', async (req, res) => {
@@ -1003,7 +1016,8 @@ function sendComparisonCsv(res, comparison, requestedFile) {
 function sendValidationExport(res, runId, requestedFile) {
   const validation = getLatestValidationReport(db, runId);
   if (!validation?.report) return res.status(404).json({ error: 'Validation report not found for run' });
-  const files = buildValidationExportPayload(withDerivedUnresolved(validation.report));
+  const report = withEvidenceImpact(runId, withDerivedUnresolved(validation.report));
+  const files = buildValidationExportPayload(report);
   const requested = String(requestedFile || '');
   const content = files[requested];
   if (content === undefined) return res.status(404).json({ error: 'Validation export not found' });
@@ -1033,6 +1047,8 @@ function isValidationExportFile(file) {
     'evidence-packs.json',
     'evidence-job-plan.md',
     'evidence-job-plan.json',
+    'evidence-job-impact.md',
+    'evidence-job-impact.json',
     'tool-gap-backlog.md',
     'tool-gap-backlog.json',
     'validation-summary.json',
@@ -1062,6 +1078,17 @@ function withDerivedUnresolved(report = {}) {
     evidencePacks: report.evidencePacks || queue.evidencePacks,
     evidenceJobPlan: report.evidenceJobPlan || queue.evidenceJobPlan
   };
+}
+
+function withEvidenceImpact(runId, report = {}) {
+  try {
+    return {
+      ...report,
+      evidenceJobImpact: report.evidenceJobImpact || buildEvidenceImpactForRun(db, runId, { validationReport: report })
+    };
+  } catch {
+    return report;
+  }
 }
 
 function httpError(statusCode, message) {
