@@ -71,10 +71,15 @@ export const EVIDENCE_JOB_TYPES = Object.freeze({
     description: 'Fetch pages and store compact hreflang language/region/x-default target facts. Full return-link validation still needs broader data.',
     requiredUrlSet: ['known_url_facts', 'sitemap_urls', 'uploaded_url_list'],
     maxUrls: 50000,
-    factsToExtract: ['url', 'statusCode', 'hreflangAlternates', 'hreflangXDefault', 'hreflangTargets'],
-    estimatedBytesPerUrl: 4500,
+    factsToExtract: ['url', 'finalUrl', 'statusCode', 'hreflangCount', 'languages', 'regions', 'hasXDefault', 'hasSelfLanguage', 'canonicalHreflangConflict', 'hreflangSummaryHash'],
+    estimatedBytesPerUrl: 3500,
     closesGapTypes: ['needs_hreflang_facts', 'needs_external_import'],
-    relatedCheckIds: ['tech.hreflang_x_default_missing']
+    relatedCheckIds: ['tech.hreflang_x_default_missing'],
+    safetyNotes: [
+      'Does not validate hreflang return links.',
+      'x-default missing is not treated as a hard issue by this targeted job.',
+      'Stores compact entries and hashes only.'
+    ]
   }),
   resource_facts: job('resource_facts', 'Resource facts', {
     description: 'Collect compact CSS/JS counts, third-party origins, resource hints and header/content-length signals without storing raw asset lists.',
@@ -89,10 +94,15 @@ export const EVIDENCE_JOB_TYPES = Object.freeze({
     description: 'Extract schema type counts, JSON-LD hashes and capped parse-error summaries without storing full raw schema blobs.',
     requiredUrlSet: ['known_url_facts', 'sitemap_urls', 'uploaded_url_list'],
     maxUrls: 50000,
-    factsToExtract: ['url', 'schemaTypes', 'schemaTypeCounts', 'jsonLdHash', 'jsonLdParseErrorSummary'],
-    estimatedBytesPerUrl: 9000,
+    factsToExtract: ['url', 'finalUrl', 'statusCode', 'schemaBlockCount', 'jsonLdBlockCount', 'schemaTypes', 'jsonLdHashes', 'cappedJsonLdExcerpt', 'parseErrors', 'schemaSummaryHash'],
+    estimatedBytesPerUrl: 6500,
     closesGapTypes: ['needs_schema_summary', 'needs_more_urls'],
-    relatedCheckIds: ['tech.schema_types_coverage_summary', 'tech.json_ld_parse_errors', 'tech.product_coverage_on_product_like_pages', 'tech.article_coverage_on_article_like_pages', 'tech.breadcrumb_missing_low_coverage', 'template.schema_missing_pattern']
+    relatedCheckIds: ['tech.schema_types_coverage_summary', 'tech.json_ld_parse_errors', 'tech.product_coverage_on_product_like_pages', 'tech.article_coverage_on_article_like_pages', 'tech.breadcrumb_missing_low_coverage', 'template.schema_missing_pattern'],
+    safetyNotes: [
+      'Does not store full JSON-LD raw blobs.',
+      'Stores schema types, hashes and a capped 2 KB excerpt only.',
+      'Parse errors are capped and do not fail the job.'
+    ]
   }),
   link_aggregate_facts: job('link_aggregate_facts', 'Link aggregate facts', {
     description: 'Store internal/external link counts, unique target counts and coarse navigation/footer/content aggregates without raw link lists.',

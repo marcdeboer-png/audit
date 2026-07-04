@@ -20,6 +20,7 @@ import {
 import { factStorageEstimate, extractTargetedFacts, isSupportedTargetedJobType } from './targetedFactExtractors.js';
 import { fetchTargetedHtml, normalizeTargetedCrawlerConfig, runWithConcurrency, TARGETED_CRAWLER_DEFAULTS } from './targetedCrawler.js';
 import { normalizeUrl } from '../utils/url.js';
+import { buildTargetedFactSummaries } from './evidenceImpactService.js';
 
 export const TARGETED_EVIDENCE_LIMITS = Object.freeze({
   defaultMaxUrls: 100,
@@ -127,6 +128,8 @@ export async function runEvidenceJob(db, jobId, urls = null, context = null) {
       });
     }, context.crawlerConfig);
 
+    const storedFacts = listTargetedEvidenceFacts(db, jobId, { limit: 10000 });
+    const factSummary = buildTargetedFactSummaries(storedFacts, [getEvidenceJob(db, jobId) || job])[job.jobType] || null;
     const summary = {
       beforeCoverage: context.beforeCoverage,
       afterCoverage: context.beforeCoverage,
@@ -140,9 +143,10 @@ export async function runEvidenceJob(db, jobId, urls = null, context = null) {
       })),
       potentiallyAffectedManualItems: context.relatedManualItems,
       factRowsStored: countTargetedEvidenceFacts(db, jobId).count || 0,
+      factSummary,
       rawHtmlStored: false,
       renderedHtmlStored: false,
-      note: 'Batch 10.8 collects targeted facts only. It does not automatically inflate validation coverage.'
+      note: 'Targeted evidence jobs collect compact facts only. Validation Impact recalculates honest sample-based coverage separately.'
     };
 
     return completeEvidenceJob(db, jobId, {
@@ -294,16 +298,16 @@ function buildEvidenceJobContext(db, runId, input = {}) {
     throw error;
   }
   if (!isSupportedTargetedJobType(definition.jobType)) {
-    warnings.push(`${definition.jobType} is planned but not executable in Batch 10.8.`);
+    warnings.push(`${definition.jobType} is planned but not executable by the targeted runner.`);
   }
   if (definition.storesRawHtml || definition.storesRenderedHtml) {
-    warnings.push('Job type is not allowed because Batch 10.8 does not store raw or rendered HTML.');
+    warnings.push('Job type is not allowed because the targeted runner does not store raw or rendered HTML.');
   }
 
   const requestedMaxUrls = input.maxUrls === undefined ? TARGETED_EVIDENCE_LIMITS.defaultMaxUrls : Number(input.maxUrls);
   const maxUrls = Math.min(TARGETED_EVIDENCE_LIMITS.absoluteMaxUrls, Math.max(1, Number.isFinite(requestedMaxUrls) ? Math.round(requestedMaxUrls) : TARGETED_EVIDENCE_LIMITS.defaultMaxUrls));
   if (Number(input.maxUrls || 0) > TARGETED_EVIDENCE_LIMITS.absoluteMaxUrls) {
-    warnings.push(`maxUrls capped at ${TARGETED_EVIDENCE_LIMITS.absoluteMaxUrls} for Batch 10.8 safety.`);
+    warnings.push(`maxUrls capped at ${TARGETED_EVIDENCE_LIMITS.absoluteMaxUrls} for targeted evidence safety.`);
   }
   if (maxUrls > TARGETED_EVIDENCE_LIMITS.warningMaxUrls) {
     warnings.push(`Large targeted job (${maxUrls} URLs). Keep this below ${TARGETED_EVIDENCE_LIMITS.warningMaxUrls} unless the URL set is deliberate.`);
@@ -324,7 +328,7 @@ function buildEvidenceJobContext(db, runId, input = {}) {
     userAgent: input.userAgent,
     respectRobots: input.respectRobots
   });
-  if (crawlerConfig.respectRobots) warnings.push('Robots checks are not enforced by the Batch 10.8 runner yet; use existing audit crawl for robots-aware discovery.');
+  if (crawlerConfig.respectRobots) warnings.push('Robots checks are not enforced by the targeted runner yet; use existing audit crawl for robots-aware discovery.');
 
   return {
     run,

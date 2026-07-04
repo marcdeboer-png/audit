@@ -8,7 +8,9 @@ const TARGETED_JOB_TYPES = Object.freeze([
   'title_facts',
   'meta_description_facts',
   'h1_facts',
-  'canonical_robots_facts'
+  'canonical_robots_facts',
+  'schema_summary_facts',
+  'hreflang_facts'
 ]);
 
 const STATUS_WEIGHT = Object.freeze({
@@ -67,7 +69,7 @@ export function buildEvidenceImpactFromReport(report = {}, context = {}) {
   const beforeById = new Map(rows.map((row) => [row.manualItemId, row.coverageStatus]));
   const itemImpacts = rows.map((row) => assessManualItemImpact(row, factIndex, jobSummaries, jobs));
   const changedItems = itemImpacts.filter((item) => item.impactType !== 'no_change');
-  const upgradedItems = itemImpacts.filter((item) => item.previousStatus !== item.newStatus);
+  const upgradedItems = itemImpacts.filter((item) => weightForStatus(item.newStatus) > weightForStatus(item.previousStatus));
   const downgradedItems = itemImpacts.filter((item) => weightForStatus(item.newStatus) < weightForStatus(item.previousStatus));
   const unchangedItems = itemImpacts.filter((item) => item.impactType === 'no_change');
   const recalculatedBefore = coverageSnapshot(report, rows.map((row) => ({
@@ -127,7 +129,7 @@ export function renderEvidenceImpactMarkdown(impact = {}) {
   ];
   for (const summary of Object.values(impact.factSummaries || {})) {
     lines.push(
-      `- **${md(summary.jobType)}**: ${summary.checkedUrls || 0} checked, ${summary.issueCount || 0} issue signals, ${summary.duplicateGroupCount || 0} duplicate group(s).`
+      `- **${md(summary.jobType)}**: ${summary.checkedUrls || 0} checked, ${summary.issueCount || 0} issue signals, ${md(summaryLabel(summary))}`
     );
   }
   if (!Object.keys(impact.factSummaries || {}).length) lines.push('- No targeted fact summaries available.');
@@ -279,6 +281,8 @@ function relevantJobTypesForRow(row = {}) {
   if (/meta[\s_-]?description|description_missing|description_too|meta beschreibung/.test(tokens)) types.push('meta_description_facts');
   if (/\bh1\b|headline|heading|ueberschrift|überschrift/.test(tokens)) types.push('h1_facts');
   if (/canonical|robots|noindex|nofollow|indexability|x-robots|indexier/.test(tokens)) types.push('canonical_robots_facts');
+  if (/schema|structured data|structured.?data|json.?ld|breadcrumb|product schema|article schema|organization|website schema|faq schema|howto|videoobject|maschinenlesbar|machine.?readable|geo.*schema/.test(tokens)) types.push('schema_summary_facts');
+  if (/hreflang|x-default|internationali[sz]ation|international|language|region|return.?link|sprachversion|laender|länder/.test(tokens)) types.push('hreflang_facts');
   return unique(types);
 }
 
@@ -290,6 +294,10 @@ function buildNewMatchReasons(row, jobTypes, summaries, factIndex) {
   if (summaries.some((summary) => summary.checkedUrls > 0)) reasons.push('targeted_fact_url_sample_available');
   if (summaries.some((summary) => summary.issueCount > 0)) reasons.push('targeted_fact_issue_summary_available');
   if (summaries.some((summary) => summary.duplicateGroupCount > 0 || summary.patternGroupCount > 0)) reasons.push('targeted_fact_hash_pattern_available');
+  if (summaries.some((summary) => summary.jobType === 'schema_summary_facts' && summary.schemaTypesFound?.length)) reasons.push('targeted_schema_types_available');
+  if (summaries.some((summary) => summary.jobType === 'schema_summary_facts' && summary.jsonLdHashCount > 0)) reasons.push('targeted_jsonld_hashes_available');
+  if (summaries.some((summary) => summary.jobType === 'hreflang_facts' && summary.hreflangEntryCount > 0)) reasons.push('targeted_hreflang_entries_available');
+  if (summaries.some((summary) => summary.jobType === 'hreflang_facts' && summary.xDefaultCount > 0)) reasons.push('targeted_hreflang_xdefault_available');
   const affectedUrls = (row.manualItem?.affectedUrls || []).map((url) => normalizeUrl(url)).filter(Boolean);
   if (affectedUrls.length && affectedUrls.some((url) => factIndex.byUrl.has(url))) reasons.push('targeted_url_overlap');
   if ((row.expectedCheckIds || []).length && jobTypes.length) reasons.push('targeted_check_family_match');
@@ -306,6 +314,16 @@ function removableMissingReasons(row, missingReasons, jobTypes, summaries, sampl
   if (jobTypes.includes('title_facts')) removable.add('weak_title_match');
   if (jobTypes.includes('meta_description_facts')) removable.add('weak_title_match');
   if (jobTypes.includes('h1_facts')) removable.add('weak_title_match');
+  if (jobTypes.includes('schema_summary_facts')) {
+    removable.add('weak_title_match');
+    removable.add('missing_data_source');
+    removable.add('missing_template_context');
+    removable.add('missing_page_type_context');
+  }
+  if (jobTypes.includes('hreflang_facts')) {
+    removable.add('weak_title_match');
+    removable.add('missing_data_source');
+  }
   if (jobTypes.includes('canonical_robots_facts')) {
     removable.add('weak_title_match');
     removable.add('missing_data_source');
@@ -327,8 +345,11 @@ function limitationFlags(row, remainingMissingReasons, sampleStats) {
     remainingMissingReasons.includes('sample_too_small') ||
     /domain|sitewide|full crawl|gesamt|alle url|alle seiten|crawler|crawl-bloat/i.test([manual.title, manual.description, row.rationale].join(' '))
   );
+  const tokens = [manual.title, manual.description, row.rationale, ...(row.missingReasons || [])].join(' ').toLowerCase();
   return {
     needsMoreUrls: fullScopeNeeded || sampleStats.jobLimited || sampleStats.checkedUrls > 0 && sampleStats.checkedUrls < 100,
+    needsReturnLinkValidation: /hreflang|return.?link|international|x-default/.test(tokens) && sampleStats.checkedUrls > 0,
+    needsFullDomainSchemaCoverage: /schema|structured data|json.?ld|breadcrumb|product|article|organization/.test(tokens) && (fullScopeNeeded || sampleStats.checkedUrls > 0 && sampleStats.checkedUrls < 100),
     needsHumanReview: Boolean(manual.requiresHumanJudgment || row.coverageStatus === 'needs_human_review' || remainingMissingReasons.includes('human_review_needed')),
     needsLlmReview: Boolean(manual.requiresLlmJudgment || row.coverageStatus === 'needs_llm_review'),
     needsExternalData: Boolean(manual.requiresExternalData || row.coverageStatus === 'needs_external_data' || remainingMissingReasons.includes('missing_data_source') && !sampleStats.checkedUrls),
@@ -382,6 +403,8 @@ function impactTypeFor(context) {
   if (limitations.needsMoreUrls) return 'needs_more_urls';
   if (limitations.needsHumanReview) return 'needs_human_review';
   if (limitations.needsExternalData) return 'needs_external_data';
+  if (limitations.needsReturnLinkValidation) return 'needs_return_link_validation';
+  if (limitations.needsFullDomainSchemaCoverage) return 'needs_full_domain_schema_coverage';
   return 'no_change';
 }
 
@@ -393,6 +416,8 @@ function evidenceBoost(matchReasons, removedMissingReasons, summaries) {
   else if (summaries.some((summary) => summary.checkedUrls >= 5)) boost += 5;
   if (summaries.some((summary) => summary.issueCount > 0)) boost += 6;
   if (summaries.some((summary) => summary.duplicateGroupCount > 0 || summary.patternGroupCount > 0)) boost += 4;
+  if (summaries.some((summary) => summary.jobType === 'schema_summary_facts' && summary.schemaTypesFound?.length)) boost += 6;
+  if (summaries.some((summary) => summary.jobType === 'hreflang_facts' && summary.hreflangEntryCount > 0)) boost += 6;
   return Math.min(28, boost);
 }
 
@@ -481,6 +506,53 @@ function summarizeFactsForType(jobType, facts, jobs) {
         return this.canonicalMissingCount + this.canonicalExternalCount + this.canonicalNonSelfCount +
           this.metaNoindexCount + this.metaNofollowCount + this.xRobotsNoindexCount +
           this.xRobotsNofollowCount + this.robotsConflictCount;
+      }
+    };
+  }
+  if (jobType === 'schema_summary_facts') {
+    const schemaTypesFound = unique(facts.flatMap((fact) => fact.facts?.schemaTypes || []));
+    return {
+      ...base,
+      schemaTypesFound,
+      schemaBlockCount: sumFact(facts, 'schemaBlockCount'),
+      jsonLdBlockCount: sumFact(facts, 'jsonLdBlockCount'),
+      jsonLdHashCount: facts.reduce((sum, fact) => sum + (fact.facts?.jsonLdHashes || []).length, 0),
+      microdataCount: countFact(facts, 'microdataDetected'),
+      rdfaCount: countFact(facts, 'rdfaDetected'),
+      breadcrumbCount: countFact(facts, 'hasBreadcrumbList'),
+      articleCount: countFact(facts, 'hasArticle'),
+      productCount: countFact(facts, 'hasProduct'),
+      organizationCount: countFact(facts, 'hasOrganization'),
+      websiteCount: countFact(facts, 'hasWebSite'),
+      localBusinessCount: countFact(facts, 'hasLocalBusiness'),
+      faqPageCount: countFact(facts, 'hasFAQPage'),
+      howToCount: countFact(facts, 'hasHowTo'),
+      videoObjectCount: countFact(facts, 'hasVideoObject'),
+      parseErrorCount: facts.reduce((sum, fact) => sum + (fact.facts?.parseErrors || []).length, 0),
+      rawJsonCappedCount: countFact(facts, 'rawJsonCapped'),
+      get duplicateGroupCount() { return duplicateGroups(facts, 'schemaSummaryHash').length; },
+      get patternGroupCount() { return this.schemaTypesFound.length ? 1 : 0; },
+      get issueCount() { return this.parseErrorCount + Math.max(0, this.checkedUrls - this.schemaBlockCount) + this.rawJsonCappedCount; }
+    };
+  }
+  if (jobType === 'hreflang_facts') {
+    const languages = unique(facts.flatMap((fact) => fact.facts?.languages || []));
+    const regions = unique(facts.flatMap((fact) => fact.facts?.regions || []));
+    return {
+      ...base,
+      hreflangEntryCount: sumFact(facts, 'hreflangCount'),
+      languages,
+      regions,
+      xDefaultCount: countFact(facts, 'hasXDefault'),
+      selfLanguageCount: countFact(facts, 'hasSelfLanguage'),
+      invalidLanguageCodeCount: countFact(facts, 'hasInvalidLanguageCodes'),
+      emptyHrefCount: countFact(facts, 'hasEmptyHref'),
+      externalTargetCount: countFact(facts, 'hasExternalHreflangTargets'),
+      canonicalConflictCount: countFact(facts, 'canonicalHreflangConflict'),
+      returnLinkValidationPerformed: facts.some((fact) => fact.facts?.returnLinkValidationPerformed === true),
+      get duplicateGroupCount() { return duplicateGroups(facts, 'hreflangSummaryHash').length; },
+      get issueCount() {
+        return this.invalidLanguageCodeCount + this.emptyHrefCount + this.canonicalConflictCount;
       }
     };
   }
@@ -614,6 +686,8 @@ function nextJobsForReason(reason, fallbackJobTypes = []) {
   if (reason === 'weak_title_match') return fallbackJobTypes.length ? fallbackJobTypes : ['title_facts', 'meta_description_facts', 'h1_facts'];
   if (reason === 'missing_data_source') return fallbackJobTypes.length ? fallbackJobTypes : ['canonical_robots_facts'];
   if (reason === 'missing_template_context' || reason === 'missing_page_type_context') return fallbackJobTypes.length ? fallbackJobTypes : ['title_facts', 'meta_description_facts', 'h1_facts'];
+  if (/schema|structured|jsonld|json.?ld/.test(reason)) return fallbackJobTypes.length ? fallbackJobTypes : ['schema_summary_facts'];
+  if (/hreflang|return.?link|international/.test(reason)) return fallbackJobTypes.length ? fallbackJobTypes : ['hreflang_facts'];
   return fallbackJobTypes;
 }
 
@@ -622,7 +696,9 @@ function recommendationReason(jobType, reason) {
     title_facts: 'Title-Facts erweitern Match-Evidence, Hashes und Pattern im Sample.',
     meta_description_facts: 'Meta-Description-Facts schließen fehlende Evidence und betroffene Counts im Sample.',
     h1_facts: 'H1-Facts liefern Headline-Signale und Multiple/Missing-Auswertung.',
-    canonical_robots_facts: 'Canonical/Robots-Facts klären Indexability-, Canonical- und X-Robots-Signale.'
+    canonical_robots_facts: 'Canonical/Robots-Facts klären Indexability-, Canonical- und X-Robots-Signale.',
+    schema_summary_facts: 'Schema-Summary-Facts liefern strukturierte Datentypen, JSON-LD-Hashes und Parse-Fehler ohne Raw-Dumps.',
+    hreflang_facts: 'Hreflang-Facts liefern Sprach-/Region-/x-default-Signale; Return-Link-Validierung bleibt Full-Data-Thema.'
   };
   return `${labels[jobType] || 'Targeted Facts sammeln.'} Anlass: ${reason}.`;
 }
@@ -649,6 +725,8 @@ function upgradeLimitations(limitations, sampleStats, remainingMissingReasons) {
   if (limitations.needsHumanReview) output.push('human_review_required');
   if (limitations.needsLlmReview) output.push('llm_review_required');
   if (limitations.needsExternalData) output.push('external_data_required');
+  if (limitations.needsReturnLinkValidation) output.push('return_link_validation_not_performed');
+  if (limitations.needsFullDomainSchemaCoverage) output.push('full_domain_schema_coverage_not_proven');
   for (const reason of remainingMissingReasons) {
     if (!output.includes(reason)) output.push(reason);
   }
@@ -679,6 +757,10 @@ function formatJobSummary(job = {}) {
 
 function countFact(facts, key) {
   return facts.filter((fact) => Boolean(fact.facts?.[key])).length;
+}
+
+function sumFact(facts, key) {
+  return facts.reduce((sum, fact) => sum + Number(fact.facts?.[key] || 0), 0);
 }
 
 function duplicateGroups(facts, key) {
@@ -721,6 +803,16 @@ function groupBy(rows = [], keyFn) {
 
 function unique(values = []) {
   return Array.from(new Set(values.filter((value) => value !== null && value !== undefined && value !== '')));
+}
+
+function summaryLabel(summary = {}) {
+  if (summary.jobType === 'schema_summary_facts') {
+    return `${(summary.schemaTypesFound || []).slice(0, 8).join(', ') || 'no schema types'}, parse errors ${summary.parseErrorCount || 0}`;
+  }
+  if (summary.jobType === 'hreflang_facts') {
+    return `${summary.hreflangEntryCount || 0} hreflang entries, x-default ${summary.xDefaultCount || 0}, invalid ${summary.invalidLanguageCodeCount || 0}`;
+  }
+  return `${summary.duplicateGroupCount || 0} duplicate group(s)`;
 }
 
 function confidenceFromScore(score) {

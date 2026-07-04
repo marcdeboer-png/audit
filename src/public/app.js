@@ -1932,7 +1932,7 @@ function renderReviewQueueReport(runId, queue, jobsPayload = { jobs: [] }, impac
 }
 
 function executableEvidenceJobs(jobs = []) {
-  const supported = new Set(['title_facts', 'meta_description_facts', 'h1_facts', 'canonical_robots_facts']);
+  const supported = new Set(['title_facts', 'meta_description_facts', 'h1_facts', 'canonical_robots_facts', 'schema_summary_facts', 'hreflang_facts']);
   return jobs.filter((job) => supported.has(job.jobType));
 }
 
@@ -1963,7 +1963,7 @@ function renderEvidenceJobHistoryRowsWithImpact(jobs = [], impact = null) {
     <td>${escapeHtml(job.jobType)}</td>
     <td><span class="status ${escapeHtml(job.status)}">${escapeHtml(job.status)}</span></td>
     <td>${escapeHtml(job.urlCountProcessed || 0)} / ${escapeHtml(job.urlCountPlanned || 0)} · ok ${escapeHtml(job.urlCountSucceeded || 0)} · fail ${escapeHtml(job.urlCountFailed || 0)}</td>
-    <td>${escapeHtml(evidenceJobImpactLabel(job, impact))}</td>
+    <td>${escapeHtml(evidenceJobImpactLabel(job, impact))}<div class="muted">${escapeHtml(evidenceJobFactSummaryLabel(job))}</div></td>
     <td>${escapeHtml(formatBytes(job.actualStoredBytesEstimate || job.estimatedTotalBytes || 0))}</td>
     <td>${escapeHtml(formatDateTime(job.startedAt || job.createdAt))}</td>
   </tr>`).join('');
@@ -2009,6 +2009,15 @@ function renderEvidenceImpactPanel(impact = null) {
         </tbody>
       </table>
     </div>
+    <h3>Fact Summaries</h3>
+    <div class="table-scroll">
+      <table class="validation-matrix">
+        <thead><tr><th>Job</th><th>Checked URLs</th><th>Issue Signals</th><th>Summary</th><th>Warnings</th></tr></thead>
+        <tbody>
+          ${renderEvidenceFactSummaryRows(impact.factSummaries || {})}
+        </tbody>
+      </table>
+    </div>
     <h3>Next Recommended Jobs</h3>
     <div class="table-scroll">
       <table class="validation-matrix">
@@ -2045,6 +2054,50 @@ function evidenceJobImpactLabel(job, impact = null) {
   const upgraded = changed.filter((item) => item.previousStatus !== item.newStatus);
   if (changed.length) return `${changed.length} changed, ${upgraded.length} upgrade(s)`;
   return `${(job.relatedManualItemIds || []).length || 0} planned point(s)`;
+}
+
+function evidenceJobFactSummaryLabel(job = {}) {
+  const summary = job.summary?.factSummary || {};
+  if (!summary.jobType) return '';
+  if (summary.jobType === 'schema_summary_facts') {
+    return `Schema: ${(summary.schemaTypesFound || []).slice(0, 4).join(', ') || 'none'}; parse errors ${summary.parseErrorCount || 0}`;
+  }
+  if (summary.jobType === 'hreflang_facts') {
+    return `Hreflang: ${summary.hreflangEntryCount || 0}; x-default ${summary.xDefaultCount || 0}; invalid ${summary.invalidLanguageCodeCount || 0}`;
+  }
+  if (summary.jobType === 'h1_facts') return `H1 missing ${summary.missingCount || 0}; multiple ${summary.multipleCount || 0}`;
+  if (summary.jobType === 'canonical_robots_facts') return `Canonicals external ${summary.canonicalExternalCount || 0}; x-robots noindex ${summary.xRobotsNoindexCount || 0}`;
+  if (summary.jobType === 'title_facts') return `Title missing ${summary.missingCount || 0}; too long ${summary.tooLongCount || 0}`;
+  if (summary.jobType === 'meta_description_facts') return `Meta missing ${summary.missingCount || 0}; too short ${summary.tooShortCount || 0}`;
+  return '';
+}
+
+function renderEvidenceFactSummaryRows(summaries = {}) {
+  const rows = Object.values(summaries || {});
+  if (!rows.length) return '<tr><td colspan="5" class="muted">Noch keine Fact Summaries.</td></tr>';
+  return rows.map((summary) => `<tr>
+    <td><code>${escapeHtml(summary.jobType)}</code></td>
+    <td>${escapeHtml(summary.checkedUrls || 0)}</td>
+    <td>${escapeHtml(summary.issueCount || 0)}</td>
+    <td>${escapeHtml(evidenceFactSummaryText(summary))}</td>
+    <td>${escapeHtml(summary.failedRows ? `${summary.failedRows} failed row(s)` : '')}</td>
+  </tr>`).join('');
+}
+
+function evidenceFactSummaryText(summary = {}) {
+  if (summary.jobType === 'schema_summary_facts') {
+    return `types ${(summary.schemaTypesFound || []).slice(0, 10).join(', ') || 'none'}; JSON-LD ${summary.jsonLdBlockCount || 0}; parse errors ${summary.parseErrorCount || 0}`;
+  }
+  if (summary.jobType === 'hreflang_facts') {
+    return `entries ${summary.hreflangEntryCount || 0}; languages ${(summary.languages || []).join(', ') || 'none'}; x-default ${summary.xDefaultCount || 0}; canonical conflicts ${summary.canonicalConflictCount || 0}`;
+  }
+  if (summary.jobType === 'canonical_robots_facts') {
+    return `canonical missing ${summary.canonicalMissingCount || 0}; external ${summary.canonicalExternalCount || 0}; noindex ${summary.metaNoindexCount || 0}; x-robots noindex ${summary.xRobotsNoindexCount || 0}`;
+  }
+  if (summary.jobType === 'h1_facts') return `missing ${summary.missingCount || 0}; empty ${summary.emptyCount || 0}; multiple ${summary.multipleCount || 0}`;
+  if (summary.jobType === 'title_facts') return `missing ${summary.missingCount || 0}; too long ${summary.tooLongCount || 0}; duplicates ${summary.duplicateGroupCount || 0}`;
+  if (summary.jobType === 'meta_description_facts') return `missing ${summary.missingCount || 0}; too short ${summary.tooShortCount || 0}; duplicates ${summary.duplicateGroupCount || 0}`;
+  return '';
 }
 
 function wireEvidenceJobButtons(runId) {
@@ -2191,7 +2244,7 @@ function renderMaturityPage(maturity) {
       <div id="export-message" class="muted"></div>
 
       <section class="stats maturity-stats">
-        ${maturityStat('Gesamtscore', weightedScore === null ? 'NA' : weightedScore, 'accent')}
+        ${maturityStat('Gesamtscore', formatMaturityScore(weightedScore), 'accent')}
         ${maturityStat('Prüfpunkte', `${maturity.evaluatedChecks}/${maturity.totalChecks}`)}
         ${maturityStat('Beste Kategorie', best)}
         ${maturityStat('Schwachstelle', weakest)}
@@ -2201,8 +2254,8 @@ function renderMaturityPage(maturity) {
         <summary>Methodik & Details</summary>
         <div class="grid metrics">
           ${maturityStat('Label', maturity.maturityLabel || 'NA')}
-          ${maturityStat('Ungewichtet', maturity.unweightedScore === null ? 'NA' : maturity.unweightedScore)}
-          ${maturityStat('Check-Schnitt', maturity.checkAverageScore === null ? 'NA' : maturity.checkAverageScore)}
+          ${maturityStat('Ungewichtet', formatMaturityScore(maturity.unweightedScore))}
+          ${maturityStat('Check-Schnitt', formatMaturityScore(maturity.checkAverageScore))}
           ${maturityStat('Action Items', maturity.actionItems)}
         </div>
       </details>
@@ -2282,7 +2335,7 @@ function renderMaturitySunburst(maturity = {}) {
   const weightedScore = maturity.weightedScore ?? maturity.maturityScore;
   const layout = createSunburstLayout(maturity.categories || [], { size: 900 });
   const { size, center, centerRadius, categoryOuterRadius, itemInnerRadius, itemOuterRadius } = layout;
-  const centerScore = weightedScore === null || weightedScore === undefined ? 'NA' : weightedScore;
+  const centerScore = formatMaturityScore(weightedScore);
   const categoryMarkup = layout.categories.map((segment) => {
     const labelPoint = polarToXY(center, center, segment.midAngle, (centerRadius + categoryOuterRadius) / 2);
     const rotation = sunburstTextRotation(segment.midAngle);
@@ -2475,7 +2528,7 @@ function maturityBar(category) {
     <div class="maturity-bar-bg" aria-label="${escapeHtml(category.name)} ${escapeHtml(score)} von 10">
       <span class="maturity-bar-fill" style="width:${width}%;background:${maturityColor(score)}"></span>
     </div>
-    <strong class="maturity-score">${category.score === null ? 'NA' : escapeHtml(category.score)}</strong>
+    <strong class="maturity-score">${escapeHtml(formatMaturityScore(category.score))}</strong>
   </div>`;
 }
 
@@ -2487,7 +2540,7 @@ function maturityCategoryRow(category) {
     <td class="cat-name">${escapeHtml(category.name)}<div class="muted">${escapeHtml(category.description)}</div></td>
     <td><strong>${escapeHtml(category.weight)}</strong><div class="muted">${escapeHtml(category.weightShare || 0)}% Anteil</div></td>
     <td>${escapeHtml(category.evaluatedCount)} / ${escapeHtml(category.checkCount)}</td>
-    <td class="cat-score" style="color:${maturityColor(category.score)}">${category.score === null ? 'NA' : escapeHtml(category.score)}</td>
+    <td class="cat-score" style="color:${maturityColor(category.score)}">${escapeHtml(formatMaturityScore(category.score))}</td>
     <td class="cat-bar"><div class="bar-bg"><div class="bar-fill" style="width:${category.normalizedScore || 0}%;background:${maturityColor(category.score)}"></div></div><div class="muted">${escapeHtml(category.maturityLabel)}</div></td>
     <td>${escapeHtml(recommendation)}</td>
   </tr>`;
@@ -3350,6 +3403,13 @@ function formatObjectSummary(value) {
 
 function formatScore(value) {
   return value === null || value === undefined || value === '' ? '' : `${Math.round(Number(value) * 100)}%`;
+}
+
+function formatMaturityScore(value) {
+  if (value === null || value === undefined || value === '') return 'NA';
+  const number = Number(value);
+  if (!Number.isFinite(number)) return String(value);
+  return `${Number(number.toFixed(1))}/10`;
 }
 
 function scoreLabel(value) {

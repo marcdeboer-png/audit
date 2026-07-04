@@ -97,7 +97,8 @@ test('Batch 10.7 unresolved queue excludes covered rows and creates evidence pac
   assert.ok(queue.evidencePacks.packs.find((pack) => pack.manualItem.title === 'E-E-A-T'));
   assert.match(renderUnresolvedAuditQueueMarkdown(queue), /Title tag/);
   assert.match(renderEvidencePacksMarkdown(queue.evidencePacks), /Suggested next step/);
-  assert.match(renderEvidenceJobPlanMarkdown(queue.evidenceJobPlan), /Runner implemented: no/);
+  assert.match(renderEvidenceJobPlanMarkdown(queue.evidenceJobPlan), /Runner implemented: yes/);
+  assert.match(renderEvidenceJobPlanMarkdown(queue.evidenceJobPlan), /Low-risk targeted fact jobs are executable/);
 });
 
 test('Batch 10.7 validation exports include unresolved queue, evidence packs and job plan', () => {

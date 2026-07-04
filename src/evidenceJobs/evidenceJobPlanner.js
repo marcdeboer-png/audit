@@ -17,9 +17,9 @@ const GAP_TO_JOB_TYPES = Object.freeze({
   needs_legal_privacy_review: ['legal_privacy_review'],
   needs_entity_trust_review: ['human_quality_review'],
   needs_manual_strategy_context: ['human_quality_review'],
-  needs_more_urls: ['title_facts', 'meta_description_facts', 'canonical_robots_facts'],
-  needs_specific_url_set: ['title_facts', 'meta_description_facts', 'canonical_robots_facts'],
-  needs_larger_crawl: ['title_facts', 'meta_description_facts', 'canonical_robots_facts'],
+  needs_more_urls: ['title_facts', 'meta_description_facts', 'h1_facts', 'canonical_robots_facts'],
+  needs_specific_url_set: ['title_facts', 'meta_description_facts', 'h1_facts', 'canonical_robots_facts'],
+  needs_larger_crawl: ['title_facts', 'meta_description_facts', 'h1_facts', 'canonical_robots_facts'],
   needs_external_import: []
 });
 
@@ -68,8 +68,9 @@ export function buildEvidenceJobPlan(points = [], options = {}) {
     jobs,
     storageProjectionSummary: storageProjectionSummary(jobs),
     runnerStatus: {
-      implemented: false,
-      message: 'Batch 10.7 provides planning and review queues only. Job execution should be added after confirming URL-source and storage semantics.'
+      implemented: true,
+      executableJobTypes: ['title_facts', 'meta_description_facts', 'h1_facts', 'canonical_robots_facts', 'schema_summary_facts', 'hreflang_facts'],
+      message: 'Low-risk targeted fact jobs are executable with capped URL sets and no raw/rendered HTML storage.'
     }
   };
 }
