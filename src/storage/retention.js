@@ -32,6 +32,10 @@ export function sanitizeCheckResultForStorage(item, policy = DEFAULT_POLICY) {
   const maxSamples = Math.max(1, Number(policy.maxEvidenceSamplesPerCheck || DEFAULT_POLICY.maxEvidenceSamplesPerCheck));
   const sampleUrls = dedupeUrlSamples(item.sampleUrls || [], maxSamples);
   const evidenceResult = pruneEvidence(item.evidence || {}, policy);
+  const factsResult = pruneEvidence(item.facts || {}, policy);
+  const assessmentResult = pruneEvidence(item.assessment || {}, policy);
+  const recommendationMetaResult = pruneEvidence(item.recommendationMeta || {}, policy);
+  const requirementsResult = pruneEvidence(item.requirements || {}, policy);
   const evidence = evidenceResult.truncated
     ? {
         ...evidenceResult.value,
@@ -52,7 +56,11 @@ export function sanitizeCheckResultForStorage(item, policy = DEFAULT_POLICY) {
     reviewReason: truncateText(item.reviewReason, 1000),
     interpretation: truncateText(item.interpretation, 2000),
     limitations: truncateText(item.limitations, 2000),
-    evidence
+    evidence,
+    facts: factsResult.value,
+    assessment: assessmentResult.value,
+    recommendationMeta: recommendationMetaResult.value,
+    requirements: requirementsResult.value
   };
 }
 

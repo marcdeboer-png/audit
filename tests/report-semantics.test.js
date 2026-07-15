@@ -47,7 +47,7 @@ test('OK and informational NA checks are not open review tasks or action items',
   db.close();
 });
 
-test('AI crawler policy checks are GEO opportunities, not core issues', async () => {
+test('inherited AI crawler policy is informational and not a core issue', async () => {
   const db = setupDb();
   const runId = createRun(db, 'geo');
   insertAsset(db, runId, 'robots', 'https://example.com/robots.txt', 200, 'User-agent: *\nAllow: /');
@@ -58,15 +58,17 @@ test('AI crawler policy checks are GEO opportunities, not core issues', async ()
   const gptbot = result(db, runId, 'geo.robots_mentions_gptbot');
   assert.equal(gptbot.category, 'AI Crawler Policy');
   assert.equal(gptbot.priority, 'Low');
-  assert.equal(gptbot.findingType, 'opportunity');
+  assert.equal(gptbot.status, 'NA');
+  assert.equal(gptbot.evaluationState, 'not_applicable');
+  assert.equal(gptbot.findingType, 'info');
 
   const html = generateReportHtml(db, runId);
-  assert.match(section(html, 'GEO Opportunities', 'Security Best Practices'), /geo\.robots_mentions_gptbot/);
+  assert.match(section(html, 'Not Applicable Checks', 'All Findings'), /geo\.robots_mentions_gptbot/);
   assert.doesNotMatch(section(html, 'Action Items', 'Confirmed / Needs Fix Findings'), /geo\.robots_mentions_gptbot/);
   db.close();
 });
 
-test('llms-full 500 without reference is low optional opportunity', async () => {
+test('llms-full 500 without reference is optional and score-excluded', async () => {
   const db = setupDb();
   const runId = createRun(db, 'geo');
   insertAsset(db, runId, 'robots', 'https://example.com/robots.txt', 200, 'User-agent: *\nAllow: /');
@@ -75,10 +77,12 @@ test('llms-full 500 without reference is low optional opportunity', async () => 
 
   await runChecks(db, runId);
   const row = result(db, runId, 'geo.llms_full_txt_present');
-  assert.equal(row.status, 'Warning');
+  assert.equal(row.status, 'NA');
+  assert.equal(row.evaluationState, 'not_applicable');
+  assert.equal(row.scoreEligible, 0);
   assert.equal(row.priority, 'Low');
-  assert.equal(row.findingType, 'opportunity');
-  assert.match(row.finding, /returned 500 instead of 2xx and is not referenced/);
+  assert.equal(row.findingType, 'info');
+  assert.match(row.finding, /returned 500 and is not referenced/);
   db.close();
 });
 

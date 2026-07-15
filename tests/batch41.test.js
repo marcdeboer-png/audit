@@ -20,7 +20,7 @@ test('check results persist only valid statuses and priorities', async () => {
   db.close();
 });
 
-test('llms-full.txt missing is a low GEO opportunity and referenced broken files remain reviewable', async () => {
+test('unreferenced llms-full.txt is excluded while referenced broken files remain reviewable', async () => {
   const db = setupDb();
   const runId = createRun(db, 'geo');
   insertAsset(db, runId, 'llms', 'https://example.com/llms.txt', 200, '# llms');
@@ -29,9 +29,11 @@ test('llms-full.txt missing is a low GEO opportunity and referenced broken files
   await runChecks(db, runId);
   assert.equal(result(db, runId, 'geo.llms_txt_present').status, 'OK');
   const missingFull = result(db, runId, 'geo.llms_full_txt_present');
-  assert.equal(missingFull.status, 'Warning');
+  assert.equal(missingFull.status, 'NA');
+  assert.equal(missingFull.evaluationState, 'not_applicable');
+  assert.equal(missingFull.scoreEligible, 0);
   assert.equal(missingFull.priority, 'Low');
-  assert.equal(missingFull.findingType, 'opportunity');
+  assert.equal(missingFull.findingType, 'info');
   assert.equal(missingFull.reviewRecommended, 0);
 
   const referencedRunId = createRun(db, 'geo');
@@ -42,6 +44,31 @@ test('llms-full.txt missing is a low GEO opportunity and referenced broken files
   const referenced = result(db, referencedRunId, 'geo.llms_full_txt_present');
   assert.equal(referenced.status, 'Warning');
   assert.equal(JSON.parse(referenced.evidenceJson).references.length, 1);
+
+  const technicalRunId = createRun(db, 'geo');
+  insertAsset(db, technicalRunId, 'llms', 'https://example.com/llms.txt', null, null);
+  insertAsset(db, technicalRunId, 'llms_full', 'https://example.com/llms-full.txt', null, null);
+  await runChecks(db, technicalRunId);
+  const technical = result(db, technicalRunId, 'geo.llms_full_txt_present');
+  assert.equal(technical.status, 'NA');
+  assert.equal(technical.evaluationState, 'technical_error');
+  assert.equal(technical.scoreEligible, 0);
+  assert.equal(technical.score, null);
+  db.close();
+});
+
+test('an observed empty robots.txt body is not treated as missing evidence', async () => {
+  const db = setupDb();
+  const runId = createRun(db, 'geo');
+  insertAsset(db, runId, 'robots', 'https://example.com/robots.txt', 200, '');
+
+  await runChecks(db, runId);
+
+  assert.equal(result(db, runId, 'geo.ai_bots_policy_summary').status, 'OK');
+  const bot = result(db, runId, 'geo.robots_mentions_gptbot');
+  assert.equal(bot.status, 'NA');
+  assert.equal(bot.evaluationState, 'not_applicable');
+  assert.equal(bot.scoreEligible, 0);
   db.close();
 });
 

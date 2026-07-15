@@ -365,6 +365,7 @@ function extractFeatureFlags($, bodyText, links, h2Count, pageUrl) {
     prefetch: $('link[rel~="prefetch"]').length
   };
   const semanticSignals = extractSemanticSignals($);
+  const searchSignals = extractSearchSignals($, bodyText, htmlSample);
 
   return {
     tablesCount: $('table').length,
@@ -384,6 +385,7 @@ function extractFeatureFlags($, bodyText, links, h2Count, pageUrl) {
     hasPreload: resourceHintCounts.preload > 0 || resourceHintCounts.modulepreload > 0,
     hasPreconnect: resourceHintCounts.preconnect > 0 || resourceHintCounts.dnsPrefetch > 0,
     resourceHintCounts,
+    ...searchSignals,
     ...semanticSignals,
     hreflangCount: hreflangLinks.length,
     hreflangLanguages: [...new Set(hreflangLinks.map((item) => item.hreflang.toLowerCase()))].slice(0, 50),
@@ -399,6 +401,42 @@ function extractFeatureFlags($, bodyText, links, h2Count, pageUrl) {
     articleLike,
     productLike: /\/(product|produkt|shop|p)\//i.test(new URLSafePath($, pageUrl)) || $('[itemtype*="Product"]').length > 0,
     lowStructuredSections: countWords(bodyText) > 250 && h2Count < 2 && !hasLists && !hasTables
+  };
+}
+
+function extractSearchSignals($, bodyText, htmlSample) {
+  const forms = [];
+  $('form').each((_, element) => {
+    const form = $(element);
+    const action = String(form.attr('action') || '').trim();
+    const role = String(form.attr('role') || '').toLowerCase();
+    const inputs = form.find('input').map((__, input) => ({
+      type: String($(input).attr('type') || '').toLowerCase(),
+      name: String($(input).attr('name') || '').toLowerCase(),
+      role: String($(input).attr('role') || '').toLowerCase()
+    })).get();
+    const hasSearchInput = inputs.some((input) => input.type === 'search' || input.role === 'searchbox' || ['s', 'q', 'query', 'search'].includes(input.name));
+    const actionLooksSearch = /\/(search|suche|site-search)(?:\/|$)|[?&](s|q|query|search)=/i.test(action);
+    if (role !== 'search' && !hasSearchInput && !actionLooksSearch) return;
+    const inGlobalChrome = form.closest('header,nav,footer').length > 0;
+    const inMain = form.closest('main,[role="main"],article').length > 0 && !inGlobalChrome;
+    forms.push({
+      action: action.slice(0, 500) || null,
+      inputNames: [...new Set(inputs.map((input) => input.name).filter(Boolean))].slice(0, 10),
+      inGlobalChrome,
+      inMain
+    });
+  });
+  const explicitResultsText = /\b(search results?|suchergebnisse|ergebnisse\s+f(?:u|ü)r|results?\s+for)\b/i.test(bodyText.slice(0, 5000));
+  const searchResultListCount = $('[class*="search-results"], [id*="search-results"], [class*="search-result-list"], [data-search-results]').length;
+  return {
+    searchFormCount: forms.length,
+    mainSearchFormCount: forms.filter((form) => form.inMain).length,
+    globalSearchFormCount: forms.filter((form) => form.inGlobalChrome).length,
+    searchFormSamples: forms.slice(0, 5),
+    hasExplicitSearchResultsText: explicitResultsText,
+    searchResultListCount,
+    hasSearchAction: /["']@type["']\s*:\s*["']SearchAction["']/i.test(htmlSample)
   };
 }
 

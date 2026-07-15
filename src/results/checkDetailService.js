@@ -85,7 +85,15 @@ export function getCheckDetail(db, runId, checkResultId, options = {}) {
     reportSection: checkResult.reportSection,
     affectedCount: checkResult.affectedCount || 0,
     sampleUrls: checkResult.sampleUrls,
+    evaluationState: checkResult.evaluationState,
+    scoreEligible: Boolean(checkResult.scoreEligible),
+    scoreExclusionReason: checkResult.scoreExclusionReason || null,
+    scoreDeduplicationKey: checkResult.scoreDeduplicationKey || null,
+    facts: checkResult.facts,
     evidence: checkResult.evidence,
+    assessment: checkResult.assessment,
+    recommendationMeta: checkResult.recommendationMeta,
+    requirements: checkResult.requirements,
     context: buildNarrative(checkResult, detail),
     columns,
     rows: enrichedRows,
@@ -127,6 +135,10 @@ function loadCheckResult(db, runId, checkResultId) {
     auditType: row.checkId.startsWith('geo.') || row.checkId.startsWith('trust.') || row.checkId.startsWith('llm.') ? 'geo' : 'tech',
     sampleUrls: safeJson(row.sampleUrlsJson, []),
     evidence: safeJson(row.evidenceJson, {}),
+    facts: safeJson(row.factsJson, {}),
+    assessment: safeJson(row.assessmentJson, {}),
+    recommendationMeta: safeJson(row.recommendationMetaJson, {}),
+    requirements: safeJson(row.requirementsJson, {}),
     relatedCheckIds: safeJson(row.relatedCheckIdsJson, [])
   }));
 }

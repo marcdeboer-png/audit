@@ -83,6 +83,7 @@ const rawMaturityCategories = [
       'tech.http_to_https_redirect',
       'tech.www_non_www_consistency',
       'tech.status_code_distribution',
+      'tech.synthetic_not_found_handling',
       'tech.4xx_pages',
       'tech.5xx_pages',
       'tech.redirect_pages',

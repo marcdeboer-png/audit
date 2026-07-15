@@ -4,6 +4,7 @@ import { techChecks } from './tech/index.js';
 import { geoChecks } from './geo/index.js';
 import { applyEffectiveValues } from '../reviews/reviewWorkflow.js';
 import { runLlmChecks } from '../llm/llmCheckRunner.js';
+import { makeResult } from './helpers.js';
 
 export async function runChecks(db, runId) {
   const run = getRunWithProject(db, runId);
@@ -36,25 +37,31 @@ export async function runChecks(db, runId) {
       const result = await check.run(context);
       results.push(importAwareResult(run, {
         ...result,
-        score: scoreForStatus(result.status)
+        score: result.scoreEligible === false ? null : scoreForStatus(result.status)
       }));
     } catch (error) {
       logRun(db, runId, 'error', 'Check failed', { checkId: check.id, error: error.message });
       results.push({
-        id: check.id,
-        category: check.category,
-        name: check.name,
-        auditType: check.auditType,
-        status: 'Warning',
-        priority: check.priority || 'Medium',
-        effort: check.effort || 'M',
-        score: scoreForStatus('Warning'),
-        finding: `${check.name}: check execution failed.`,
-        details: error.message,
-        recommendation: 'Review the stored crawl data and check implementation.',
-        affectedCount: 1,
-        sampleUrls: [],
-        evidence: { error: error.message }
+        ...makeResult(check, 'NA', {
+          evaluationState: 'technical_error',
+          scoreEligible: false,
+          priority: check.priority || 'Medium',
+          effort: check.effort || 'M',
+          finding: `${check.name}: check execution failed.`,
+          details: error.message,
+          recommendation: 'Review the check execution log and repeat this targeted check after fixing the tooling error.',
+          affectedCount: 0,
+          sampleUrls: [],
+          facts: {},
+          evidence: { checkId: check.id, technicalError: error.message },
+          requirements: {
+            requiredFacts: [],
+            missingFacts: [],
+            canCollectWithTargetedRun: true,
+            reason: `Check execution failed: ${error.message}`
+          }
+        }),
+        score: null
       });
     }
   }
@@ -63,7 +70,9 @@ export async function runChecks(db, runId) {
     const llmResults = await runLlmChecks(context);
     results.push(...llmResults.map((result) => ({
       ...result,
-      score: scoreForStatus(result.status)
+      evaluationState: result.evaluationState || (result.status === 'OK' ? 'pass' : ['Warning', 'Error'].includes(result.status) ? 'fail' : 'not_executed'),
+      scoreEligible: result.scoreEligible ?? ['OK', 'Warning', 'Error'].includes(result.status),
+      score: result.scoreEligible === false ? null : scoreForStatus(result.status)
     })));
   } catch (error) {
     logRun(db, runId, 'error', 'LLM checks failed without aborting audit', { error: error.message });
@@ -96,6 +105,10 @@ function importAwareResult(run, result) {
   return {
     ...result,
     status: 'NA',
+    score: null,
+    evaluationState: 'not_executed',
+    scoreEligible: false,
+    scoreExclusionReason: 'Live HTTP facts are unavailable in an import-only run.',
     affectedCount: 0,
     finding: `${result.name}: not evaluated for Screaming Frog import runs.`,
     details: 'This check requires live HTTP/domain asset data that was not part of the imported Screaming Frog CSV facts.',
@@ -104,6 +117,14 @@ function importAwareResult(run, result) {
     evidence: {
       sourceType: run.sourceType,
       skippedReason: 'requires_live_crawl_data'
+    },
+    requirements: {
+      requiredFacts: ['liveHttpResponse'],
+      optionalFacts: [],
+      missingFacts: ['liveHttpResponse'],
+      minimumCoverage: 1,
+      canCollectWithTargetedRun: true,
+      reason: 'Run a live or hybrid audit to collect this fact.'
     }
   };
 }
@@ -136,6 +157,11 @@ export function loadResultsWithScores(db, runId) {
     auditType: row.checkId.startsWith('geo.') || row.checkId.startsWith('trust.') || row.checkId.startsWith('llm.') ? 'geo' : 'tech',
     sampleUrls: safeParse(row.sampleUrlsJson, []),
     evidence: safeParse(row.evidenceJson, {}),
+    facts: safeParse(row.factsJson, {}),
+    assessment: safeParse(row.assessmentJson, {}),
+    recommendationMeta: safeParse(row.recommendationMetaJson, {}),
+    requirements: safeParse(row.requirementsJson, {}),
+    scoreEligible: Boolean(row.scoreEligible),
     relatedCheckIds: safeParse(row.relatedCheckIdsJson, [])
   })).map(applyEffectiveValues);
 

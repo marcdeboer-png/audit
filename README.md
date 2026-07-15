@@ -180,6 +180,18 @@ Evidence und Samples bleiben im Report verfuegbar, werden aber in einklappbaren 
 
 Scores schliessen optionale unavailable Sampling-Checks aus und gewichten Security Best Practices und GEO Opportunities niedriger als Core SEO Issues. Dadurch kann ein hoher Score sinnvoll neben Low-Priority-Opportunities stehen.
 
+### Evidence-Gates, 404-Test und Score-Erklaerung
+
+Der Live-Audit fuehrt waehrend der aktiven Check-Phase einen kleinen synthetischen Not-Found-Test aus. Er sendet ausschliesslich fuenf lesende GET-Requests: einen Homepage-Request als Vergleich sowie vier eindeutige Nonce-URLs (Root-Pfad, verschachtelter Pfad, dateiaehnlicher Pfad und Query-Variante). Admin-, Login-, API- oder Security-Pfade werden nicht verwendet. Erwartet werden `404` oder ein bewusstes `410`; `200`, Weiterleitungen auf regulaere Inhalte, Redirect-Schleifen und `5xx` werden getrennt bewertet. Netzwerk-, Firewall- oder instabile Antworten ergeben `technical_error` und keinen Website-Fehler. Gespeichert werden Status, Redirect-Kette, Header-Auswahl, Laenge, Titel, Hash, kurzer Auszug und Homepage-Aehnlichkeit, aber kein vollstaendiger Response-Body. Import-Runs und spaetere reine Report-Neuberechnungen loesen keine neuen Live-Requests aus.
+
+Checks koennen die Bewertungszustaende `pass`, `fail`, `not_applicable`, `insufficient_evidence`, `not_executed` und `technical_error` speichern. Die letzten vier Zustaende sind nicht scorefaehig. `null`, leerer String, `0` und `false` bleiben beobachtete Werte; nur eine nicht erhobene beziehungsweise `undefined` Messung gilt als fehlend. Jeder angepasste Check weist benoetigte und optionale Fakten, fehlende Fakten, Mindestabdeckung, Wiederholbarkeit per Targeted Run und Ausschlussgrund aus.
+
+Die interne Suchseiten-Erkennung kombiniert URL-Pfad oder Suchparameter mit Resultat-Ueberschrift/-Text, Main-Content-Suchformular, Ergebnisliste und optional `SearchAction`. Ein Suchfeld im globalen Header, ein einzelner `q`-Parameter, Kategorie-/Tag-/Autorenarchive, Glossare und Filterseiten reichen nicht. Widerspruechliche Signale ergeben `insufficient_evidence`; die erkannten positiven und widersprechenden Signale stehen in der Evidence.
+
+Das Scoring aggregiert nur `pass`/`fail`, gewichtet optionale Low-Findings geringer und dedupliziert ausschliesslich Checks mit einem expliziten gemeinsamen Root-Cause-Key. Die maschinenlesbare `summary/scores.json` und der HTML-Report enthalten Kategorien, gewichtete Abzuege, ausgeschlossene Checks, Deduplizierungen, Datenabdeckung und den maximal abgedeckten Score-Anteil. Eine geringe Datenabdeckung kann deshalb neben einem hohen normalisierten Score stehen und muss separat interpretiert werden.
+
+Finding-Daten trennen additiv `facts`, `evidence`, `assessment` und `recommendationMeta`. Fakten sind Messwerte, Evidence beschreibt Quelle und Zeitpunkt, Assessment enthaelt Interpretation und Gueltigkeitsbedingungen, und die Empfehlung bleibt eine Handlungsempfehlung. Bestehende Textfelder bleiben fuer Kompatibilitaet erhalten.
+
 Comparison Reports zeigen Base Run vs Compare Run mit Executive Delta Summary, Regression Findings, neuen/resolved/worsened/improved Findings, URL-Aenderungen, Template-Aenderungen und Performance-Aenderungen. Synthetische Regression Findings existieren nur im Vergleichskontext und werden nicht als normale Check-Ergebnisse gespeichert.
 
 ## Architektur
@@ -211,6 +223,8 @@ Batch 3 erweitert `runs` migrationssicher um `lockToken`, `lockedAt`, `heartbeat
 Batch 4 erweitert `runs` um `maxSitemapUrls`, `maxSitemaps`, `sitemapBatchSize`, `sampleUrlsPerTemplate`, `maxTemplateSamplesTotal`, `sitemapUrlsDiscovered`, `sitemapUrlsQueued`, `sitemapFilesProcessed` und `currentSitemapUrl`. `pages` enthaelt `templateClusterId` und `templateClusterKey`; `crawl_queue` enthaelt `shardKey` und `shardId`. Neu sind `template_clusters` fuer URL-/Template-Zusammenfassungen und `scheduled_runs` als vorbereitete Scheduling-Tabelle.
 
 Batch 4.1 erweitert `check_results` additiv um `reportGroupingKey`, `findingType`, `confidence`, `reviewRecommended` und `relatedCheckIdsJson`. `page_images` enthaelt Heuristikfelder fuer dekorative Bilder, Badges, Tracking-Pixel und Icons. Status und Prioritaeten werden vor dem Speichern normalisiert: Status ist nur `OK`, `Warning`, `Error` oder `NA`; Priority ist nur `High`, `Medium` oder `Low`.
+
+Der Evidence-Gate-Batch erweitert `check_results` additiv um `evaluationState`, `scoreEligible`, `scoreExclusionReason`, `requirementsJson`, `factsJson`, `assessmentJson`, `recommendationMetaJson` und `scoreDeduplicationKey`. `OK`, `Warning`, `Error` und `NA` bleiben als kompatible Anzeigezustaende bestehen; die fachliche Bewertbarkeit wird separat gespeichert.
 
 Batch 5 fuegt `finding_reviews` hinzu. Originale `check_results` bleiben unveraendert; manuelle Felder wie `manualStatus`, `manualPriority`, `manualFinding` und `manualRecommendation` werden nur als Effective Values in UI, Report und Export genutzt.
 

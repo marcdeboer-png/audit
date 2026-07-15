@@ -1,6 +1,7 @@
 import {
   HTML_WHERE,
   all,
+  availabilityResult,
   count,
   dedupeLinkSamples,
   htmlPageCount,
@@ -98,6 +99,46 @@ function getAsset(ctx, type) {
   `).get(ctx.run.id, type);
 }
 
+function assetHttpResponseGate(check, asset, factName) {
+  if (!asset) {
+    return availabilityResult(check, 'not_executed', {
+      finding: `${check.name}: no HTTP asset observation was collected.`,
+      details: 'The absence of a domain-asset row is not treated as an HTTP failure.',
+      recommendation: 'Repeat only the targeted domain-asset request if this signal is needed.',
+      facts: { assetObserved: false },
+      evidence: { factName, source: 'domain_assets' },
+      requirements: { requiredFacts: [factName], missingFacts: [factName], canCollectWithTargetedRun: true }
+    });
+  }
+  if (asset.statusCode === null || asset.statusCode === undefined) {
+    return availabilityResult(check, 'technical_error', {
+      finding: `${check.name}: no stable HTTP response was available.`,
+      details: 'A network or request failure is not scored as a website defect.',
+      recommendation: 'Repeat the small targeted HTTP request after resolving the technical collection error.',
+      facts: { assetObserved: true, statusCode: null },
+      evidence: { factName, url: asset.url, source: 'domain_assets' },
+      requirements: { requiredFacts: [factName], missingFacts: [factName], canCollectWithTargetedRun: true }
+    });
+  }
+  return null;
+}
+
+function assetContentGate(check, asset, factName) {
+  const responseGate = assetHttpResponseGate(check, asset, `${factName}HttpResponse`);
+  if (responseGate) return responseGate;
+  if (asset.content === null || asset.content === undefined) {
+    return availabilityResult(check, 'insufficient_evidence', {
+      finding: `${check.name}: the HTTP response was observed, but retained content is unavailable.`,
+      details: 'Missing retained content is not equivalent to an empty response body.',
+      recommendation: 'Repeat the targeted request with domain-asset content retention if policy parsing is required.',
+      facts: { assetObserved: true, statusCode: asset.statusCode, contentObserved: false },
+      evidence: { factName, url: asset.url, source: 'domain_assets' },
+      requirements: { requiredFacts: [factName], missingFacts: [factName], canCollectWithTargetedRun: true }
+    });
+  }
+  return null;
+}
+
 function contentTypeForAsset(_ctx, assetOrUrl) {
   const row = typeof assetOrUrl === 'object' && assetOrUrl
     ? assetOrUrl
@@ -120,12 +161,17 @@ function isMarkdownLikeAsset(row, contentType = '') {
 function llmsTxtPresent() {
   return geo('llms_txt_present', 'GEO Opportunities', 'llms.txt vorhanden', function run(ctx) {
     const asset = getAsset(ctx, 'llms');
+    const gate = assetHttpResponseGate(this, asset, 'llmsTxtHttpResponse');
+    if (gate) return gate;
     const ok = asset && asset.statusCode >= 200 && asset.statusCode < 300;
     return makeResult(this, ok ? 'OK' : 'Warning', {
       affectedCount: ok ? 0 : 1,
       finding: ok ? 'llms.txt returned a 2xx status.' : 'llms.txt did not return a 2xx status.',
       recommendation: 'Publish /llms.txt if it is part of the site AI-readiness strategy.',
-      evidence: { url: asset?.url, statusCode: asset?.statusCode ?? null, bytes: asset?.content?.length || 0 }
+      evidence: { url: asset?.url, statusCode: asset?.statusCode ?? null, bytes: asset?.content?.length || 0 },
+      requirements: { requiredFacts: ['llmsTxtHttpResponse'], optionalFacts: ['siteAiReadinessIntent'], missingFacts: [], minimumCoverage: 1, canCollectWithTargetedRun: true },
+      scoreDeduplicationKey: 'ai_files.llms_txt',
+      reportGroupingKey: 'ai_files.llms_txt'
     });
   }, { priority: 'Low' });
 }
@@ -133,14 +179,19 @@ function llmsTxtPresent() {
 function llmsTxtStatus() {
   return geo('llms_txt_http_status', 'GEO Opportunities', 'llms.txt HTTP status', function run(ctx) {
     const asset = getAsset(ctx, 'llms');
+    const gate = assetHttpResponseGate(this, asset, 'llmsTxtHttpStatus');
+    if (gate) return gate;
     const ok = asset && asset.statusCode >= 200 && asset.statusCode < 300;
     return makeResult(this, asset ? (ok ? 'OK' : 'Warning') : 'NA', {
       affectedCount: asset && !ok ? 1 : 0,
       finding: asset ? `llms.txt status recorded: ${asset.statusCode ?? 'fetch failed'}.` : 'llms.txt was not fetched.',
       recommendation: 'Review the returned status and content when llms.txt should be available.',
       evidence: { url: asset?.url, statusCode: asset?.statusCode ?? null },
+      requirements: { requiredFacts: ['llmsTxtHttpStatus'], optionalFacts: [], missingFacts: [], minimumCoverage: 1, canCollectWithTargetedRun: true },
       findingType: ok ? 'info' : 'opportunity',
-      confidence: 'high'
+      confidence: 'high',
+      scoreDeduplicationKey: 'ai_files.llms_txt',
+      reportGroupingKey: 'ai_files.llms_txt'
     });
   }, { priority: 'Low', effort: 'S' });
 }
@@ -148,10 +199,22 @@ function llmsTxtStatus() {
 function llmsFullTxtPresent() {
   return geo('llms_full_txt_present', 'GEO Opportunities', 'llms-full.txt vorhanden', function run(ctx) {
     const asset = getAsset(ctx, 'llms_full');
+    const gate = assetHttpResponseGate(this, asset, 'llmsFullHttpResponse');
+    if (gate) return gate;
     const ok = asset && asset.statusCode >= 200 && asset.statusCode < 300;
     const references = llmsFullReferences(ctx);
-    const broken = !ok && asset && (asset.statusCode === null || asset.statusCode >= 400);
-    const status = ok ? 'OK' : broken ? 'Warning' : 'NA';
+    if (!ok && !references.length) {
+      return availabilityResult(this, 'not_applicable', {
+        finding: `llms-full.txt returned ${asset?.statusCode ?? 'no stable response'} and is not referenced; the optional file was not scored as a defect.`,
+        details: 'A missing optional full-corpus file is different from a broken referenced resource or a server error.',
+        recommendation: 'Publish /llms-full.txt only if the site intentionally maintains a full AI-readable corpus.',
+        facts: { statusCode: asset?.statusCode ?? null, referenceCount: 0 },
+        evidence: { url: asset?.url, statusCode: asset?.statusCode ?? null, references: [] },
+        requirements: { requiredFacts: ['llmsFullIntentOrReference'], missingFacts: [], canCollectWithTargetedRun: false, reason: 'No site intent or reference makes this optional file applicable.' },
+        scoreDeduplicationKey: 'ai_files.llms_full'
+      });
+    }
+    const status = ok ? 'OK' : 'Warning';
     return makeResult(this, status, {
       affectedCount: status === 'Warning' ? 1 : 0,
       finding: ok
@@ -161,9 +224,11 @@ function llmsFullTxtPresent() {
           : `llms-full.txt returned ${asset?.statusCode ?? 'fetch failed'} instead of 2xx and is not referenced by stored assets; treat as optional unless a full AI-readable corpus is intended.`,
       recommendation: 'Publish /llms-full.txt only if the site maintains a full Markdown/AI-readable corpus.',
       evidence: { url: asset?.url, statusCode: asset?.statusCode ?? null, bytes: asset?.content?.length || 0, references },
+      requirements: { requiredFacts: ['llmsFullHttpResponse', 'llmsFullReference'], optionalFacts: [], missingFacts: [], minimumCoverage: 1, canCollectWithTargetedRun: true },
       findingType: ok ? 'info' : 'opportunity',
       confidence: references.length ? 'high' : 'medium',
-      reviewRecommended: references.length > 0
+      reviewRecommended: references.length > 0,
+      scoreDeduplicationKey: 'ai_files.llms_full'
     });
   }, { priority: 'Low' });
 }
@@ -200,6 +265,8 @@ function llmsFullReferences(ctx) {
 function robotsBlocksTxt() {
   return geo('robots_blocks_txt_files', 'AI File Access', 'robots.txt blockiert .txt-Dateien', function run(ctx) {
     const robots = getAsset(ctx, 'robots');
+    const gate = assetContentGate(this, robots, 'robotsTxtContent');
+    if (gate) return gate;
     const blocked = blocksTxtFiles(robots?.content || '');
     return makeResult(this, blocked ? 'Warning' : 'OK', {
       affectedCount: blocked ? 1 : 0,
@@ -214,16 +281,30 @@ function robotsMentionsBot(botName) {
   const id = `robots_mentions_${botName.toLowerCase().replace(/[^a-z0-9]+/g, '_')}`;
   return geo(id, 'AI Crawler Policy', `robots.txt mentions ${botName}`, function run(ctx) {
     const robots = getAsset(ctx, 'robots');
-    const content = robots?.content || '';
-    const mentioned = new RegExp(`(^|\\n)\\s*user-agent\\s*:\\s*${escapeRegex(botName)}\\s*(\\n|$)`, 'i').test(content);
-    return makeResult(this, mentioned ? 'OK' : 'Warning', {
-      affectedCount: mentioned ? 0 : 1,
-      finding: mentioned ? `robots.txt has an explicit ${botName} user-agent block.` : `robots.txt does not explicitly mention ${botName}.`,
+    const gate = assetContentGate(this, robots, 'robotsTxtContent');
+    if (gate) return gate;
+    const policy = summarizeAiBotRules(robots.url, robots.content).find((item) => item.bot === botName);
+    if (!policy?.mentioned) {
+      return availabilityResult(this, 'not_applicable', {
+        finding: `${botName} has no explicit rule and follows the observed wildcard/default policy; explicit mention is optional.`,
+        details: 'Absence of a bot-specific user-agent group is not itself an SEO failure.',
+        recommendation: `Add explicit ${botName} rules only when business policy needs to differ from the default.`,
+        facts: { botName, mentioned: false, inheritedWildcard: Boolean(policy?.inheritedWildcard), effectiveStatus: policy?.status || 'unknown' },
+        evidence: { botName, policy, robotsStatusCode: robots.statusCode },
+        requirements: { requiredFacts: ['robotsTxtContent'], missingFacts: [], canCollectWithTargetedRun: false, reason: 'Bot-specific policy is optional when the default policy applies.' },
+        scoreDeduplicationKey: 'ai_crawler_policy.summary'
+      });
+    }
+    return makeResult(this, 'OK', {
+      affectedCount: 0,
+      finding: `robots.txt has an explicit ${botName} user-agent block (${policy.policyStatus}).`,
       recommendation: `Add explicit ${botName} rules only if the crawl policy should be unambiguous.`,
-      evidence: { botName, mentioned, robotsStatusCode: robots?.statusCode ?? null },
-      findingType: mentioned ? 'info' : 'opportunity',
+      evidence: { botName, policy, robotsStatusCode: robots.statusCode },
+      requirements: { requiredFacts: ['robotsTxtContent', 'effectiveBotPolicy'], optionalFacts: ['explicitBotPolicy'], missingFacts: [], minimumCoverage: 1, canCollectWithTargetedRun: true },
+      findingType: 'info',
       confidence: 'high',
-      reportGroupingKey: `ai_crawler_policy.${botName.toLowerCase().replace(/[^a-z0-9]+/g, '_')}`
+      reportGroupingKey: `ai_crawler_policy.${botName.toLowerCase().replace(/[^a-z0-9]+/g, '_')}`,
+      scoreDeduplicationKey: 'ai_crawler_policy.summary'
     });
   }, { priority: 'Low' });
 }
@@ -231,30 +312,32 @@ function robotsMentionsBot(botName) {
 function aiBotsPolicySummary() {
   return geo('ai_bots_policy_summary', 'AI Crawler Policy', 'AI bots allowed/blocked/unclear from robots.txt', function run(ctx) {
     const robots = getAsset(ctx, 'robots');
-    if (!robots?.content) {
-      return makeResult(this, 'NA', {
-        finding: 'robots.txt content unavailable.',
-        recommendation: 'Fetchable robots.txt is required for bot policy inference.',
-        evidence: { robotsStatusCode: robots?.statusCode ?? null }
-      });
-    }
+    const gate = assetContentGate(this, robots, 'robotsTxtContent');
+    if (gate) return gate;
     const summary = summarizeAiBotRules(robots.url, robots.content);
     const blocked = summary.filter((item) => item.status === 'blocked');
     const explicitAllowed = summary.filter((item) => item.policyStatus === 'allowed_explicitly');
     const explicitBlocked = summary.filter((item) => item.policyStatus === 'blocked_explicitly');
     const inheritedWildcard = summary.filter((item) => item.inheritedWildcard);
     const unmentioned = summary.filter((item) => item.policyStatus === 'not_mentioned');
-    const status = blocked.length || unmentioned.length || inheritedWildcard.length ? 'Warning' : 'OK';
+    if (!blocked.length && unmentioned.length) {
+      return availabilityResult(this, 'insufficient_evidence', {
+        finding: `${unmentioned.length} tracked bot policy/policies could not be resolved from robots.txt.`,
+        details: 'No website defect was scored because an effective allow/block result could not be established.',
+        recommendation: 'Review robots.txt syntax or repeat the targeted policy parse.',
+        facts: { blockedBots: 0, unresolvedBots: unmentioned.length, inheritedWildcardBots: inheritedWildcard.length },
+        evidence: { summary, notMentioned: unmentioned },
+        requirements: { requiredFacts: ['effectiveBotPolicy'], missingFacts: ['effectiveBotPolicy'], canCollectWithTargetedRun: true },
+        scoreDeduplicationKey: 'ai_crawler_policy.summary'
+      });
+    }
+    const status = blocked.length ? 'Warning' : 'OK';
     return makeResult(this, status, {
       priority: blocked.length ? 'Medium' : 'Low',
-      affectedCount: blocked.length + unmentioned.length + inheritedWildcard.length,
+      affectedCount: blocked.length,
       finding: blocked.length
         ? `${blocked.length} tracked AI bot(s) appear blocked at root; ${explicitAllowed.length} are explicitly allowed.`
-        : unmentioned.length
-          ? `${unmentioned.length} tracked AI bot(s) are not explicitly mentioned; ${inheritedWildcard.length} inherit wildcard handling.`
-          : inheritedWildcard.length
-            ? `${inheritedWildcard.length} tracked AI bot(s) inherit wildcard handling but are not explicitly mentioned.`
-            : 'Tracked AI bots are explicitly mentioned and are not blocked at root.',
+        : `${explicitAllowed.length} tracked AI bot(s) are explicitly allowed and ${inheritedWildcard.length} inherit a non-blocking wildcard/default policy.`,
       recommendation: 'Make AI crawler policy explicit only where business policy requires unambiguous AI-crawler handling; review explicit blocks before treating them as a GEO risk.',
       evidence: { summary, explicitAllowed, explicitBlocked, inheritedWildcard, notMentioned: unmentioned },
       findingType: status === 'OK' ? 'info' : 'opportunity',
@@ -264,7 +347,9 @@ function aiBotsPolicySummary() {
       evidenceLevel: 'fact',
       automationCoverage: 'partial',
       interpretation: 'This is a technical policy inventory, not a recommendation to allow or block every AI crawler.',
-      limitations: 'Business strategy, licensing and content policy determine whether explicit allow/block rules are desirable.'
+      limitations: 'Business strategy, licensing and content policy determine whether explicit allow/block rules are desirable.',
+      requirements: { requiredFacts: ['robotsTxtContent', 'effectiveBotPolicy'], optionalFacts: ['businessAiCrawlerPolicy'], missingFacts: [], minimumCoverage: 1, canCollectWithTargetedRun: true },
+      scoreDeduplicationKey: 'ai_crawler_policy.summary'
     });
   });
 }
@@ -466,6 +551,7 @@ function faqHtmlMissingSchema() {
     `, [ctx.run.id]);
     const status = faqPages ? (affectedCount ? 'Warning' : 'OK') : 'NA';
     return makeResult(this, status, {
+      evaluationState: faqPages ? (affectedCount ? 'fail' : 'pass') : weakFaqPages ? 'insufficient_evidence' : 'not_applicable',
       priority: 'Low',
       affectedCount,
       sampleUrls: rows.map((row) => row.url),
@@ -481,7 +567,15 @@ function faqHtmlMissingSchema() {
       confidence: faqPages ? 'high' : 'low',
       reviewRecommended: weakFaqPages > 0,
       reportGroupingKey: 'schema.faqpage',
-      relatedCheckIds: ['tech.faqpage_missing_low_coverage']
+      relatedCheckIds: ['tech.faqpage_missing_low_coverage'],
+      requirements: {
+        requiredFacts: ['strongFaqPageClassification', 'schemaTypeExtraction'],
+        optionalFacts: ['weakFaqHints'],
+        missingFacts: faqPages ? [] : weakFaqPages ? ['strongFaqPageClassification'] : [],
+        minimumCoverage: 1,
+        canCollectWithTargetedRun: weakFaqPages > 0,
+        reason: faqPages ? 'Strong FAQ page facts were available.' : weakFaqPages ? 'Only weak FAQ hints were observed.' : 'No qualifying FAQ page is in scope.'
+      }
     });
   });
 }
@@ -535,12 +629,15 @@ function articleSignalCoverage(id, category, name, column, label) {
     const missingCount = total ? count(ctx.db, `SELECT COUNT(*) AS count FROM pages WHERE runId = ? AND ${missingWhere}`, [ctx.run.id]) : 0;
     const status = !total ? 'NA' : missingCount ? 'Warning' : 'OK';
     return makeResult(this, status, {
+      evaluationState: !total ? 'not_applicable' : missingCount ? 'fail' : 'pass',
       affectedCount: missingCount,
       sampleUrls: missingCount ? sampleUrls(ctx.db, ctx.run.id, missingWhere) : sampleUrls(ctx.db, ctx.run.id, signalWhere),
       finding: total ? `${signalCount}/${total} article-like page(s) have ${label} signal(s).` : `No article-like pages detected for ${label} evaluation.`,
       recommendation: `Use ${label} where it improves editorial provenance, freshness or citation quality.`,
       details: `Evaluated only article-like pages, not every service, legal or landing page.`,
-      evidence: { candidatePages: total, signalPages: signalCount, missingPages: missingCount, signalColumn: column, label },
+      facts: { candidatePages: total, signalPages: signalCount, missingPages: missingCount, signalColumn: column, label },
+      evidence: { source: 'article-like page classification and extracted editorial signals', runId: ctx.run.id, sampleUrls: missingCount ? sampleUrls(ctx.db, ctx.run.id, missingWhere) : [] },
+      requirements: { requiredFacts: ['articleLikePageClassification', `${column}Observation`], optionalFacts: ['editorialPolicy'], missingFacts: [], minimumCoverage: 1, canCollectWithTargetedRun: true },
       findingType: status === 'Warning' ? 'opportunity' : 'info',
       confidence: total ? 'high' : 'medium'
     });
@@ -558,12 +655,15 @@ function sourceLinksPresent() {
     const missingWhere = `${candidateWhere} AND COALESCE(externalSourceLinksCount, 0) = 0`;
     const missingCount = total ? count(ctx.db, `SELECT COUNT(*) AS count FROM pages WHERE runId = ? AND ${missingWhere}`, [ctx.run.id]) : 0;
     return makeResult(this, !total ? 'NA' : sourcePages ? 'OK' : 'Warning', {
+      evaluationState: !total ? 'not_applicable' : sourcePages ? 'pass' : 'fail',
       affectedCount: missingCount,
       sampleUrls: missingCount ? sampleUrls(ctx.db, ctx.run.id, missingWhere) : [],
       finding: total ? `${sourcePages}/${total} article-like page(s) include external/source-link signals.` : 'No article-like pages detected for source-link evaluation.',
       recommendation: 'Use external source links where claims depend on citeable references.',
       details: 'Source links are evaluated on article-like pages only; generic service pages are not expected to cite external sources by default.',
-      evidence: { candidatePages: total, sourceSignalPages: sourcePages, missingPages: missingCount },
+      facts: { candidatePages: total, sourceSignalPages: sourcePages, missingPages: missingCount },
+      evidence: { source: 'article-like page classification and external/source-link extraction', runId: ctx.run.id },
+      requirements: { requiredFacts: ['articleLikePageClassification', 'externalSourceLinkObservation'], optionalFacts: ['claimCitationNeed'], missingFacts: [], minimumCoverage: 1, canCollectWithTargetedRun: true },
       findingType: total ? 'opportunity' : 'info',
       confidence: total ? 'high' : 'medium'
     });
@@ -572,6 +672,16 @@ function sourceLinksPresent() {
 
 function internalNavLink(id, category, name, needles) {
   return geo(id, category, name, function run(ctx) {
+    if (!Boolean(ctx.run.storeAllLinks)) {
+      return availabilityResult(this, 'not_executed', {
+        finding: `${name}: normalized link rows were not retained, so no absence was inferred.`,
+        details: 'Aggregate link counts cannot prove whether a specific trust/contact destination was linked.',
+        recommendation: 'Repeat a small targeted crawl with storeAllLinks enabled if navigation evidence is required.',
+        facts: { storeAllLinks: false },
+        evidence: { storageProfile: ctx.run.storageProfile, runId: ctx.run.id },
+        requirements: { requiredFacts: ['normalizedInternalLinkRows'], missingFacts: ['normalizedInternalLinkRows'], canCollectWithTargetedRun: true }
+      });
+    }
     const total = htmlPageCount(ctx.db, ctx.run.id);
     if (!total) {
       return makeResult(this, 'NA', {
@@ -606,7 +716,8 @@ function internalNavLink(id, category, name, needles) {
           matchedNeedle: samples[0]?.matchedNeedle || null,
           matchSource: samples[0]?.matchSource || null,
           samples
-        }
+        },
+        requirements: { requiredFacts: ['normalizedInternalLinkRows'], optionalFacts: ['navigationRegion'], missingFacts: [], minimumCoverage: 1, canCollectWithTargetedRun: true }
       });
     }
     const conditions = needles.map(() => '(LOWER(targetUrl) LIKE ? OR LOWER(anchorText) LIKE ?)').join(' OR ');
@@ -622,7 +733,8 @@ function internalNavLink(id, category, name, needles) {
       sampleUrls: rows.map((row) => row.sourceUrl || row.url),
       finding: rows.length ? `${rows.length} matching internal link sample(s) found.` : 'No matching internal link found in crawled pages.',
       recommendation: 'Expose important trust/contact pages through crawlable internal links.',
-      evidence: { needles, samples: rows }
+      evidence: { needles, samples: rows },
+      requirements: { requiredFacts: ['normalizedInternalLinkRows'], optionalFacts: ['navigationRegion'], missingFacts: [], minimumCoverage: 1, canCollectWithTargetedRun: true }
     });
   }, { priority: 'Low' });
 }
@@ -630,13 +742,38 @@ function internalNavLink(id, category, name, needles) {
 function organizationSameAs() {
   return geo('organization_schema_sameas', 'Structured Data', 'Organization Schema mit sameAs vorhanden', function run(ctx) {
     const rows = all(ctx.db, "SELECT pageUrl AS url, rawJson FROM schemas WHERE runId = ? AND schemaType = 'Organization'", [ctx.run.id]);
+    if (!rows.length) {
+      return availabilityResult(this, 'not_applicable', {
+        finding: 'No Organization schema block was observed, so sameAs completeness was not assessed.',
+        details: 'sameAs is conditional on an Organization entity and verified official profiles.',
+        recommendation: 'Evaluate Organization schema separately before considering sameAs.',
+        facts: { organizationBlocks: 0 },
+        evidence: { schemaType: 'Organization', runId: ctx.run.id },
+        requirements: { requiredFacts: ['organizationSchemaBlock'], missingFacts: [], canCollectWithTargetedRun: false, reason: 'The check is not applicable without an Organization block.' },
+        scoreDeduplicationKey: 'organization.same_as'
+      });
+    }
+    if (!rows.some((row) => row.rawJson !== null && row.rawJson !== undefined)) {
+      return availabilityResult(this, 'insufficient_evidence', {
+        finding: 'Organization schema was observed, but retained schema properties are insufficient to assess sameAs.',
+        details: 'Missing retained raw JSON is not evidence that the property is absent.',
+        recommendation: 'Repeat a small targeted run with schema-property retention if sameAs is in scope.',
+        facts: { organizationBlocks: rows.length, schemaPropertyPayloadAvailable: false },
+        evidence: { storageProfile: ctx.run.storageProfile, schemaType: 'Organization' },
+        requirements: { requiredFacts: ['organizationSchemaProperties'], missingFacts: ['organizationSchemaProperties'], canCollectWithTargetedRun: true },
+        scoreDeduplicationKey: 'organization.same_as'
+      });
+    }
     const matches = rows.filter((row) => /"sameAs"\s*:/.test(row.rawJson || ''));
     return makeResult(this, matches.length ? 'OK' : 'Warning', {
       affectedCount: matches.length ? 0 : 1,
       sampleUrls: matches.map((row) => row.url),
       finding: matches.length ? 'Organization schema with sameAs found.' : 'Organization schema with sameAs not found.',
       recommendation: 'Add sameAs only for verified official profiles.',
-      evidence: { organizationBlocks: rows.length, sameAsBlocks: matches.length, sampleUrls: matches.map((row) => row.url).slice(0, 10) }
+      evidence: { organizationBlocks: rows.length, sameAsBlocks: matches.length, sampleUrls: matches.map((row) => row.url).slice(0, 10) },
+      requirements: { requiredFacts: ['organizationSchemaBlock', 'organizationSchemaProperties'], optionalFacts: ['verifiedOfficialProfiles'], missingFacts: [], minimumCoverage: 1, canCollectWithTargetedRun: true },
+      scoreDeduplicationKey: 'organization.same_as',
+      reportGroupingKey: 'organization.same_as'
     });
   });
 }
@@ -656,12 +793,26 @@ function schemaPresence(id, category, name, schemaType, priority = 'Medium') {
       WHERE runId = ? AND schemaType = ? AND parseStatus = 'ok'
       LIMIT 10
     `, [ctx.run.id, schemaType]);
+    if (!rows.length && schemaType === 'SpeakableSpecification') {
+      return availabilityResult(this, 'not_applicable', {
+        finding: 'Speakable schema is not present; this optional, page-type-dependent opportunity was excluded from scoring.',
+        details: 'No page type or editorial workflow was established that makes SpeakableSpecification necessary.',
+        recommendation: 'Use SpeakableSpecification only where it accurately matches visible speakable content and a supported use case.',
+        facts: { totalHtmlPages: total, schemaType, matchingPages: 0 },
+        evidence: { schemaType, sampleUrls: [] },
+        requirements: { requiredFacts: ['applicableSpeakableUseCase'], missingFacts: [], canCollectWithTargetedRun: false, reason: 'No applicable use case was established.' },
+        scoreDeduplicationKey: 'schema.speakable',
+        reportGroupingKey: 'schema.speakable',
+        relatedCheckIds: ['tech.speakable_missing']
+      });
+    }
     return makeResult(this, rows.length ? 'OK' : 'Warning', {
       affectedCount: rows.length ? 0 : 1,
       sampleUrls: rows.map((row) => row.url),
       finding: rows.length ? `${schemaType} schema found.` : `${schemaType} schema not found.`,
       recommendation: `Use ${schemaType} schema where it accurately matches visible content.`,
       evidence: { schemaType, sampleUrls: rows.map((row) => row.url) },
+      requirements: { requiredFacts: ['htmlPageFacts', 'schemaTypeExtraction'], optionalFacts: ['applicablePageType'], missingFacts: [], minimumCoverage: 1, canCollectWithTargetedRun: true },
       reportGroupingKey: schemaType === 'SpeakableSpecification' ? 'schema.speakable' : undefined,
       relatedCheckIds: schemaType === 'SpeakableSpecification' ? ['tech.speakable_missing'] : [],
       findingType: schemaType === 'SpeakableSpecification' ? 'opportunity' : undefined,

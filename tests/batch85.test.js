@@ -215,17 +215,20 @@ test('GEO fixture treats AI bot policy, llms files and trust links as opportunit
   assertExpectationCompliance(missingResults);
 
   const gptbot = result(missingResults, 'geo.robots_mentions_gptbot');
-  assert.equal(gptbot.status, 'Warning');
+  assert.equal(gptbot.status, 'NA');
+  assert.equal(gptbot.evaluationState, 'not_applicable');
+  assert.equal(gptbot.scoreEligible, false);
   assert.equal(gptbot.priority, 'Low');
-  assert.equal(gptbot.normalizedFindingType, 'opportunity');
+  assert.equal(gptbot.normalizedFindingType, 'info');
   assert.notEqual(gptbot.reportSection, 'action_items');
   assert.equal(gptbot.evidence.botName, 'GPTBot');
-  assert.equal(gptbot.evidence.mentioned, false);
+  assert.equal(gptbot.evidence.policy.mentioned, false);
 
-  assert.equal(result(missingResults, 'geo.ai_bots_policy_summary').normalizedFindingType, 'opportunity');
+  assert.equal(result(missingResults, 'geo.ai_bots_policy_summary').status, 'OK');
+  assert.equal(result(missingResults, 'geo.ai_bots_policy_summary').normalizedFindingType, 'info');
   assert.equal(result(missingResults, 'geo.llms_txt_present').status, 'OK');
-  assert.equal(result(missingResults, 'geo.llms_full_txt_present').status, 'Warning');
-  assert.equal(result(missingResults, 'geo.llms_full_txt_present').normalizedFindingType, 'opportunity');
+  assert.equal(result(missingResults, 'geo.llms_full_txt_present').status, 'NA');
+  assert.equal(result(missingResults, 'geo.llms_full_txt_present').evaluationState, 'not_applicable');
   assert.equal(result(missingResults, 'geo.markdown_twin_homepage').status, 'OK');
   assert.equal(result(missingResults, 'geo.about_linked').status, 'Warning');
   assert.equal(result(missingResults, 'geo.contact_linked').status, 'Warning');

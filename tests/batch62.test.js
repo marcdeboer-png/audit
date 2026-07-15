@@ -15,6 +15,7 @@ test('report snapshot structure keeps central sections in order and evidence col
   const html = generateReportHtml(db, runId);
 
   assert.deepEqual(h2Headings(html), [
+    'Score Evidence &amp; Coverage',
     'Executive Summary',
     'Full Audit Downloads',
     'Action Items',

@@ -416,6 +416,10 @@ function buildFindingsData(db, runId) {
 function formatFindingForExport(row) {
   const sampleUrls = safeJson(row.sampleUrlsJson, row.sampleUrls || []);
   const evidence = safeJson(row.evidenceJson, row.evidence || {});
+  const facts = safeJson(row.factsJson, row.facts || {});
+  const assessment = safeJson(row.assessmentJson, row.assessment || {});
+  const recommendationMeta = safeJson(row.recommendationMetaJson, row.recommendationMeta || {});
+  const requirements = safeJson(row.requirementsJson, row.requirements || {});
   return {
     ...row,
     title: row.checkName || row.title || '',
@@ -426,6 +430,14 @@ function formatFindingForExport(row) {
     sampleUrls,
     evidence,
     evidenceJson: row.evidenceJson || JSON.stringify(evidence),
+    facts,
+    factsJson: row.factsJson || JSON.stringify(facts),
+    assessment,
+    assessmentJson: row.assessmentJson || JSON.stringify(assessment),
+    recommendationMeta,
+    recommendationMetaJson: row.recommendationMetaJson || JSON.stringify(recommendationMeta),
+    requirements,
+    requirementsJson: row.requirementsJson || JSON.stringify(requirements),
     relatedCheckIds: safeJson(row.relatedCheckIdsJson, row.relatedCheckIds || [])
   };
 }

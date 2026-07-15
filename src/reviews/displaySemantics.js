@@ -117,13 +117,13 @@ export function buildDisplaySummary(rows = []) {
 
 export function normalizeDisplayFindingType(row = {}) {
   const input = row.findingType || 'info';
+  if (row.status === 'OK' || row.status === 'NA') return 'info';
   if (isAiCrawlerPolicy(row)) return 'opportunity';
   if (isBrowserMetadataOpportunity(row)) return 'opportunity';
   if (/security/i.test(row.category || '')) return 'best_practice';
   if (input === 'llm_assisted') return 'llm_assisted';
   if (['core_issue', 'opportunity', 'best_practice', 'info'].includes(input)) return input;
   if (input === 'issue') return 'core_issue';
-  if (row.status === 'OK' || row.status === 'NA') return 'info';
   return 'core_issue';
 }
 

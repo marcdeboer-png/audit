@@ -366,6 +366,9 @@ function renderHtml(data) {
       ${metricCard('Failed URLs', run.failedUrls)}
     </section>
 
+    <h2>Score Evidence &amp; Coverage</h2>
+    ${scoreBreakdownSection(scores.breakdown)}
+
     <h2>Executive Summary</h2>
     ${executiveSummary({
       run,
@@ -648,6 +651,29 @@ function scoreCard(label, value) {
   return `<div class="card accent"><div class="muted">${escapeHtml(label)}</div><div class="metric">${value === null || value === undefined ? 'NA' : `${value}%`}</div></div>`;
 }
 
+function scoreBreakdownSection(breakdown = {}) {
+  if (!breakdown || !breakdown.scoringModel) return '<p class="muted">No score breakdown is available.</p>';
+  const summary = [{
+    model: breakdown.scoringModel,
+    configuredChecks: breakdown.configuredChecks,
+    scoredChecks: breakdown.eligibleChecks,
+    excludedChecks: breakdown.excludedChecks,
+    deduplicatedChecks: breakdown.deduplicatedChecks,
+    dataCoverage: `${breakdown.dataCoveragePct}%`,
+    coverageCeiling: `${breakdown.maximumScoreAtAvailableCoverage}%`
+  }];
+  return `<section class="summary">
+    <div class="notice">Scores are normalized across checks with sufficient evidence. The coverage ceiling shows how much configured check weight had assessable evidence; excluded states do not count as failures.</div>
+    ${simpleTable(summary, ['model', 'configuredChecks', 'scoredChecks', 'excludedChecks', 'deduplicatedChecks', 'dataCoverage', 'coverageCeiling'])}
+    <h3>Weighted Deductions</h3>
+    ${simpleTable((breakdown.deductions || []).slice(0, 30), ['checkId', 'category', 'status', 'priority', 'findingType', 'weightedDeduction', 'deduplicationKey'], 'No score deductions.')}
+    <h3>Excluded Checks</h3>
+    ${simpleTable((breakdown.excluded || []).slice(0, 50), ['checkId', 'evaluationState', 'reason'], 'No checks were excluded.')}
+    <h3>Deduplicated Root Causes</h3>
+    ${simpleTable((breakdown.deduplicated || []).slice(0, 50), ['checkId', 'deduplicationKey', 'representedBy'], 'No checks were deduplicated.')}
+  </section>`;
+}
+
 function metricCard(label, value) {
   return `<div class="card"><div class="muted">${escapeHtml(label)}</div><div class="metric">${Number(value || 0).toLocaleString('en-US')}</div></div>`;
 }
@@ -783,14 +809,14 @@ function findingsTable(rows, { emptyMessage = 'No findings in this category.' } 
       ${rows.map((row) => `<tr>
         <td><code>${escapeHtml(row.checkId)}</code></td>
         <td>${escapeHtml(row.category)}</td>
-        <td>${findingBadges(row).join(' ')}<div class="muted">Score: ${escapeHtml(formatCell(row.score))}</div></td>
+        <td>${findingBadges(row).join(' ')}<div class="muted">Evaluation: ${escapeHtml(row.evaluationState || '')} · Score: ${escapeHtml(formatCell(row.score))}${row.scoreEligible ? '' : ' · excluded'}</div></td>
         <td>${badge(row.displayReviewStatus || row.reviewStatus || 'unreviewed', 'review')} ${badge(row.displayActionStatus || row.actionStatus || 'open', 'review')}</td>
         <td>${escapeHtml(row.effectiveFinding || row.finding || '')}<div class="muted">Original: ${escapeHtml(row.status)} / ${escapeHtml(row.priority)}</div></td>
-        <td>${escapeHtml(row.details || '')}</td>
+        <td>${escapeHtml(row.details || '')}${row.scoreExclusionReason ? `<div class="muted">${escapeHtml(row.scoreExclusionReason)}</div>` : ''}</td>
         <td>${escapeHtml(row.effectiveRecommendation || row.recommendation || '')}</td>
         <td>${row.affectedCount || 0}</td>
         <td>${samplesDetails(row.sampleUrls || safeParse(row.sampleUrlsJson, []))}</td>
-        <td>${evidenceDetails(row.evidence || safeParse(row.evidenceJson, {}))}</td>
+        <td>${evidenceDetails(row.facts || safeParse(row.factsJson, {}), 'Facts')}${evidenceDetails(row.evidence || safeParse(row.evidenceJson, {}), 'Evidence')}${evidenceDetails(row.assessment || safeParse(row.assessmentJson, {}), 'Assessment')}${evidenceDetails(row.recommendationMeta || safeParse(row.recommendationMetaJson, {}), 'Recommendation')}${evidenceDetails(row.requirements || safeParse(row.requirementsJson, {}), 'Requirements')}</td>
       </tr>`).join('')}
     </tbody>
   </table>`;
@@ -875,9 +901,9 @@ function samplesDetails(samples = []) {
   return `<details><summary>${escapeHtml(summary)}</summary><pre>${escapeHtml(formatJson(safeSamples))}</pre></details>`;
 }
 
-function evidenceDetails(evidence = {}) {
+function evidenceDetails(evidence = {}, label = 'Evidence') {
   const keys = evidence && typeof evidence === 'object' && !Array.isArray(evidence) ? Object.keys(evidence) : [];
-  const summary = keys.length ? `Evidence: ${keys.slice(0, 4).join(', ')}${keys.length > 4 ? ', ...' : ''}` : 'Evidence';
+  const summary = keys.length ? `${label}: ${keys.slice(0, 4).join(', ')}${keys.length > 4 ? ', ...' : ''}` : label;
   return `<details><summary>${escapeHtml(summary)}</summary><pre>${escapeHtml(formatJson(evidence))}</pre></details>`;
 }
 

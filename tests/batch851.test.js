@@ -103,15 +103,15 @@ test('Findings CSV prioritizes display semantics and keeps raw values explicit',
   assert.ok(csv.startsWith('checkId,title,category,displayStatus,displayPriority,displayFindingType,displayReviewStatus,displayActionStatus,affectedCount,recommendation,rawStatus,rawPriority,rawFindingType,confidence,reportSection,reviewRecommended,evidenceJson,sampleUrls'));
 
   const aiBot = csvRow(csv, 'geo.ai_bots_policy_summary');
-  assert.equal(aiBot.displayStatus, 'Opportunity');
-  assert.equal(aiBot.displayFindingType, 'opportunity');
+  assert.equal(aiBot.displayStatus, 'OK');
+  assert.equal(aiBot.displayFindingType, 'info');
   assert.notEqual(aiBot.displayFindingType, 'core_issue');
-  assert.equal(aiBot.rawFindingType, 'opportunity');
+  assert.equal(aiBot.rawFindingType, 'info');
 
   const fullJson = JSON.parse(collectFullAuditJson(db, runId, ['findings']).body);
   const jsonAiBot = fullJson.findings.find((row) => row.checkId === 'geo.ai_bots_policy_summary');
-  assert.equal(jsonAiBot.displayFindingType, 'opportunity');
-  assert.equal(jsonAiBot.rawFindingType, 'opportunity');
+  assert.equal(jsonAiBot.displayFindingType, 'info');
+  assert.equal(jsonAiBot.rawFindingType, 'info');
   assert.ok(jsonAiBot.evidenceJson);
   db.close();
 });

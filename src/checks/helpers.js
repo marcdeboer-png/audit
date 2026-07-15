@@ -1,3 +1,9 @@
+import {
+  isScoreEligibleEvaluation,
+  normalizeEvaluationState,
+  statusForEvaluationState
+} from './availability.js';
+
 export const HTML_WHERE = `(contentType LIKE '%text/html%' OR contentType LIKE '%application/xhtml%')`;
 export const VALID_STATUSES = new Set(['OK', 'Warning', 'Error', 'NA']);
 export const VALID_PRIORITIES = new Set(['High', 'Medium', 'Low']);
@@ -8,10 +14,25 @@ export const VALID_AUTOMATION_COVERAGE = new Set(['full', 'partial', 'sample', '
 
 export function makeResult(check, status, options = {}) {
   const evidence = normalizeEvidence(options.evidence || {});
+  const facts = normalizeEvidence(options.facts || {});
   const sampleUrls = dedupeUrlSamples(options.sampleUrls || [], 10);
   const affectedCount = Math.max(0, Number(options.affectedCount || 0));
   const normalizedStatus = normalizeStatus(status);
-  const finalStatus = ['Warning', 'Error'].includes(normalizedStatus) && !hasConcreteEvidence(evidence) ? 'NA' : normalizedStatus;
+  const lacksIssueEvidence = ['Warning', 'Error'].includes(normalizedStatus) && !hasConcreteEvidence(evidence);
+  const evaluationState = normalizeEvaluationState(
+    lacksIssueEvidence ? 'insufficient_evidence' : options.evaluationState,
+    normalizedStatus
+  );
+  const finalStatus = statusForEvaluationState(evaluationState, normalizedStatus);
+  const requirements = normalizeRequirements(options.requirements, evaluationState, evidence, options);
+  const scoreEligible = Boolean(options.scoreEligible ?? isScoreEligibleEvaluation(evaluationState));
+  const assessment = normalizeAssessment(options.assessment, {
+    status: finalStatus,
+    evaluationState,
+    priority: options.priority || check.priority || 'Medium',
+    confidence: options.confidence || check.confidence
+  });
+  const recommendation = options.recommendation || check.recommendation || '';
   return {
     id: check.id,
     category: check.category,
@@ -22,10 +43,18 @@ export function makeResult(check, status, options = {}) {
     effort: options.effort || check.effort || 'M',
     finding: options.finding || defaultFinding(check, finalStatus),
     details: options.details || defaultDetails(finalStatus, evidence),
-    recommendation: options.recommendation || check.recommendation || '',
+    recommendation,
     affectedCount,
     sampleUrls,
     evidence: Object.keys(evidence).length ? evidence : { status: finalStatus, basis: 'No issue evidence required for this status.' },
+    facts: Object.keys(facts).length ? facts : { evaluatedStatus: finalStatus },
+    assessment,
+    recommendationMeta: normalizeRecommendation(options.recommendationMeta, recommendation, options, check),
+    evaluationState,
+    scoreEligible,
+    scoreExclusionReason: scoreEligible ? null : (options.scoreExclusionReason || requirements.reason || evaluationState),
+    requirements,
+    scoreDeduplicationKey: options.scoreDeduplicationKey || check.scoreDeduplicationKey || null,
     reportGroupingKey: options.reportGroupingKey || check.reportGroupingKey || null,
     findingType: normalizeFindingType(options.findingType || check.findingType || defaultFindingType(check, finalStatus)),
     confidence: normalizeConfidence(options.confidence || check.confidence || (finalStatus === 'NA' ? 'low' : 'high')),
@@ -41,6 +70,22 @@ export function makeResult(check, status, options = {}) {
       ? (options.relatedCheckIds || check.relatedCheckIds).slice(0, 20)
       : []
   };
+}
+
+export function availabilityResult(check, evaluationState, options = {}) {
+  return makeResult(check, 'NA', {
+    ...options,
+    evaluationState,
+    affectedCount: 0,
+    scoreEligible: false,
+    finding: options.finding || `${check.name}: ${evaluationState.replaceAll('_', ' ')}.`,
+    facts: options.facts || {},
+    evidence: options.evidence || { evaluationState },
+    requirements: {
+      ...(options.requirements || {}),
+      reason: options.requirements?.reason || options.details || evaluationState
+    }
+  });
 }
 
 export function count(db, sql, params = []) {
@@ -260,6 +305,56 @@ function defaultDetails(status, evidence) {
 function normalizeEvidence(evidence) {
   if (!evidence || typeof evidence !== 'object' || Array.isArray(evidence)) return {};
   return evidence;
+}
+
+function normalizeRequirements(value, evaluationState, evidence = {}, options = {}) {
+  const input = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+  const inferredRequiredFacts = Array.isArray(evidence.requiredData) ? evidence.requiredData : [];
+  const requiredFacts = Array.isArray(input.requiredFacts)
+    ? [...new Set(input.requiredFacts.map(String))]
+    : [...new Set(inferredRequiredFacts.map(String))];
+  const optionalFacts = Array.isArray(input.optionalFacts) ? [...new Set(input.optionalFacts.map(String))] : [];
+  const missingFacts = Array.isArray(input.missingFacts)
+    ? [...new Set(input.missingFacts.map(String))]
+    : ['insufficient_evidence', 'not_executed', 'technical_error'].includes(evaluationState)
+      ? [...requiredFacts]
+      : [];
+  const retryableState = ['insufficient_evidence', 'not_executed', 'technical_error'].includes(evaluationState);
+  return {
+    requiredFacts,
+    optionalFacts,
+    minimumCoverage: Number.isFinite(Number(input.minimumCoverage)) ? Number(input.minimumCoverage) : 1,
+    missingFacts,
+    canCollectWithTargetedRun: input.canCollectWithTargetedRun === undefined ? retryableState : Boolean(input.canCollectWithTargetedRun),
+    reason: input.reason || options.details || options.finding || (evaluationState === 'pass' || evaluationState === 'fail'
+      ? 'Required facts were available for assessment.'
+      : `Check excluded from scoring: ${evaluationState}.`)
+  };
+}
+
+function normalizeAssessment(value, defaults) {
+  const input = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+  return {
+    rationale: input.rationale || null,
+    pageType: input.pageType || null,
+    relevance: input.relevance || null,
+    severity: input.severity || (defaults.status === 'Error' ? 'high' : defaults.status === 'Warning' ? 'medium' : 'none'),
+    confidence: normalizeConfidence(input.confidence || defaults.confidence || (defaults.evaluationState === 'pass' || defaults.evaluationState === 'fail' ? 'high' : 'low')),
+    validityConditions: Array.isArray(input.validityConditions) ? input.validityConditions.slice(0, 20) : [],
+    evaluationState: defaults.evaluationState
+  };
+}
+
+function normalizeRecommendation(value, text, options, check) {
+  const input = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+  return {
+    action: input.action || text || null,
+    location: input.location || null,
+    expectedBenefit: input.expectedBenefit || null,
+    whenNotToImplement: input.whenNotToImplement || null,
+    priority: normalizePriority(input.priority || options.priority || check.priority || 'Medium'),
+    effort: input.effort || options.effort || check.effort || 'M'
+  };
 }
 
 function hasConcreteEvidence(evidence) {

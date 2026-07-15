@@ -1,6 +1,7 @@
 import {
   HTML_WHERE,
   all,
+  availabilityResult,
   checkStatusForCoverage,
   count,
   dedupeImageSamples,
@@ -12,6 +13,8 @@ import {
   safeJson,
   sampleUrls
 } from '../helpers.js';
+import { syntheticNotFoundCheck } from '../http/notFoundCheck.js';
+import { classifyInternalSearchPage } from '../searchPageClassifier.js';
 import { stripWww } from '../../utils/url.js';
 import { thresholdBytes, thresholds } from '../config/thresholds.js';
 import { templatePatternChecks } from '../../analysis/templatePatternChecks.js';
@@ -52,11 +55,31 @@ const NOT_LIKELY_HERO_IMAGE_WHERE = `
   AND LOWER(COALESCE(imageUrl, '')) NOT LIKE '%banner%'
 `;
 
+function storedFactGate(check, ctx, runFlag, factName, targetedRunHint) {
+  if (Boolean(ctx.run[runFlag])) return null;
+  return availabilityResult(check, 'not_executed', {
+    finding: `${check.name}: the required ${factName} were not collected in this run.`,
+    details: `The ${runFlag} run option was disabled; absence of stored rows is not a negative measurement.`,
+    recommendation: `Repeat only the relevant targeted crawl with ${runFlag} enabled if this check is needed.`,
+    facts: { [runFlag]: Boolean(ctx.run[runFlag]) },
+    evidence: { runId: ctx.run.id, storageProfile: ctx.run.storageProfile, runFlag },
+    requirements: {
+      requiredFacts: [factName],
+      optionalFacts: [],
+      missingFacts: [factName],
+      minimumCoverage: 1,
+      canCollectWithTargetedRun: true,
+      reason: targetedRunHint || `${factName} were deliberately not retained by this run profile.`
+    }
+  });
+}
+
 export function techChecks() {
   return [
     domainHttpsReachable(),
     httpToHttpsRedirect(),
     wwwConsistency(),
+    syntheticNotFoundCheck(),
     statusCodeDistribution(),
     pageStatusCheck('4xx_pages', 'Server & Infrastructure', '4xx pages present', 'statusCode >= 400 AND statusCode < 500', 'Warning'),
     pageStatusCheck('5xx_pages', 'Server & Infrastructure', '5xx pages present', 'statusCode >= 500', 'Error', 'High'),
@@ -265,6 +288,22 @@ function pageStatusCheck(id, category, name, where, status = 'Warning', priority
 
 function highTtfbCheck() {
   return tech('high_ttfb', 'Performance Light', `High TTFB > ${thresholds.highTtfbMs}ms`, function run(ctx) {
+    const measuredCount = count(ctx.db, 'SELECT COUNT(*) AS count FROM pages WHERE runId = ? AND ttfbMs IS NOT NULL', [ctx.run.id]);
+    if (!measuredCount) {
+      return availabilityResult(this, 'not_executed', {
+        finding: 'No TTFB measurement was collected; no performance defect was inferred.',
+        details: 'A missing timing value differs from an observed zero or a measurement below threshold.',
+        recommendation: 'Collect targeted request timing samples if TTFB is in scope.',
+        facts: { measuredPageCount: 0 },
+        evidence: { runId: ctx.run.id, measurement: 'ttfbMs' },
+        requirements: {
+          requiredFacts: ['ttfbMs'],
+          missingFacts: ['ttfbMs'],
+          canCollectWithTargetedRun: true,
+          reason: 'No page has a stored ttfbMs observation.'
+        }
+      });
+    }
     const rows = all(ctx.db, `
       SELECT url, ttfbMs, loadTimeMs, statusCode, pageType
       FROM pages
@@ -284,6 +323,7 @@ function highTtfbCheck() {
       recommendation: affectedCount ? 'Treat TTFB as volatile: confirm with repeated measurements or a follow-up run before prioritizing infrastructure work.' : 'No TTFB action from the stored crawl data.',
       details: 'Based on the stored crawl TTFB value. Network timing is volatile and should be confirmed with repeated measurements for final decisions.',
       evidence: {
+        measuredPageCount: measuredCount,
         thresholdMs: thresholds.highTtfbMs,
         measurementType: 'single_crawl_ttfb_ms',
         volatility: 'network_timing',
@@ -292,13 +332,16 @@ function highTtfbCheck() {
       },
       findingType: 'best_practice',
       confidence: affectedCount > 3 ? 'medium' : affectedCount ? 'low' : 'high',
-      reviewRecommended: affectedCount > 0
+      reviewRecommended: affectedCount > 0,
+      requirements: { requiredFacts: ['ttfbMs'], optionalFacts: ['repeatTtfbMeasurements'], missingFacts: [], minimumCoverage: 1, canCollectWithTargetedRun: true }
     });
   }, { priority: 'Medium', effort: 'M' });
 }
 
 function headerPresence(id, category, name, headerKey, priority = 'Medium', options = {}) {
   return tech(id, category, name, function run(ctx) {
+    const gate = storedFactGate(this, ctx, 'storeResponseHeaders', 'HTML response headers');
+    if (gate) return gate;
     const total = htmlPageCount(ctx.db, ctx.run.id);
     const where = `${HTML_WHERE} AND (responseHeadersJson IS NULL OR responseHeadersJson NOT LIKE ?)`;
     const affectedCount = count(ctx.db, `SELECT COUNT(*) AS count FROM pages WHERE runId = ? AND ${where}`, [ctx.run.id, `%"${headerKey}"%`]);
@@ -321,7 +364,8 @@ function headerPresence(id, category, name, headerKey, priority = 'Medium', opti
       evidenceLevel: 'aggregate',
       automationCoverage: options.automationCoverage || 'partial',
       interpretation: options.interpretation || '',
-      limitations: options.limitations || ''
+      limitations: options.limitations || '',
+      requirements: { requiredFacts: ['htmlResponseHeaders'], optionalFacts: [], missingFacts: [], minimumCoverage: 1, canCollectWithTargetedRun: true }
     });
   }, { priority, effort: 'M' });
 }
@@ -432,6 +476,8 @@ function cdnCacheSignals() {
 
 function xRobotsTagCheck() {
   return tech('x_robots_tag_unusual', 'Server & Infrastructure', 'X-Robots-Tag directive review', function run(ctx) {
+    const gate = storedFactGate(this, ctx, 'storeResponseHeaders', 'HTML response headers');
+    if (gate) return gate;
     const directiveRows = all(ctx.db, `
       SELECT url, pageType, contentType, metaRobots, xRobotsTag
       FROM pages
@@ -461,7 +507,7 @@ function xRobotsTagCheck() {
     });
     const affectedCount = problematic.length;
     const samples = problematic.slice(0, 10).map((row) => row.url);
-    return makeResult(this, affectedCount ? 'Warning' : present ? 'OK' : 'NA', {
+    return makeResult(this, affectedCount ? 'Warning' : 'OK', {
       affectedCount,
       sampleUrls: samples,
       finding: affectedCount
@@ -485,14 +531,15 @@ function xRobotsTagCheck() {
         conflictSamples: conflictRows.slice(0, 10)
       },
       findingType: affectedCount ? 'core_issue' : 'info',
-      confidence: present ? 'medium' : 'low',
+      confidence: present ? 'medium' : 'high',
       reviewRecommended: affectedCount > 0 || conflictRows.length > 0,
       reviewReason: affectedCount ? 'Header-level indexing directives need intent validation.' : null,
       dataBasis: 'X-Robots-Tag response header and meta robots facts',
-      evidenceLevel: present ? 'sample' : 'none',
-      automationCoverage: present ? 'partial' : 'requires_external_data',
+      evidenceLevel: present ? 'sample' : 'aggregate',
+      automationCoverage: 'partial',
       interpretation: 'Header directives are treated as indexation facts; only clear noindex/none on content HTML is raised as a technical finding.',
-      limitations: 'The check cannot know business intent for individual utility, legal or campaign URLs.'
+      limitations: 'The check cannot know business intent for individual utility, legal or campaign URLs.',
+      requirements: { requiredFacts: ['htmlResponseHeaders'], optionalFacts: ['indexingIntent'], missingFacts: [], minimumCoverage: 1, canCollectWithTargetedRun: true }
     });
   });
 }
@@ -602,64 +649,103 @@ function sitemapUrlsNon200() {
 
 function internalSearchNoindexPolicy() {
   return tech('internal_search_noindex_policy', 'Crawling & Indexing', 'Internal search indexation policy signal', function run(ctx) {
-    const searchWhere = `${HTML_WHERE} AND (
-      LOWER(url) LIKE '%/search%' OR
-      LOWER(url) LIKE '%/suche%' OR
-      LOWER(url) LIKE '%?q=%' OR
-      LOWER(url) LIKE '%?s=%' OR
-      LOWER(url) LIKE '%query=%' OR
-      LOWER(COALESCE(title, '')) LIKE '%suche%' OR
-      LOWER(COALESCE(title, '')) LIKE '%search%'
-    )`;
-    const total = count(ctx.db, `SELECT COUNT(*) AS count FROM pages WHERE runId = ? AND ${searchWhere}`, [ctx.run.id]);
-    if (!total) {
-      return makeResult(this, 'NA', {
-        finding: 'No internal-search URL/title patterns are stored in this run.',
-        recommendation: 'Validate internal-search indexation with a larger crawl or SF URL pattern export when this is in audit scope.',
-        evidence: { requiredData: ['url_patterns', 'meta_robots'], searchPatternPages: 0 },
-        findingType: 'info',
-        confidence: 'low',
-        dataBasis: 'stored URL/title facts',
-        evidenceLevel: 'none',
-        automationCoverage: 'requires_external_data',
-        limitations: 'A sample crawl may not include internal search result URLs.'
+    const rows = all(ctx.db, `
+      SELECT url, finalUrl, title, h1Json, pageType, featureFlagsJson, schemaTypesJson,
+             canonical, metaRobots, xRobotsTag, noindex, indexable
+      FROM pages
+      WHERE runId = ? AND ${HTML_WHERE}
+      ORDER BY id ASC
+      LIMIT 5000
+    `, [ctx.run.id]).map((row) => ({
+      ...row,
+      classification: classifyInternalSearchPage({
+        ...row,
+        h1: safeJson(row.h1Json, []),
+        featureFlags: safeJson(row.featureFlagsJson, {}),
+        schemaTypes: safeJson(row.schemaTypesJson, [])
+      })
+    }));
+    if (!rows.length) {
+      return availabilityResult(this, 'not_executed', {
+        finding: 'No successfully extracted HTML page facts are available for search-page classification.',
+        details: 'No classification or indexation defect was inferred.',
+        evidence: { htmlPages: 0 },
+        requirements: { requiredFacts: ['htmlPageFacts'], missingFacts: ['htmlPageFacts'], canCollectWithTargetedRun: true }
       });
     }
-    const indexableRows = all(ctx.db, `
-      SELECT url, title, metaRobots, xRobotsTag
-      FROM pages
-      WHERE runId = ? AND ${searchWhere}
-        AND COALESCE(noindex, 0) = 0
-        AND ${ROBOTS_TEXT_EXPR} NOT LIKE '%noindex%'
-      ORDER BY id ASC
-      LIMIT 10
-    `, [ctx.run.id]);
-    const affectedCount = count(ctx.db, `
-      SELECT COUNT(*) AS count
-      FROM pages
-      WHERE runId = ? AND ${searchWhere}
-        AND COALESCE(noindex, 0) = 0
-        AND ${ROBOTS_TEXT_EXPR} NOT LIKE '%noindex%'
-    `, [ctx.run.id]);
+    const classified = rows.filter((row) => row.classification.classification === 'internal_search');
+    const unclear = rows.filter((row) => row.classification.classification === 'unclear');
+    if (!classified.length && unclear.length) {
+      return availabilityResult(this, 'insufficient_evidence', {
+        finding: `${unclear.length} page(s) had incomplete or contradictory search signals; none was classified as an internal search result page.`,
+        details: 'Ambiguous q parameters, global header forms, archives and listing pages are not enough for classification.',
+        recommendation: 'Collect a targeted example of a real submitted search-results URL only if internal-search indexation is in scope.',
+        facts: { checkedHtmlPages: rows.length, classifiedSearchPages: 0, unclearPages: unclear.length },
+        evidence: { ambiguousSamples: unclear.slice(0, 10).map(searchClassificationEvidence) },
+        requirements: {
+          requiredFacts: ['multipleIndependentSearchSignals'],
+          optionalFacts: ['submittedSearchResultUrl'],
+          missingFacts: ['multipleIndependentSearchSignals'],
+          canCollectWithTargetedRun: true,
+          reason: 'Only ambiguous or contradictory search-page signals were observed.'
+        },
+        confidence: 'low'
+      });
+    }
+    if (!classified.length) {
+      return availabilityResult(this, 'not_applicable', {
+        finding: 'No internal search-results page was identified in the targeted crawl scope.',
+        details: 'A search field in global navigation alone does not make a page a search-results page.',
+        recommendation: 'No action from this crawl scope.',
+        facts: { checkedHtmlPages: rows.length, classifiedSearchPages: 0, unclearPages: 0 },
+        evidence: { classificationRule: 'two independent strong signals or equivalent evidence' },
+        requirements: { requiredFacts: ['classifiedInternalSearchPage'], missingFacts: [], canCollectWithTargetedRun: true, reason: 'The check is not applicable to the observed page set.' }
+      });
+    }
+    const indexableRows = classified.filter((row) => !Number(row.noindex) && !/noindex/i.test(`${row.metaRobots || ''} ${row.xRobotsTag || ''}`));
+    const affectedCount = indexableRows.length;
     return makeResult(this, affectedCount ? 'Warning' : 'OK', {
       priority: 'Low',
       affectedCount,
       sampleUrls: indexableRows.map((row) => row.url),
       finding: affectedCount
-        ? `${affectedCount}/${total} stored internal-search candidate page(s) appear indexable.`
-        : `${total} stored internal-search candidate page(s) carry noindex or no problematic indexation signal was detected.`,
+        ? `${affectedCount}/${classified.length} confidently classified internal-search page(s) appear indexable.`
+        : `${classified.length} confidently classified internal-search page(s) carry noindex.`,
       recommendation: 'Keep true internal-search result pages out of the index unless there is a deliberate landing-page strategy.',
-      evidence: { searchPatternPages: total, indexableSamples: indexableRows },
+      facts: { checkedHtmlPages: rows.length, classifiedSearchPages: classified.length, unclearPages: unclear.length, indexableSearchPages: affectedCount },
+      evidence: { classifiedSamples: classified.slice(0, 10).map(searchClassificationEvidence) },
+      assessment: {
+        rationale: 'Classification requires multiple independent URL, content, form or result-template signals.',
+        relevance: 'Search-results indexation policy',
+        severity: affectedCount ? 'low' : 'none',
+        confidence: 'high',
+        validityConditions: ['successfully extracted HTML', 'confident internal-search classification']
+      },
+      requirements: { requiredFacts: ['htmlPageFacts', 'searchClassification', 'robotsDirective'], optionalFacts: ['canonical'], missingFacts: [], canCollectWithTargetedRun: true },
       findingType: affectedCount ? 'core_issue' : 'info',
-      confidence: 'medium',
-      reviewRecommended: affectedCount > 0,
-      reviewReason: affectedCount ? 'Confirm that sampled URLs are true internal-search result pages, not intentional landing pages.' : null,
-      dataBasis: 'URL/title pattern and robots directives',
-      evidenceLevel: 'sample',
-      automationCoverage: 'partial',
-      limitations: 'This check cannot detect search pages if they are absent from the sampled crawl/import.'
+      confidence: 'high',
+      dataBasis: 'URL, main-content form, result-template, page-type and robots facts',
+      evidenceLevel: 'pattern',
+      automationCoverage: 'full',
+      limitations: 'A targeted crawl can only classify pages observed in its scope.',
+      scoreDeduplicationKey: 'internal_search_indexation'
     });
   }, { priority: 'Low', effort: 'S' });
+}
+
+function searchClassificationEvidence(row) {
+  return {
+    url: row.url,
+    pageType: row.pageType,
+    canonical: row.canonical,
+    noindex: Boolean(row.noindex),
+    classification: row.classification.classification,
+    confidence: row.classification.confidence,
+    score: row.classification.score,
+    positiveSignals: row.classification.positiveSignals,
+    contradictorySignals: row.classification.contradictorySignals,
+    rationale: row.classification.rationale
+  };
 }
 
 function noindexPagesCheck() {
@@ -855,6 +941,25 @@ function openGraphMissing() {
       ORDER BY id ASC
       LIMIT 1000
     `, [ctx.run.id]);
+    if (!rows.length) {
+      const htmlPages = htmlPageCount(ctx.db, ctx.run.id);
+      return availabilityResult(this, htmlPages ? 'not_applicable' : 'not_executed', {
+        finding: htmlPages
+          ? 'No indexable non-legal content page is in scope for the optional Open Graph check.'
+          : 'No extracted HTML head is available for the optional Open Graph check.',
+        details: 'Missing Open Graph values are assessed only after a successful HTML-head extraction on a relevant page type.',
+        recommendation: 'No Open Graph action from the available facts.',
+        facts: { htmlPages, relevantPages: 0 },
+        evidence: { scope: 'indexable_non_legal_html_pages' },
+        requirements: {
+          requiredFacts: ['successfullyExtractedHtmlHead', 'relevantPageType'],
+          missingFacts: htmlPages ? [] : ['successfullyExtractedHtmlHead'],
+          canCollectWithTargetedRun: !htmlPages,
+          reason: htmlPages ? 'No relevant page type was observed.' : 'No HTML-head extraction was stored.'
+        },
+        scoreDeduplicationKey: 'social.open_graph'
+      });
+    }
     const required = ['og:title', 'og:description', 'og:image', 'og:url', 'og:type'];
     const affected = rows
       .map((row) => {
@@ -876,7 +981,9 @@ function openGraphMissing() {
         ? `${affectedCount} indexable content page(s) have incomplete Open Graph metadata or a basic consistency warning.`
         : 'Open Graph basics are present on checked indexable content pages.',
       recommendation: 'Treat Open Graph as a social/entity/snippet opportunity, not as a classic indexing blocker. Add og:title, og:description, og:image, og:url and og:type where sharing or reusable snippets matter.',
-      evidence: { checkedPages: rows.length, requiredFields: required, affectedCount, samples: affected.slice(0, 10) },
+      facts: { checkedPages: rows.length, requiredFields: required, affectedCount, affectedPages: affected.slice(0, 10).map((row) => ({ url: row.url, missingFields: row.missingFields, consistencyWarnings: row.consistencyWarnings })) },
+      evidence: { source: 'successfully extracted HTML head', extractor: 'open_graph_meta', runId: ctx.run.id, sampleUrls: samples },
+      requirements: { requiredFacts: ['successfullyExtractedHtmlHead', 'relevantPageType', 'openGraphFieldObservations'], optionalFacts: ['sharingUseCase'], missingFacts: [], minimumCoverage: 1, canCollectWithTargetedRun: true },
       findingType: 'opportunity',
       confidence: affectedCount > 20 ? 'medium' : affectedCount ? 'low' : 'high',
       reviewRecommended: affectedCount > 0,
@@ -885,7 +992,9 @@ function openGraphMissing() {
       evidenceLevel: 'sample',
       automationCoverage: 'partial',
       interpretation: 'Unvollständige Open-Graph-Metadaten sind kein klassischer Indexierungsfehler, können aber Social Sharing, Entity-Signale und wiederverwendbare Snippet-Kontexte schwächen.',
-      limitations: 'The check does not validate image dimensions, social crawler rendering or real sharing previews.'
+      limitations: 'The check does not validate image dimensions, social crawler rendering or real sharing previews.',
+      scoreDeduplicationKey: 'social.open_graph',
+      reportGroupingKey: 'social.open_graph'
     });
   }, { priority: 'Low' });
 }
@@ -972,10 +1081,12 @@ function hreflangXDefaultMissing() {
       return Number(flags.hreflangCount || 0) > 0 || (flags.hreflangLanguages || []).length > 0;
     });
     if (!hreflangRows.length) {
-      return makeResult(this, 'NA', {
-        finding: 'No hreflang data is stored for this run.',
-        recommendation: 'Import Screaming Frog hreflang exports or crawl pages with hreflang extraction before evaluating internationalisation. Do not treat a DE-only site as faulty solely because hreflang is absent.',
-        evidence: { requiredData: ['hreflang_export', 'html_head'] },
+      return availabilityResult(this, 'not_applicable', {
+        finding: 'No hreflang signal was observed, so the conditional x-default check is not applicable.',
+        recommendation: 'Do not add hreflang or x-default unless the site has a real international targeting setup.',
+        facts: { pagesWithHreflang: 0 },
+        evidence: { checkedSource: 'extracted_html_head', pagesWithHreflang: 0 },
+        requirements: { requiredFacts: ['existingHreflangCluster'], optionalFacts: ['internationalMarketIntent'], missingFacts: [], canCollectWithTargetedRun: false, reason: 'x-default is only assessed when hreflang exists.' },
         findingType: 'info',
         confidence: 'low',
         dataBasis: 'no stored hreflang facts',
@@ -1000,7 +1111,8 @@ function hreflangXDefaultMissing() {
       dataBasis: 'stored HTML/SF hreflang facts',
       evidenceLevel: 'sample',
       automationCoverage: 'partial',
-      limitations: 'This check does not validate full reciprocal hreflang clusters unless import data contains those relationships.'
+      limitations: 'This check does not validate full reciprocal hreflang clusters unless import data contains those relationships.',
+      requirements: { requiredFacts: ['existingHreflangCluster', 'xDefaultObservation'], optionalFacts: ['reciprocalCluster'], missingFacts: [], minimumCoverage: 1, canCollectWithTargetedRun: true }
     });
   }, { priority: 'Low', effort: 'M' });
 }
@@ -1014,10 +1126,11 @@ function consentTechnicalSignals() {
       LIMIT 500
     `, [ctx.run.id]);
     if (!rows.length) {
-      return makeResult(this, 'NA', {
+      return availabilityResult(this, 'not_executed', {
         finding: 'No HTML pages are stored for consent technical signal detection.',
         recommendation: 'Run a crawl or import rendered/JavaScript facts before reviewing consent implementation.',
-        evidence: {},
+        evidence: { htmlPages: 0 },
+        requirements: { requiredFacts: ['htmlScriptFacts'], missingFacts: ['htmlScriptFacts'], canCollectWithTargetedRun: true },
         findingType: 'info',
         confidence: 'low',
         automationCoverage: 'requires_external_data',
@@ -1028,6 +1141,16 @@ function consentTechnicalSignals() {
     const cmpRows = parsed.filter((row) => row.flags.hasConsentSignal || (row.flags.consentVendorSignals || []).length);
     const tagRows = parsed.filter((row) => row.flags.hasGoogleTagManager || row.flags.hasGtag || row.flags.hasDataLayer || row.flags.hasMetaPixel);
     const status = tagRows.length && !cmpRows.length ? 'Warning' : cmpRows.length ? 'OK' : 'NA';
+    if (!tagRows.length && !cmpRows.length) {
+      return availabilityResult(this, 'not_applicable', {
+        finding: 'No CMP, consent-mode or tag-manager technical signals were detected; no consent implementation defect was inferred.',
+        details: 'The HTML/script extractor ran successfully, but the page sample did not establish an applicable tracking/consent implementation.',
+        recommendation: 'No technical consent action from the observed pages; legal assessment remains outside this tool.',
+        facts: { sampledPages: rows.length, cmpSignalPages: 0, marketingTagSignalPages: 0 },
+        evidence: { sampledPages: rows.length, legalJudgment: 'outside_automated_scope' },
+        requirements: { requiredFacts: ['htmlScriptFacts'], optionalFacts: ['runtimeConsentFlow'], missingFacts: [], canCollectWithTargetedRun: false, reason: 'No applicable tag/CMP implementation was observed.' }
+      });
+    }
     return makeResult(this, status, {
       affectedCount: status === 'Warning' ? tagRows.length : 0,
       sampleUrls: (tagRows.length ? tagRows : parsed).slice(0, 10).map((row) => row.url),
@@ -1053,7 +1176,8 @@ function consentTechnicalSignals() {
       evidenceLevel: 'sample',
       automationCoverage: 'requires_human_review',
       interpretation: 'Tracking-/Tag-Manager-Signale werden technisch erkannt. Eine rechtliche Bewertung kann das Tool nicht leisten; die Evidence gehoert in den Consent-/Datenschutz-Review.',
-      limitations: 'The check does not execute consent flows and cannot prove whether hits fire before consent.'
+      limitations: 'The check does not execute consent flows and cannot prove whether hits fire before consent.',
+      requirements: { requiredFacts: ['htmlScriptFacts'], optionalFacts: ['runtimeConsentFlow', 'legalAssessment'], missingFacts: [], minimumCoverage: 1, canCollectWithTargetedRun: true }
     });
   }, { priority: 'Low', effort: 'M' });
 }
@@ -1104,6 +1228,8 @@ function canonicalTargetNon200() {
 
 function internalLinksToStatus(id, name, targetWhere, status = 'Warning', priority = 'Medium') {
   return tech(id, 'Crawling & Indexing', name, function run(ctx) {
+    const gate = storedFactGate(this, ctx, 'storeAllLinks', 'normalized internal link rows');
+    if (gate) return gate;
     const rows = all(ctx.db, `
       SELECT l.sourceUrl AS url, l.targetUrl, p.statusCode
       FROM page_links l
@@ -1123,13 +1249,16 @@ function internalLinksToStatus(id, name, targetWhere, status = 'Warning', priori
       sampleUrls: rows.map((row) => row.url),
       finding: affectedCount ? `${affectedCount} internal link(s) point to matching target status.` : 'No matching internal link targets found among crawled pages.',
       recommendation: 'Update internal links to point directly to 200 destinations.',
-      evidence: { samples: rows }
+      evidence: { samples: rows },
+      requirements: { requiredFacts: ['normalizedInternalLinkRows', 'knownTargetStatus'], optionalFacts: [], missingFacts: [], minimumCoverage: 1, canCollectWithTargetedRun: true }
     });
   }, { priority });
 }
 
 function orphanLikeSitemapUrls() {
   return tech('orphan_like_sitemap_urls', 'Crawling & Indexing', 'Orphan-like sitemap URLs without internal links', function run(ctx) {
+    const gate = storedFactGate(this, ctx, 'storeAllLinks', 'normalized internal link rows');
+    if (gate) return gate;
     const rows = all(ctx.db, `
       SELECT p.url
       FROM pages p
@@ -1151,13 +1280,16 @@ function orphanLikeSitemapUrls() {
       sampleUrls: rows.map((row) => row.url),
       finding: affectedCount ? `${affectedCount} sitemap URL(s) have no observed internal inlinks.` : 'Crawled sitemap URLs have observed internal inlinks where detectable.',
       recommendation: 'Review XML-only URLs and add crawlable internal links where they should be discoverable.',
-      evidence: { affectedCount, sampleUrls: rows.map((row) => row.url) }
+      evidence: { affectedCount, sampleUrls: rows.map((row) => row.url) },
+      requirements: { requiredFacts: ['sitemapSourceFacts', 'normalizedInternalLinkRows'], optionalFacts: [], missingFacts: [], minimumCoverage: 1, canCollectWithTargetedRun: true }
     });
   }, { priority: 'Low' });
 }
 
 function resourceCountCheck(id, category, name, resourceType, threshold, status = 'Warning') {
   return tech(id, category, name, function run(ctx) {
+    const gate = storedFactGate(this, ctx, 'storeAllResources', 'resource rows');
+    if (gate) return gate;
     const rows = all(ctx.db, `
       SELECT pageUrl AS url, COUNT(*) AS count
       FROM resources
@@ -1191,13 +1323,16 @@ function resourceCountCheck(id, category, name, resourceType, threshold, status 
       dataBasis: 'stored browser/resource facts',
       evidenceLevel: 'sample',
       automationCoverage: 'partial',
-      limitations: 'Count-based JS/CSS checks do not know byte weight or execution cost unless resource metrics are imported.'
+      limitations: 'Count-based JS/CSS checks do not know byte weight or execution cost unless resource metrics are imported.',
+      requirements: { requiredFacts: ['resourceRows'], optionalFacts: ['resourceBytes', 'renderBlockingImpact'], missingFacts: [], minimumCoverage: 1, canCollectWithTargetedRun: true }
     });
   });
 }
 
 function resourceBytesCheck(id, category, name, resourceType, threshold, status = 'Warning') {
   return tech(id, category, name, function run(ctx) {
+    const gate = storedFactGate(this, ctx, 'storeAllResources', 'resource byte rows');
+    if (gate) return gate;
     const rows = all(ctx.db, `
       SELECT pageUrl AS url, SUM(sizeBytes) AS totalBytes, COUNT(*) AS knownResources
       FROM resources
@@ -1227,13 +1362,16 @@ function resourceBytesCheck(id, category, name, resourceType, threshold, status 
       confidence: affectedCount ? 'medium' : 'high',
       dataBasis: 'stored resource byte facts',
       evidenceLevel: 'sample',
-      automationCoverage: 'partial'
+      automationCoverage: 'partial',
+      requirements: { requiredFacts: ['resourceRows', 'resourceBytes'], optionalFacts: [], missingFacts: [], minimumCoverage: 1, canCollectWithTargetedRun: true }
     });
   });
 }
 
 function thirdPartyScripts() {
   return tech('third_party_scripts_detected', 'Performance Light', 'Third-party scripts detected', function run(ctx) {
+    const gate = storedFactGate(this, ctx, 'storeAllResources', 'resource origin rows');
+    if (gate) return gate;
     const rows = all(ctx.db, `
       SELECT pageUrl AS url, COUNT(*) AS thirdPartyScripts
       FROM resources
@@ -1266,13 +1404,16 @@ function thirdPartyScripts() {
       automationCoverage: 'requires_human_review',
       maturityImpact: rows.length ? 'low' : 'none',
       interpretation: 'Third-party scripts are surfaced as performance/privacy review evidence, not automatically as a JS optimisation defect.',
-      limitations: 'The check does not measure main-thread execution cost or consent behaviour.'
+      limitations: 'The check does not measure main-thread execution cost or consent behaviour.',
+      requirements: { requiredFacts: ['resourceRows', 'resourceOriginClassification'], optionalFacts: ['executionCost', 'consentState'], missingFacts: [], minimumCoverage: 1, canCollectWithTargetedRun: true }
     });
   }, { priority: 'Low' });
 }
 
 function preloadMissing() {
   return tech('preload_missing', 'Performance Light', 'Preload missing when resource signals are strong', function run(ctx) {
+    const gate = storedFactGate(this, ctx, 'storeAllResources', 'resource rows');
+    if (gate) return gate;
     const rows = all(ctx.db, `
       SELECT p.url, COUNT(r.id) AS resources
       FROM pages p
@@ -1310,13 +1451,16 @@ function preloadMissing() {
       evidenceLevel: 'sample',
       automationCoverage: 'partial',
       maturityImpact: rows.length ? 'low' : 'none',
-      limitations: 'No critical-path or Lighthouse proof is implied by this check.'
+      limitations: 'No critical-path or Lighthouse proof is implied by this check.',
+      requirements: { requiredFacts: ['resourceRows', 'htmlHeadResourceHints'], optionalFacts: ['criticalPathEvidence'], missingFacts: [], minimumCoverage: 1, canCollectWithTargetedRun: true }
     });
   }, { priority: 'Low' });
 }
 
 function preconnectMissing() {
   return tech('preconnect_missing', 'Performance Light', 'Preconnect missing for external font/CDN origins', function run(ctx) {
+    const gate = storedFactGate(this, ctx, 'storeAllResources', 'resource origin rows');
+    if (gate) return gate;
     const rows = all(ctx.db, `
       SELECT p.url, COUNT(r.id) AS thirdPartyResources
       FROM pages p
@@ -1354,7 +1498,8 @@ function preconnectMissing() {
       evidenceLevel: 'sample',
       automationCoverage: 'partial',
       maturityImpact: rows.length ? 'low' : 'none',
-      limitations: 'The check does not measure connection setup delay or actual Core Web Vitals improvement.'
+      limitations: 'The check does not measure connection setup delay or actual Core Web Vitals improvement.',
+      requirements: { requiredFacts: ['resourceRows', 'resourceOriginClassification', 'htmlHeadResourceHints'], optionalFacts: ['connectionTiming'], missingFacts: [], minimumCoverage: 1, canCollectWithTargetedRun: true }
     });
   }, { priority: 'Low' });
 }
@@ -1735,7 +1880,13 @@ function templateFinding(check, rows, status, options) {
 function unavailableSamplingResult(check, data, tool) {
   const enabled = tool === 'lighthouse' ? data.lighthouseEnabled : data.playwrightEnabled;
   const successCount = tool === 'lighthouse' ? data.lighthouseSuccessCount : data.playwrightSuccessCount;
-  return makeResult(check, 'NA', {
+  const unavailableCount = tool === 'lighthouse' ? data.lighthouseUnavailableCount : data.playwrightUnavailableCount;
+  const evaluationState = !enabled || !data.templateSamplingEnabled || !data.sampleCount
+    ? 'not_executed'
+    : unavailableCount > 0
+      ? 'technical_error'
+      : 'insufficient_evidence';
+  return availabilityResult(check, evaluationState, {
     affectedCount: 0,
     finding: enabled
       ? `${tool} sampling did not produce successful template measurements.`
@@ -1744,6 +1895,15 @@ function unavailableSamplingResult(check, data, tool) {
       ? `Review local ${tool} availability if template sampling should collect these measurements.`
       : `Enable ${tool} sampling only when rendered/lab measurements are needed for representative templates.`,
     evidence: { ...data, tool, enabled, successCount },
+    facts: { tool, enabled, sampleCount: data.sampleCount, successCount, unavailableCount },
+    requirements: {
+      requiredFacts: [`${tool}TemplateMeasurements`],
+      optionalFacts: [],
+      missingFacts: [`${tool}TemplateMeasurements`],
+      minimumCoverage: 1,
+      canCollectWithTargetedRun: true,
+      reason: !enabled ? `${tool} sampling was disabled.` : unavailableCount ? `${tool} could not produce a successful sample.` : 'No stable template measurement was observed.'
+    },
     findingType: 'info',
     confidence: 'low'
   });
@@ -1916,7 +2076,22 @@ function speakableOpportunity() {
       });
     }
     const present = count(ctx.db, "SELECT COUNT(*) AS count FROM schemas WHERE runId = ? AND schemaType = 'SpeakableSpecification' AND parseStatus = 'ok'", [ctx.run.id]);
-    return makeResult(this, present ? 'OK' : 'NA', {
+    if (!present) {
+      return availabilityResult(this, 'not_applicable', {
+        priority: 'Low',
+        finding: 'Speakable schema was not found; no applicable use case was established and no defect was scored.',
+        recommendation: 'Use Speakable only for suitable editorial or answer-focused content where the markup matches visible text.',
+        facts: { totalHtmlPages: total, schemaType: 'SpeakableSpecification', occurrences: 0 },
+        evidence: { totalHtmlPages: total, schemaType: 'SpeakableSpecification', occurrences: 0 },
+        requirements: { requiredFacts: ['applicableSpeakableUseCase'], missingFacts: [], canCollectWithTargetedRun: false, reason: 'No applicable page type/use case was established.' },
+        findingType: 'opportunity',
+        confidence: 'medium',
+        reportGroupingKey: 'schema.speakable',
+        scoreDeduplicationKey: 'schema.speakable',
+        relatedCheckIds: ['geo.speakable_present']
+      });
+    }
+    return makeResult(this, 'OK', {
       priority: 'Low',
       affectedCount: 0,
       finding: present ? 'Speakable schema found.' : 'Speakable schema was not found; this is treated as a GEO opportunity rather than a technical error.',
@@ -1926,6 +2101,7 @@ function speakableOpportunity() {
       findingType: present ? 'info' : 'opportunity',
       confidence: 'medium',
       reportGroupingKey: 'schema.speakable',
+      scoreDeduplicationKey: 'schema.speakable',
       relatedCheckIds: ['geo.speakable_present']
     });
   }, { priority: 'Low', effort: 'S' });
@@ -1957,6 +2133,7 @@ function pageTypeSchemaCoverage(check, ctx, pageType, schemaType) {
     WHERE runId = ? AND pageType = ? AND COALESCE(schemaTypesJson, '') NOT LIKE ?
   `, [ctx.run.id, pageType, `%${schemaType}%`]);
   return makeResult(check, total ? (affectedCount ? 'Warning' : 'OK') : 'NA', {
+    evaluationState: !total ? 'not_applicable' : affectedCount ? 'fail' : 'pass',
     affectedCount,
     sampleUrls: rows.map((row) => row.url),
     finding: total ? `${affectedCount}/${total} ${pageType} page(s) lack ${schemaType} schema.` : `No ${pageType} pages detected by stored heuristics.`,
@@ -1965,6 +2142,7 @@ function pageTypeSchemaCoverage(check, ctx, pageType, schemaType) {
     evidence: { pageType, schemaType, totalCandidatePages: total, affectedCount, sampleUrls: rows.map((row) => row.url) },
     reportGroupingKey: `schema.${schemaType.toLowerCase()}`,
     relatedCheckIds: schemaType === 'Article' ? ['geo.article_blog_pages_article_schema'] : [],
+    requirements: { requiredFacts: [`${pageType}PageClassification`, 'schemaTypeExtraction'], optionalFacts: [], missingFacts: [], minimumCoverage: 1, canCollectWithTargetedRun: true },
     findingType: 'opportunity',
     confidence: total >= 20 ? 'high' : total ? 'medium' : 'low',
     reviewRecommended: affectedCount > 0,
@@ -2013,12 +2191,14 @@ function breadcrumbCoverage() {
     const sampleMissingUrls = missingRows.map((row) => row.url);
     const samplePresentUrls = presentRows.map((row) => row.url);
     return makeResult(this, total ? (affectedCount ? 'Warning' : 'OK') : 'NA', {
+      evaluationState: total ? (affectedCount ? 'fail' : 'pass') : 'not_applicable',
       affectedCount,
       sampleUrls: sampleMissingUrls,
       finding: total ? `${affectedCount}/${total} eligible detail page(s) lack BreadcrumbList schema.` : 'No eligible detail pages for BreadcrumbList evaluation.',
       recommendation: 'Use BreadcrumbList schema where visible breadcrumbs exist on deeper templates.',
       details: 'Eligible pages include article, product, category, location, facts/fakta/fakten and deeper non-index templates. Homepage, index, legal and contact pages are excluded.',
-      evidence: { eligiblePages: total, pagesWithBreadcrumbList, coverage, sampleMissingUrls, samplePresentUrls }
+      evidence: { eligiblePages: total, pagesWithBreadcrumbList, coverage, sampleMissingUrls, samplePresentUrls },
+      requirements: { requiredFacts: ['eligibleDetailPageClassification', 'schemaTypeExtraction'], optionalFacts: ['visibleBreadcrumb'], missingFacts: [], minimumCoverage: 1, canCollectWithTargetedRun: true }
     });
   });
 }
@@ -2054,6 +2234,7 @@ function faqPageCoverage() {
     `, [ctx.run.id]);
     const status = total ? (affectedCount ? 'Warning' : 'OK') : 'NA';
     return makeResult(this, status, {
+      evaluationState: total ? (affectedCount ? 'fail' : 'pass') : weakFaqPages ? 'insufficient_evidence' : 'not_applicable',
       priority: 'Low',
       affectedCount,
       sampleUrls: rows.map((row) => row.url),
@@ -2069,7 +2250,15 @@ function faqPageCoverage() {
       confidence: total ? 'high' : 'low',
       reviewRecommended: weakFaqPages > 0,
       reportGroupingKey: 'schema.faqpage',
-      relatedCheckIds: ['geo.faq_html_present_schema_missing']
+      relatedCheckIds: ['geo.faq_html_present_schema_missing'],
+      requirements: {
+        requiredFacts: ['strongFaqPageClassification', 'schemaTypeExtraction'],
+        optionalFacts: ['weakFaqHints'],
+        missingFacts: total ? [] : weakFaqPages ? ['strongFaqPageClassification'] : [],
+        minimumCoverage: 1,
+        canCollectWithTargetedRun: weakFaqPages > 0,
+        reason: total ? 'Strong FAQ page facts were available.' : weakFaqPages ? 'Only weak FAQ hints were observed.' : 'No qualifying FAQ page is in scope.'
+      }
     });
   }, { priority: 'Low' });
 }
@@ -2100,13 +2289,15 @@ function localBusinessDomainHint() {
     const present = count(ctx.db, "SELECT COUNT(DISTINCT pageUrl) AS count FROM schemas WHERE runId = ? AND schemaType = 'LocalBusiness' AND parseStatus = 'ok'", [ctx.run.id]);
     const status = present ? 'OK' : locationPages ? 'Warning' : 'NA';
     return makeResult(this, status, {
+      evaluationState: present || locationPages ? (status === 'Warning' ? 'fail' : 'pass') : 'not_applicable',
       affectedCount: status === 'Warning' ? locationPages : 0,
       finding: present ? 'LocalBusiness schema found.' : locationPages ? `${locationPages} location page(s) detected without LocalBusiness schema.` : 'No location pages detected by stored heuristics.',
       recommendation: 'Use LocalBusiness schema only for real local business/location entities.',
       details: 'This is a domain/template hint. Service pages mentioning local SEO are not treated as location pages without explicit Standort/Filiale/location URL or title signals.',
       evidence: { candidateLocationPages: locationPages, localBusinessSchemaPages: present, sampleUrls: rows.map((row) => row.url), samples: rows },
       findingType: status === 'Warning' ? 'opportunity' : 'info',
-      confidence: 'medium'
+      confidence: 'medium',
+      requirements: { requiredFacts: ['locationPageClassification', 'schemaTypeExtraction'], optionalFacts: ['localBusinessEntity'], missingFacts: [], minimumCoverage: 1, canCollectWithTargetedRun: true }
     });
   });
 }
@@ -2114,18 +2305,46 @@ function localBusinessDomainHint() {
 function organizationSameAsMissing() {
   return tech('organization_sameas_missing', 'Structured Data', 'Organization sameAs missing', function run(ctx) {
     const orgRows = all(ctx.db, "SELECT rawJson FROM schemas WHERE runId = ? AND schemaType = 'Organization' AND parseStatus = 'ok'", [ctx.run.id]);
+    if (!orgRows.length) {
+      return availabilityResult(this, 'not_applicable', {
+        finding: 'No Organization schema block was observed, so sameAs completeness was not assessed.',
+        details: 'sameAs is only meaningful when an Organization entity exists and authoritative profiles are available.',
+        recommendation: 'Evaluate Organization schema separately before considering sameAs.',
+        facts: { organizationSchemaBlocks: 0 },
+        evidence: { schemaType: 'Organization', runId: ctx.run.id },
+        requirements: { requiredFacts: ['organizationSchemaBlock'], missingFacts: [], canCollectWithTargetedRun: false, reason: 'The check is not applicable without an Organization block.' },
+        scoreDeduplicationKey: 'organization.same_as'
+      });
+    }
+    const rawAvailable = orgRows.some((row) => row.rawJson !== null && row.rawJson !== undefined);
+    if (!rawAvailable) {
+      return availabilityResult(this, 'insufficient_evidence', {
+        finding: 'Organization schema was observed, but retained schema facts are insufficient to assess sameAs.',
+        details: 'A missing retained rawJson field is not evidence that sameAs is absent.',
+        recommendation: 'Repeat a small targeted run with schema-property retention if sameAs must be assessed.',
+        facts: { organizationSchemaBlocks: orgRows.length, schemaPropertyPayloadAvailable: false },
+        evidence: { storageProfile: ctx.run.storageProfile, schemaType: 'Organization' },
+        requirements: { requiredFacts: ['organizationSchemaProperties'], missingFacts: ['organizationSchemaProperties'], canCollectWithTargetedRun: true },
+        scoreDeduplicationKey: 'organization.same_as'
+      });
+    }
     const hasSameAs = orgRows.some((row) => /"sameAs"\s*:/.test(row.rawJson || ''));
     return makeResult(this, hasSameAs ? 'OK' : 'Warning', {
       affectedCount: hasSameAs ? 0 : 1,
       finding: hasSameAs ? 'Organization schema includes sameAs.' : 'Organization schema with sameAs was not found.',
       recommendation: 'Add sameAs references to Organization schema when authoritative profiles exist.',
-      evidence: { organizationSchemaBlocks: orgRows.length, hasSameAs }
+      evidence: { organizationSchemaBlocks: orgRows.length, hasSameAs },
+      requirements: { requiredFacts: ['organizationSchemaBlock', 'organizationSchemaProperties'], optionalFacts: ['verifiedOfficialProfiles'], missingFacts: [], minimumCoverage: 1, canCollectWithTargetedRun: true },
+      scoreDeduplicationKey: 'organization.same_as',
+      reportGroupingKey: 'organization.same_as'
     });
   }, { priority: 'Low' });
 }
 
 function imagesWithoutAlt() {
   return tech('images_without_alt', 'Media SEO', 'Content images without alt', function run(ctx) {
+    const gate = storedFactGate(this, ctx, 'storeAllImages', 'normalized image rows');
+    if (gate) return gate;
     const contentWhere = `hasAlt = 0 AND ${NON_DECORATIVE_IMAGE_WHERE}`;
     const rows = dedupeImageSamples(all(ctx.db, `
       SELECT pageUrl AS url, imageUrl, imageRole
@@ -2154,6 +2373,7 @@ function imagesWithoutAlt() {
           : 'All detected likely content images have alt text.',
       recommendation: 'Add descriptive alt text for meaningful content images; empty alt is acceptable for decorative images.',
       evidence: { contentImagesMissingAlt: affectedCount, ignoredDecorativeImages: ignoredDecorative, samples: rows },
+      requirements: { requiredFacts: ['normalizedImageRows', 'altAttributeObservation', 'imageRoleClassification'], optionalFacts: [], missingFacts: [], minimumCoverage: 1, canCollectWithTargetedRun: true },
       findingType: 'core_issue',
       confidence: 'medium',
       reviewRecommended: ignoredDecorative > 0
@@ -2163,6 +2383,8 @@ function imagesWithoutAlt() {
 
 function emptyAltTexts() {
   return tech('empty_alt_texts', 'Media SEO', 'Empty alt texts', function run(ctx) {
+    const gate = storedFactGate(this, ctx, 'storeAllImages', 'normalized image rows');
+    if (gate) return gate;
     const rows = dedupeImageSamples(all(ctx.db, `
       SELECT pageUrl AS url, imageUrl, imageRole
       FROM page_images
@@ -2198,6 +2420,7 @@ function emptyAltTexts() {
       finding: affectedCount ? `${affectedCount} likely content image(s) have empty alt attributes.` : 'No likely content images with empty alt attributes found.',
       recommendation: 'Use empty alt only for decorative images; otherwise provide descriptive alt text.',
       evidence: { contentImagesWithEmptyAlt: affectedCount, decorativeEmptyAltImages: decorativeEmpty, samples: rows },
+      requirements: { requiredFacts: ['normalizedImageRows', 'altAttributeObservation', 'imageRoleClassification'], optionalFacts: [], missingFacts: [], minimumCoverage: 1, canCollectWithTargetedRun: true },
       findingType: 'core_issue',
       confidence: 'medium',
       reviewRecommended: decorativeEmpty > 0
@@ -2207,6 +2430,8 @@ function emptyAltTexts() {
 
 function imageAttributeCheck(id, category, name, where, status = 'Warning', priority = 'Medium', options = {}) {
   return tech(id, category, name, function run(ctx) {
+    const gate = storedFactGate(this, ctx, 'storeAllImages', 'normalized image rows');
+    if (gate) return gate;
     const contentWhere = `(${where}) AND ${NON_DECORATIVE_IMAGE_WHERE}${options.extraContentWhere ? ` AND ${options.extraContentWhere}` : ''}`;
     const rows = dedupeImageSamples(all(ctx.db, `
       SELECT pageUrl AS url, imageUrl, imageRole, ${sqlString(options.issueReason || 'image markup issue')} AS reason
@@ -2257,7 +2482,8 @@ function imageAttributeCheck(id, category, name, where, status = 'Warning', prio
       dataBasis: 'stored image markup facts',
       evidenceLevel: 'sample',
       automationCoverage: 'partial',
-      maturityImpact: options.findingType === 'best_practice' && affectedCount ? 'low' : undefined
+      maturityImpact: options.findingType === 'best_practice' && affectedCount ? 'low' : undefined,
+      requirements: { requiredFacts: ['normalizedImageRows', 'imageAttributeObservation', 'imageRoleClassification'], optionalFacts: [], missingFacts: [], minimumCoverage: 1, canCollectWithTargetedRun: true }
     });
   }, { priority });
 }
@@ -2385,12 +2611,14 @@ function videoObjectCheck() {
     `, [ctx.run.id]);
     const status = candidatePages ? (affectedCount ? 'Warning' : 'OK') : 'NA';
     return makeResult(this, status, {
+      evaluationState: candidatePages ? (affectedCount ? 'fail' : 'pass') : 'not_applicable',
       affectedCount,
       sampleUrls: rows.map((row) => row.url),
       finding: candidatePages ? `${affectedCount}/${candidatePages} video embed page(s) lack VideoObject schema.` : 'No video embeds detected by stored heuristics; no VideoObject missing check was applied.',
       recommendation: candidatePages ? 'Use VideoObject schema for important embedded videos.' : 'No VideoObject action unless visible video embeds are present.',
       details: 'Evaluated only pages with stored hasVideoEmbed=1. Existing VideoObject schema without a detected embed is reported elsewhere as schema coverage, not as a missing-embed issue.',
-      evidence: { candidatePages, affectedCount, samples: rows }
+      evidence: { candidatePages, affectedCount, samples: rows },
+      requirements: { requiredFacts: ['videoEmbedClassification', 'schemaTypeExtraction'], optionalFacts: [], missingFacts: [], minimumCoverage: 1, canCollectWithTargetedRun: true }
     });
   }, { priority: 'Low' });
 }
