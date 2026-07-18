@@ -1,4 +1,4 @@
-import { normalizeUrl, isLikelyHtmlPage } from '../utils/url.js';
+import { normalizeRequestUrl, normalizeUrl, isLikelyHtmlPage } from '../utils/url.js';
 import { crawlerDefaults } from '../crawler/defaults.js';
 
 export function enqueueUrl(db, {
@@ -13,6 +13,7 @@ export function enqueueUrl(db, {
 }) {
   const normalizedUrl = normalizeUrl(url, baseUrl);
   if (!normalizedUrl) return { inserted: false, normalizedUrl: null, reason: 'invalid' };
+  const requestUrl = normalizeRequestUrl(url, baseUrl) || normalizedUrl;
   if (!allowNonHtml && !isLikelyHtmlPage(normalizedUrl)) {
     return { inserted: false, normalizedUrl, reason: 'non_html' };
   }
@@ -24,7 +25,7 @@ export function enqueueUrl(db, {
       shardKey, shardId
     )
     VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)
-  `).run(runId, normalizedUrl, normalizedUrl, depth, sourceUrl, sourceType, priority, shard.shardKey, shard.shardId);
+  `).run(runId, requestUrl, normalizedUrl, depth, sourceUrl, sourceType, priority, shard.shardKey, shard.shardId);
 
   return {
     inserted: result.changes > 0,
@@ -45,6 +46,7 @@ export function enqueueSkippedUrl(db, {
 }, reason) {
   const finalNormalizedUrl = normalizedUrl || normalizeUrl(url, baseUrl);
   if (!finalNormalizedUrl) return { inserted: false, normalizedUrl: null, reason: 'invalid' };
+  const requestUrl = normalizeRequestUrl(url, baseUrl) || finalNormalizedUrl;
 
   const shard = shardForUrl(finalNormalizedUrl);
   const result = db.prepare(`
@@ -55,7 +57,7 @@ export function enqueueSkippedUrl(db, {
     VALUES (?, ?, ?, ?, ?, ?, 'skipped', ?, 0, ?, ?, ?, ?, CURRENT_TIMESTAMP)
   `).run(
     runId,
-    finalNormalizedUrl,
+    requestUrl,
     finalNormalizedUrl,
     depth,
     sourceUrl,

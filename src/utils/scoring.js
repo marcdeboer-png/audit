@@ -1,9 +1,9 @@
 import crypto from 'node:crypto';
 
-export const SCORING_VERSION = 'root-cause-scoring-v2';
+export const SCORING_VERSION = 'root-cause-scoring-v3';
 export const DEDUPLICATION_VERSION = 'deterministic-root-cause-v1';
-export const COVERAGE_MODEL_VERSION = 'weighted-coverage-v1';
-export const CHECK_LOGIC_VERSION = 'run77-resilience-v2';
+export const COVERAGE_MODEL_VERSION = 'weighted-coverage-v2';
+export const CHECK_LOGIC_VERSION = 'calibration-v3';
 
 export const scoringConfig = Object.freeze({
   severityPenalties: Object.freeze({ critical: 30, high: 14, medium: 5, low: 1 }),
@@ -217,7 +217,8 @@ function prepareRow(row = {}, index) {
   // category appear better covered merely because its findings carry a lower
   // score penalty.
   const coverageWeight = round(baseCoverageWeight(row.priority, findingType), 4);
-  const reliablyEvaluated = scoreEligible && EVALUATED_STATES.has(evaluationState) && confidence !== 'low';
+  const coverageEvaluated = EVALUATED_STATES.has(evaluationState) && confidence !== 'low';
+  const reliablyEvaluated = scoreEligible && coverageEvaluated;
   const evidence = objectValue(row.evidence, row.evidenceJson);
   const facts = objectValue(row.facts, row.factsJson);
   const sampleUrls = arrayValue(row.sampleUrls, row.sampleUrlsJson);
@@ -229,6 +230,7 @@ function prepareRow(row = {}, index) {
     auditType: row.auditType || (checkId.startsWith('geo.') || checkId.startsWith('trust.') || checkId.startsWith('llm.') ? 'geo' : 'tech'),
     evaluationState,
     scoreEligible,
+    coverageEvaluated,
     reliablyEvaluated,
     confidence,
     severity,
@@ -266,7 +268,10 @@ function calculateCoverage(rows) {
     configuredWeight += unit.weight;
     const states = new Set(unit.rows.map((row) => row.evaluationState));
     const isNotApplicable = [...states].every((state) => state === 'not_applicable');
-    const evaluated = unit.rows.some((row) => row.reliablyEvaluated);
+    // A deliberately score-free inventory or derived roll-up can still prove
+    // that the required facts were collected. Score eligibility and evidence
+    // coverage are independent dimensions.
+    const evaluated = unit.rows.some((row) => row.coverageEvaluated);
     if (isNotApplicable) notApplicableWeight += unit.weight;
     else {
       eligibleWeight += unit.weight;
@@ -626,8 +631,10 @@ function baseCoverageWeight(priority, findingType) {
 function normalizeSeverity(value, status, priority) {
   const candidate = String(value || '').toLowerCase();
   if (candidate in SEVERITY_RANK) return candidate;
+  const declaredPriority = String(priority || '').toLowerCase();
+  if (declaredPriority in SEVERITY_RANK) return declaredPriority;
   if (status === 'Error') return 'high';
-  if (status === 'Warning') return priority === 'High' ? 'high' : priority === 'Low' ? 'low' : 'medium';
+  if (status === 'Warning') return 'medium';
   return 'none';
 }
 

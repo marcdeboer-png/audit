@@ -4,6 +4,7 @@ import {
   getExtension,
   getHost,
   isInternalUrl,
+  normalizeRequestUrl,
   normalizeUrl,
   resourceTypeFromUrl
 } from '../utils/url.js';
@@ -132,7 +133,14 @@ function charsetFromContentType(value) {
 
 function headings($, selector) {
   return $(selector)
-    .map((_, element) => cleanText($(element).text()))
+    .map((_, element) => {
+      const node = $(element);
+      const text = cleanText(node.text());
+      if (text) return text;
+      const ariaLabel = cleanText(node.attr('aria-label') || '');
+      if (ariaLabel) return ariaLabel;
+      return cleanText(node.find('img[alt]').map((__, image) => $(image).attr('alt') || '').get().join(' '));
+    })
     .get()
     .filter(Boolean)
     .slice(0, 50);
@@ -151,7 +159,7 @@ function extractLinks($, pageUrl, finalDomain) {
   const rows = [];
   $('a[href]').each((_, element) => {
     const href = $(element).attr('href');
-    const linkedUrl = resolveAuthoredUrl(href, pageUrl);
+    const linkedUrl = normalizeRequestUrl(href, pageUrl) || resolveAuthoredUrl(href, pageUrl);
     const normalizedTargetUrl = normalizeUrl(href, pageUrl);
     if (!normalizedTargetUrl) return;
     const linkType = isInternalUrl(normalizedTargetUrl, finalDomain) ? 'internal' : 'external';

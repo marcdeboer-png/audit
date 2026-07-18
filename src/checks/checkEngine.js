@@ -37,10 +37,18 @@ export async function runChecks(db, runId) {
   context.scope = scope;
   context.scopeEvidence = scopeEvidence;
 
+  const preservedResults = collectedResultsForNonLiveRerun(db, run, checks);
+
   clearRunArtifacts(db, runId);
 
   const results = [];
   for (const check of checks) {
+    if (preservedResults.has(check.id)) {
+      const preserved = preservedResults.get(check.id);
+      assertCheckResultScope(preserved, scope, check);
+      results.push(preserved);
+      continue;
+    }
     try {
       const result = await check.run(context);
       const normalized = importAwareResult(run, {
@@ -102,6 +110,70 @@ export async function runChecks(db, runId) {
   persistRunScores(db, runId, scores);
   logRun(db, runId, 'info', 'Checks completed', { checks: results.length, scores });
   return { results, scores };
+}
+
+function collectedResultsForNonLiveRerun(db, run, checks) {
+  if (run.status === 'running') return new Map();
+  const eligibleIds = checks.filter((check) => check.preserveCollectedEvidenceOnRerun).map((check) => check.id);
+  if (!eligibleIds.length) return new Map();
+  const placeholders = eligibleIds.map(() => '?').join(', ');
+  const rows = db.prepare(`
+    SELECT *
+    FROM check_results
+    WHERE runId = ?
+      AND checkId IN (${placeholders})
+      AND evaluationState IN ('pass', 'fail', 'technical_error')
+  `).all(run.id, ...eligibleIds);
+  return new Map(rows.map((row) => [row.checkId, storedCollectedResult(row)]));
+}
+
+function storedCollectedResult(row) {
+  return {
+    id: row.checkId,
+    category: row.category,
+    name: row.checkName,
+    auditType: row.checkId.startsWith('geo.') || row.checkId.startsWith('trust.') || row.checkId.startsWith('llm.') ? 'geo' : 'tech',
+    status: row.status,
+    priority: row.priority,
+    effort: row.effort,
+    score: row.score,
+    finding: row.finding,
+    details: row.details,
+    recommendation: row.recommendation,
+    affectedCount: row.affectedCount,
+    sampleUrls: safeParse(row.sampleUrlsJson, []),
+    evidence: safeParse(row.evidenceJson, {}),
+    facts: safeParse(row.factsJson, {}),
+    assessment: safeParse(row.assessmentJson, {}),
+    recommendationMeta: safeParse(row.recommendationMetaJson, {}),
+    requirements: safeParse(row.requirementsJson, {}),
+    evaluationState: row.evaluationState,
+    scoreEligible: Boolean(row.scoreEligible),
+    scoreExclusionReason: row.scoreExclusionReason,
+    scoreDeduplicationKey: row.scoreDeduplicationKey,
+    reportGroupingKey: row.reportGroupingKey,
+    findingType: row.findingType,
+    confidence: row.confidence,
+    reviewRecommended: Boolean(row.reviewRecommended),
+    maturityImpact: row.maturityImpact,
+    dataBasis: row.dataBasis,
+    evidenceLevel: row.evidenceLevel,
+    reviewReason: row.reviewReason,
+    automationCoverage: row.automationCoverage,
+    interpretation: row.interpretation,
+    limitations: row.limitations,
+    relatedCheckIds: safeParse(row.relatedCheckIdsJson, []),
+    checkVersion: row.checkVersion,
+    provenance: safeParse(row.provenanceJson, {}),
+    rootCauseKey: row.rootCauseKey || row.scoreDeduplicationKey,
+    rootCauseFamily: row.rootCauseFamily,
+    scopeType: row.scopeType,
+    occurrenceCount: row.occurrenceCount,
+    affectedUrlCount: row.affectedUrlCount,
+    displayedSampleCount: row.displayedSampleCount,
+    deduplicationConfidence: row.deduplicationConfidence,
+    deduplicationReason: row.deduplicationReason
+  };
 }
 
 const LIVE_DATA_CHECK_IDS = new Set([

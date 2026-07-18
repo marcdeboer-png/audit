@@ -354,11 +354,14 @@ function normalizeRequirements(value, evaluationState, evidence = {}, options = 
 
 function normalizeAssessment(value, defaults) {
   const input = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
-  const defaultSeverity = defaults.status === 'Error'
-    ? 'high'
-    : defaults.status === 'Warning'
-      ? defaults.priority === 'High' ? 'high' : defaults.priority === 'Low' ? 'low' : 'medium'
-      : 'none';
+  const declaredPriority = String(defaults.priority || '').toLowerCase();
+  const defaultSeverity = ['critical', 'high', 'medium', 'low'].includes(declaredPriority)
+    ? declaredPriority
+    : defaults.status === 'Error'
+      ? 'high'
+      : defaults.status === 'Warning'
+        ? 'medium'
+        : 'none';
   return {
     rationale: input.rationale || null,
     pageType: input.pageType || null,

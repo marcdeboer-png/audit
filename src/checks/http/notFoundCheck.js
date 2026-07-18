@@ -29,6 +29,7 @@ export function syntheticNotFoundCheck(options = {}) {
     auditType: 'tech',
     priority: 'High',
     effort: 'S',
+    preserveCollectedEvidenceOnRerun: true,
     async run(ctx) {
       if (!options.force && (ctx.run.sourceType === 'screaming_frog_import' || ctx.run.status !== 'running')) {
         return makeResult(this, 'NA', {

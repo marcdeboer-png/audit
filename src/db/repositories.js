@@ -670,28 +670,34 @@ export function hydrateInternalLinkHttpFacts(db, runId) {
     SET initialStatusCode = (
           SELECT p.initialStatusCode FROM pages p
           WHERE p.runId = page_links.runId AND p.normalizedUrl = page_links.normalizedTargetUrl
+            AND (page_links.linkedUrl IS NULL OR p.url = page_links.linkedUrl)
         ),
         statusCode = (
           SELECT p.initialStatusCode FROM pages p
           WHERE p.runId = page_links.runId AND p.normalizedUrl = page_links.normalizedTargetUrl
+            AND (page_links.linkedUrl IS NULL OR p.url = page_links.linkedUrl)
         ),
         redirectChainJson = (
           SELECT p.redirectChainJson FROM pages p
           WHERE p.runId = page_links.runId AND p.normalizedUrl = page_links.normalizedTargetUrl
+            AND (page_links.linkedUrl IS NULL OR p.url = page_links.linkedUrl)
         ),
         finalUrl = (
           SELECT p.finalUrl FROM pages p
           WHERE p.runId = page_links.runId AND p.normalizedUrl = page_links.normalizedTargetUrl
+            AND (page_links.linkedUrl IS NULL OR p.url = page_links.linkedUrl)
         ),
         finalStatusCode = (
           SELECT p.statusCode FROM pages p
           WHERE p.runId = page_links.runId AND p.normalizedUrl = page_links.normalizedTargetUrl
+            AND (page_links.linkedUrl IS NULL OR p.url = page_links.linkedUrl)
         )
     WHERE runId = ?
       AND linkType = 'internal'
       AND EXISTS (
         SELECT 1 FROM pages p
         WHERE p.runId = page_links.runId AND p.normalizedUrl = page_links.normalizedTargetUrl
+          AND (page_links.linkedUrl IS NULL OR p.url = page_links.linkedUrl)
       )
   `).run(runId).changes;
 }

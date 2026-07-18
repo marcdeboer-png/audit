@@ -55,7 +55,10 @@ export function summarizeAiBotRules(robotsUrl, content) {
 
 export function blocksTxtFiles(content) {
   if (!content) return false;
-  return /disallow\s*:\s*.*\*?\.txt/i.test(content) || /disallow\s*:\s*\/.*\.txt/i.test(content);
+  const origin = 'https://audit.invalid';
+  const parser = parseRobots(`${origin}/robots.txt`, content);
+  if (!parser) return false;
+  return ['/llms.txt', '/llms-full.txt'].some((path) => parser.isAllowed(`${origin}${path}`, '*') === false);
 }
 
 function escapeRegex(input) {

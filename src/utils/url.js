@@ -42,6 +42,17 @@ export function originCandidates(input) {
 }
 
 export function normalizeUrl(input, baseUrl = null) {
+  return normalizeHttpUrl(input, baseUrl, { preserveTrailingSlash: false });
+}
+
+// Queue identity deliberately ignores a trailing slash, but the authored URL
+// still has to be requested verbatim. Otherwise `/path/` can be crawled as
+// `/path`, manufacturing a redirect that the page never linked to.
+export function normalizeRequestUrl(input, baseUrl = null) {
+  return normalizeHttpUrl(input, baseUrl, { preserveTrailingSlash: true });
+}
+
+function normalizeHttpUrl(input, baseUrl = null, { preserveTrailingSlash = false } = {}) {
   if (!input) return null;
   const trimmed = String(input).trim();
   if (!trimmed) return null;
@@ -67,7 +78,7 @@ export function normalizeUrl(input, baseUrl = null) {
   parsed.searchParams.sort();
 
   parsed.pathname = parsed.pathname.replace(/\/{2,}/g, '/');
-  if (parsed.pathname.length > 1) {
+  if (!preserveTrailingSlash && parsed.pathname.length > 1) {
     parsed.pathname = parsed.pathname.replace(/\/+$/, '');
   }
 

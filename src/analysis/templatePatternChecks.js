@@ -38,7 +38,7 @@ function titlePatternIssue() {
         : 'No systematic title pattern issue detected.',
       recommendation: 'Fix title generation at template level rather than editing individual URLs.'
     });
-  }, { priority: 'High', effort: 'M' });
+  }, { priority: 'Low', effort: 'M' });
 }
 
 function metaPatternIssue() {
@@ -56,7 +56,7 @@ function metaPatternIssue() {
         : 'No systematic meta description pattern issue detected.',
       recommendation: 'Adjust meta description generation at template level and validate representative pages.'
     });
-  }, { priority: 'Medium', effort: 'M' });
+  }, { priority: 'Low', effort: 'M' });
 }
 
 function noindexPattern() {
@@ -82,7 +82,14 @@ function schemaMissingPattern() {
   return templateCheck('template.schema_missing_pattern', 'Template schema missing pattern', function run(ctx) {
     const where = `
       (
-        pageType = 'article' AND COALESCE(schemaTypesJson, '') NOT LIKE '%Article%'
+        pageType = 'article'
+        AND COALESCE(schemaTypesJson, '') NOT LIKE '%Article%'
+        AND COALESCE(schemaTypesJson, '') NOT LIKE '%BlogPosting%'
+        AND COALESCE(schemaTypesJson, '') NOT LIKE '%NewsArticle%'
+        AND COALESCE(schemaTypesJson, '') NOT LIKE '%Report%'
+        AND COALESCE(schemaTypesJson, '') NOT LIKE '%ScholarlyArticle%'
+        AND COALESCE(schemaTypesJson, '') NOT LIKE '%SocialMediaPosting%'
+        AND COALESCE(schemaTypesJson, '') NOT LIKE '%TechArticle%'
       ) OR (
         pageType = 'product' AND COALESCE(schemaTypesJson, '') NOT LIKE '%Product%'
       ) OR (
@@ -104,7 +111,7 @@ function schemaMissingPattern() {
       recommendation: 'Add schema at template level where visible content supports it.',
       findingType: 'opportunity'
     });
-  }, { priority: 'Medium', effort: 'M' });
+  }, { priority: 'Low', effort: 'M' });
 }
 
 function largeHtmlPattern() {
@@ -120,7 +127,7 @@ function largeHtmlPattern() {
         : 'No systematic large-HTML template pattern detected.',
       recommendation: 'Reduce template HTML weight, duplicated markup and server-rendered payload bloat.'
     });
-  }, { priority: 'Medium', effort: 'L' });
+  }, { priority: 'Low', effort: 'L' });
 }
 
 function canonicalPatternIssue() {
@@ -199,6 +206,8 @@ function patternResult(check, rows, options = {}) {
       }))
     },
     findingType: options.findingType || 'core_issue',
+    scoreEligible: false,
+    scoreExclusionReason: 'Derived template roll-up; the underlying page-level check owns any score impact.',
     confidence: rows.length > 1 || affectedCount >= 10 ? 'high' : rows.length ? 'medium' : 'high',
     reviewRecommended: rows.length > 0,
     reportGroupingKey: 'template.patterns'

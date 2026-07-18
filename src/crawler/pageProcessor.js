@@ -12,7 +12,7 @@ import { filterArtifactsForStorage, snapshotHtml } from '../storage/retention.js
 const RETRY_STATUS_CODES = new Set(crawlerDefaults.retryStatusCodes);
 
 export async function processQueueItem(db, run, project, queueItem, browser, robots) {
-  const url = queueItem.normalizedUrl;
+  const url = queueItem.url || queueItem.normalizedUrl;
   const finalDomain = project.finalDomain;
 
   if (run.respectRobotsTxt && robots && robots.isAllowed(url, run.robotsUserAgent || crawlerDefaults.robotsUserAgent) === false) {
@@ -119,7 +119,7 @@ export async function processQueueItem(db, run, project, queueItem, browser, rob
       .slice(0, remaining)
       .map((link) => ({
         runId: run.id,
-        url: link.normalizedTargetUrl,
+        url: link.linkedUrl || link.targetUrl || link.normalizedTargetUrl,
         depth: queueItem.depth + 1,
         sourceUrl: normalizedFinalUrl,
         sourceType: 'internal_link',
@@ -145,7 +145,7 @@ export function shouldRetry(queueItem) {
 function emptyPageRecord(values) {
   return {
     runId: values.runId,
-    url: values.queueItem.normalizedUrl,
+    url: values.queueItem.url || values.queueItem.normalizedUrl,
     normalizedUrl: values.queueItem.normalizedUrl,
     finalUrl: values.finalUrl,
     depth: values.queueItem.depth,

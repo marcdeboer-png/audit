@@ -176,7 +176,7 @@ function llmsTxtPresent() {
       scoreDeduplicationKey: 'ai_files.llms_txt',
       reportGroupingKey: 'ai_files.llms_txt'
     });
-  }, { priority: 'Low' });
+  }, { priority: 'Low', effort: 'S' });
 }
 
 function llmsTxtStatus() {
@@ -294,7 +294,7 @@ function robotsBlocksTxt() {
       recommendation: 'Verify that Markdown or llms text files are not unintentionally blocked.',
       evidence: { robotsUrl: robots?.url, statusCode: robots?.statusCode ?? null, blocksTxtFiles: blocked }
     });
-  });
+  }, { priority: 'Low' });
 }
 
 function robotsMentionsBot(botName) {
@@ -721,6 +721,14 @@ function internalNavLink(id, category, name, needles) {
         evidence: { totalHtmlPages: 0, needles }
       });
     }
+    const truncatedPages = count(ctx.db, 'SELECT COUNT(*) AS count FROM pages WHERE runId = ? AND COALESCE(linkRowsTruncated, 0) = 1', [ctx.run.id]);
+    const renderedOnlyLinkPages = count(ctx.db, `
+      SELECT COUNT(*) AS count
+      FROM pages
+      WHERE runId = ?
+        AND renderStatus = 'success'
+        AND COALESCE(renderedLinksCount, 0) > COALESCE(internalLinksCount, 0)
+    `, [ctx.run.id]);
     if (id === 'about_linked') {
       const candidates = all(ctx.db, `
         SELECT sourceUrl, sourceUrl AS url, targetUrl, anchorText
@@ -736,6 +744,22 @@ function internalNavLink(id, category, name, needles) {
         matched.push({ ...row, matchedNeedle: match.matchedNeedle, matchSource: match.matchSource });
       }
       const samples = dedupeLinkSamples(matched, 10);
+      if (!samples.length && truncatedPages) return availabilityResult(this, 'insufficient_evidence', {
+        finding: `No clear about/company link was retained, but link rows were truncated on ${truncatedPages} page(s).`,
+        details: 'A retained link sample cannot prove absence when one or more page-level link inventories were truncated.',
+        recommendation: 'Repeat a small targeted run with debug link retention or a navigation-focused extractor if this signal is required.',
+        facts: { totalHtmlPages: total, truncatedPages, retainedMatches: 0 },
+        evidence: { runId: ctx.run.id, storageProfile: ctx.run.storageProfile, linkRowsTruncated: true },
+        requirements: { requiredFacts: ['completeInternalLinkRows'], missingFacts: ['completeInternalLinkRows'], minimumCoverage: 1, canCollectWithTargetedRun: true }
+      });
+      if (!samples.length && renderedOnlyLinkPages) return availabilityResult(this, 'insufficient_evidence', {
+        finding: `No clear about/company link was present in raw retained links, while ${renderedOnlyLinkPages} rendered page(s) added links without retained rendered-link details.`,
+        details: 'Raw link absence cannot prove navigation absence when rendering adds links and only rendered counts were retained.',
+        recommendation: 'Repeat a small browser run with rendered-link detail retention if this signal is required.',
+        facts: { totalHtmlPages: total, renderedOnlyLinkPages, retainedRawMatches: 0 },
+        evidence: { runId: ctx.run.id, renderedLinksCountAvailable: true, renderedLinkDetailsAvailable: false },
+        requirements: { requiredFacts: ['completeRenderedInternalLinkRows'], missingFacts: ['renderedInternalLinkRows'], minimumCoverage: 1, canCollectWithTargetedRun: true }
+      });
       return makeResult(this, samples.length ? 'OK' : 'Warning', {
         affectedCount: samples.length ? 0 : 1,
         sampleUrls: samples.map((row) => row.sourceUrl || row.url),
@@ -760,6 +784,22 @@ function internalNavLink(id, category, name, needles) {
       WHERE runId = ? AND linkType = 'internal' AND (${conditions})
       LIMIT 30
     `, [ctx.run.id, ...params]));
+    if (!rows.length && truncatedPages) return availabilityResult(this, 'insufficient_evidence', {
+      finding: `No matching link was retained, but link rows were truncated on ${truncatedPages} page(s).`,
+      details: 'A retained link sample cannot prove absence when one or more page-level link inventories were truncated.',
+      recommendation: 'Repeat a small targeted run with debug link retention or a navigation-focused extractor if this signal is required.',
+      facts: { totalHtmlPages: total, truncatedPages, retainedMatches: 0, needles },
+      evidence: { runId: ctx.run.id, storageProfile: ctx.run.storageProfile, linkRowsTruncated: true },
+      requirements: { requiredFacts: ['completeInternalLinkRows'], missingFacts: ['completeInternalLinkRows'], minimumCoverage: 1, canCollectWithTargetedRun: true }
+    });
+    if (!rows.length && renderedOnlyLinkPages) return availabilityResult(this, 'insufficient_evidence', {
+      finding: `No matching link was present in raw retained links, while ${renderedOnlyLinkPages} rendered page(s) added links without retained rendered-link details.`,
+      details: 'Raw link absence cannot prove navigation absence when rendering adds links and only rendered counts were retained.',
+      recommendation: 'Repeat a small browser run with rendered-link detail retention if this signal is required.',
+      facts: { totalHtmlPages: total, renderedOnlyLinkPages, retainedRawMatches: 0, needles },
+      evidence: { runId: ctx.run.id, renderedLinksCountAvailable: true, renderedLinkDetailsAvailable: false },
+      requirements: { requiredFacts: ['completeRenderedInternalLinkRows'], missingFacts: ['renderedInternalLinkRows'], minimumCoverage: 1, canCollectWithTargetedRun: true }
+    });
     return makeResult(this, rows.length ? 'OK' : 'Warning', {
       affectedCount: rows.length ? 0 : 1,
       sampleUrls: rows.map((row) => row.sourceUrl || row.url),
@@ -807,7 +847,7 @@ function organizationSameAs() {
       scoreDeduplicationKey: 'organization.same_as',
       reportGroupingKey: 'organization.same_as'
     });
-  });
+  }, { priority: 'Low' });
 }
 
 function schemaPresence(id, category, name, schemaType, priority = 'Medium') {

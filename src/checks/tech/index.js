@@ -35,7 +35,7 @@ const tech = (id, category, name, run, options = {}) => ({
 
 const LEGAL_PAGE_WHERE = "COALESCE(pageType, 'other') = 'legal'";
 const NON_LEGAL_PAGE_WHERE = "COALESCE(pageType, 'other') <> 'legal'";
-const SUCCESSFUL_HTML_WHERE = `${HTML_WHERE} AND statusCode >= 200 AND statusCode < 300`;
+const SUCCESSFUL_HTML_WHERE = `${HTML_WHERE} AND statusCode >= 200 AND statusCode < 300 AND COALESCE(initialStatusCode, statusCode) >= 200 AND COALESCE(initialStatusCode, statusCode) < 300`;
 const INDEXABLE_CONTENT_HTML_WHERE = `${SUCCESSFUL_HTML_WHERE} AND COALESCE(indexable, 1) = 1 AND ${NON_LEGAL_PAGE_WHERE}`;
 const ROBOTS_TEXT_EXPR = "LOWER(COALESCE(metaRobots, '') || ' ' || COALESCE(xRobotsTag, ''))";
 const VISIBLE_TEXT_FACTS_WHERE = `COALESCE(textFactsJson, '') LIKE '%"normalization_version":"${VISIBLE_TEXT_NORMALIZATION_VERSION}"%'`;
@@ -113,8 +113,8 @@ export function techChecks() {
     }),
     httpVersionSupport(),
     cdnCacheSignals(),
-    headerPresence('hsts_header', 'Security Best Practice', 'HSTS present', 'strict-transport-security', 'Medium'),
-    headerPresence('content_security_policy', 'Security Best Practice', 'Content-Security-Policy present', 'content-security-policy', 'Medium'),
+    headerPresence('hsts_header', 'Security Best Practice', 'HSTS present', 'strict-transport-security', 'Low'),
+    headerPresence('content_security_policy', 'Security Best Practice', 'Content-Security-Policy present', 'content-security-policy', 'Low'),
     headerPresence('x_frame_options', 'Security Best Practice', 'X-Frame-Options present', 'x-frame-options', 'Low'),
     headerPresence('x_content_type_options', 'Security Best Practice', 'X-Content-Type-Options present', 'x-content-type-options', 'Low'),
     headerPresence('referrer_policy', 'Security Best Practice', 'Referrer-Policy present', 'referrer-policy', 'Low'),
@@ -130,21 +130,21 @@ export function techChecks() {
     noindexPagesCheck(),
     nofollowPagesCheck(),
     canonicalMissing(),
-    pageStatusCheck('canonical_non_self', 'Crawling & Indexing', 'Canonical non-self', `${INDEXABLE_CONTENT_HTML_WHERE} AND canonical IS NOT NULL AND canonical <> normalizedUrl`, 'Warning', 'Medium', INDEXABLE_CONTENT_HTML_WHERE),
+    pageStatusCheck('canonical_non_self', 'Crawling & Indexing', 'Canonical non-self', `${INDEXABLE_CONTENT_HTML_WHERE} AND canonical IS NOT NULL AND canonical <> normalizedUrl`, 'Warning', 'Low', INDEXABLE_CONTENT_HTML_WHERE),
     canonicalOtherDomain(),
     canonicalTargetNon200(),
     internalLinksToStatus('internal_links_to_3xx', 'Internal links to 3xx', 'l.initialStatusCode >= 300 AND l.initialStatusCode < 400', 'Warning'),
     internalLinksToStatus('internal_links_to_4xx_5xx', 'Internal links to 4xx/5xx', 'COALESCE(l.finalStatusCode, p.statusCode) >= 400', 'Error', 'High'),
     orphanLikeSitemapUrls(),
     contentMissingField('title_missing', 'HTML Head & Meta', 'Title missing', 'title', 'Error'),
-    contentLengthCheck('title_too_short', 'HTML Head & Meta', `Title too short < ${thresholds.titleTooShort}`, `titleLength < ${thresholds.titleTooShort} AND COALESCE(title, '') <> ''`, 'Warning'),
-    contentLengthCheck('title_too_long', 'HTML Head & Meta', `Title too long > ${thresholds.titleTooLong}`, `titleLength > ${thresholds.titleTooLong}`, 'Warning'),
+    contentLengthCheck('title_too_short', 'HTML Head & Meta', `Title too short < ${thresholds.titleTooShort}`, `titleLength < ${thresholds.titleTooShort} AND COALESCE(title, '') <> ''`, 'Warning', 'Low'),
+    contentLengthCheck('title_too_long', 'HTML Head & Meta', `Title too long > ${thresholds.titleTooLong}`, `titleLength > ${thresholds.titleTooLong}`, 'Warning', 'Low'),
     duplicateContentField('duplicate_titles', 'HTML Head & Meta', 'Duplicate titles', 'title', 'Warning'),
     contentMissingField('meta_description_missing', 'HTML Head & Meta', 'Meta description missing', 'metaDescription', 'Warning'),
     contentLengthCheck('meta_description_too_short', 'HTML Head & Meta', `Meta description too short < ${thresholds.descriptionTooShort}`, `metaDescriptionLength < ${thresholds.descriptionTooShort} AND COALESCE(metaDescription, '') <> ''`, 'Warning', 'Low'),
     contentLengthCheck('meta_description_too_long', 'HTML Head & Meta', `Meta description too long > ${thresholds.descriptionTooLong}`, `metaDescriptionLength > ${thresholds.descriptionTooLong}`, 'Warning', 'Low'),
     duplicateContentField('duplicate_meta_descriptions', 'HTML Head & Meta', 'Duplicate meta descriptions', 'metaDescription', 'Warning', 'Low'),
-    pageStatusCheck('h1_missing', 'HTML Head & Meta', 'H1 missing', `${INDEXABLE_CONTENT_HTML_WHERE} AND h1Count = 0`, 'Error', 'Medium', INDEXABLE_CONTENT_HTML_WHERE),
+    pageStatusCheck('h1_missing', 'HTML Head & Meta', 'H1 missing', `${INDEXABLE_CONTENT_HTML_WHERE} AND h1Count = 0 AND NOT (renderStatus = 'success' AND renderedH1Count > 0)`, 'Error', 'Medium', INDEXABLE_CONTENT_HTML_WHERE),
     pageStatusCheck('multiple_h1', 'HTML Head & Meta', 'Multiple H1', `${HTML_WHERE} AND h1Count > 1`, 'Warning'),
     htmlSemanticsSummary(),
     missingField('html_lang_missing', 'HTML Head & Meta', 'HTML lang missing', 'htmlLang', 'Warning'),
@@ -155,9 +155,9 @@ export function techChecks() {
     missingField('webmanifest_missing', 'Browser Metadata Opportunity', 'Webmanifest missing', 'manifest', 'Warning', 'Low'),
     hreflangXDefaultMissing(),
     consentTechnicalSignals(),
-    pageStatusCheck('raw_html_size_large', 'Performance Light', `Raw HTML size > ${thresholds.largeHtmlKb} KB`, `rawHtmlSize > ${thresholdBytes.largeHtmlBytes}`, 'Warning'),
-    resourceCountCheck('too_many_js', 'Performance Light', `Too many JS resources > ${thresholds.tooManyJsResources} per page`, 'script', thresholds.tooManyJsResources, 'Warning'),
-    resourceCountCheck('too_many_css', 'Performance Light', `Too many CSS resources > ${thresholds.tooManyCssResources} per page`, 'stylesheet', thresholds.tooManyCssResources, 'Warning'),
+    pageStatusCheck('raw_html_size_large', 'Performance Light', `Raw HTML size > ${thresholds.largeHtmlKb} KB`, `rawHtmlSize > ${thresholdBytes.largeHtmlBytes}`, 'Warning', 'Low'),
+    resourceCountCheck('too_many_js', 'Performance Light', `Too many JS resources > ${thresholds.tooManyJsResources} per page`, 'script', thresholds.tooManyJsResources, 'Warning', 'Low'),
+    resourceCountCheck('too_many_css', 'Performance Light', `Too many CSS resources > ${thresholds.tooManyCssResources} per page`, 'stylesheet', thresholds.tooManyCssResources, 'Warning', 'Low'),
     resourceBytesCheck('large_js_total', 'Performance Light', 'Large JS total size > 1 MB per page', 'script', thresholds.largeJsTotalBytes, 'Warning'),
     resourceBytesCheck('large_css_total', 'Performance Light', 'Large CSS total size > 300 KB per page', 'stylesheet', thresholds.largeCssTotalBytes, 'Warning'),
     thirdPartyScripts(),
@@ -183,8 +183,8 @@ export function techChecks() {
     ...templatePatternChecks(),
     jsonLdParseErrors(),
     schemaCoverageSummary(),
-    schemaMissing('organization_missing', 'Structured Data', 'Organization missing', 'Organization', 'Warning'),
-    schemaMissing('website_missing', 'Structured Data', 'WebSite missing', 'WebSite', 'Warning'),
+    schemaMissing('organization_missing', 'Structured Data', 'Organization missing', 'Organization', 'Low'),
+    schemaMissing('website_missing', 'Structured Data', 'WebSite missing', 'WebSite', 'Low'),
     breadcrumbCoverage(),
     faqPageCoverage(),
     articleCoverage(),
@@ -195,8 +195,9 @@ export function techChecks() {
     organizationSameAsMissing(),
     imagesWithoutAlt(),
     emptyAltTexts(),
-    imageAttributeCheck('images_without_width_height', 'Media SEO', 'Images without width/height', "(width IS NULL OR width = '' OR height IS NULL OR height = '')", 'Warning', 'Medium', {
+    imageAttributeCheck('images_without_width_height', 'Media SEO', 'Images without width/height', "(width IS NULL OR width = '' OR height IS NULL OR height = '')", 'Warning', 'Low', {
       findingType: 'best_practice',
+      extraContentWhere: "LOWER(COALESCE(extension, '')) <> '.svg'",
       finding: 'Some likely content images are missing width/height attributes.',
       recommendation: 'Add explicit dimensions or CSS aspect-ratio for meaningful images to reduce CLS risk; confirm impact with Lighthouse/CrUX before treating this as a Core Web Vitals defect.',
       issueReason: 'content image missing dimensions'
@@ -218,6 +219,16 @@ function domainHttpsReachable() {
   return tech('https_reachable', 'Server & Infrastructure', 'HTTPS reachable', function run(ctx) {
     const candidates = parseProjectJson(ctx.project, 'protocolBehaviorJson', []);
     const httpsCandidates = candidates.filter((item) => item.startUrl?.startsWith('https://'));
+    if (!httpsCandidates.length) return availabilityResult(this, 'insufficient_evidence', {
+      finding: 'HTTPS reachability was not evaluated because no HTTPS candidate measurement is available.',
+      evidence: { httpsCandidates: [], protocolMeasurementsAvailable: false },
+      requirements: { requiredFacts: ['httpsCandidateResponse'], missingFacts: ['httpsCandidateResponse'], minimumCoverage: 1, canCollectWithTargetedRun: true }
+    });
+    if (httpsCandidates.every((item) => !item.statusCode)) return availabilityResult(this, 'technical_error', {
+      finding: 'All HTTPS candidate measurements failed technically; no website failure was inferred.',
+      evidence: { httpsCandidates, technicalErrors: httpsCandidates.map((item) => item.error).filter(Boolean) },
+      requirements: { requiredFacts: ['httpsCandidateResponse'], missingFacts: ['stableHttpsResponse'], minimumCoverage: 1, canCollectWithTargetedRun: true }
+    });
     const reachable = httpsCandidates.filter((item) => item.statusCode && item.statusCode < 500);
     return makeResult(this, reachable.length ? 'OK' : 'Error', {
       affectedCount: reachable.length ? 0 : 1,
@@ -234,7 +245,12 @@ function httpToHttpsRedirect() {
     const http = candidates.filter((item) => item.startUrl?.startsWith('http://') && item.statusCode);
     const notRedirecting = http.filter((item) => !item.redirectsToHttps);
     const status = !http.length ? 'NA' : notRedirecting.length ? 'Warning' : 'OK';
-    return makeResult(this, 'NA', {
+    if (!http.length) return availabilityResult(this, 'insufficient_evidence', {
+      finding: 'HTTP-to-HTTPS behavior was not evaluated because no HTTP candidate response is available.',
+      evidence: { httpCandidates: [] },
+      requirements: { requiredFacts: ['httpCandidateResponse'], missingFacts: ['httpCandidateResponse'], minimumCoverage: 1, canCollectWithTargetedRun: true }
+    });
+    return makeResult(this, status, {
       affectedCount: notRedirecting.length,
       finding: status === 'OK' ? 'Reachable HTTP candidates redirect to HTTPS.' : `${notRedirecting.length} HTTP candidate(s) did not end on HTTPS.`,
       recommendation: 'Redirect all HTTP variants to the canonical HTTPS URL.',
@@ -1371,7 +1387,7 @@ function orphanLikeSitemapUrls() {
   }, { priority: 'Low' });
 }
 
-function resourceCountCheck(id, category, name, resourceType, threshold, status = 'Warning') {
+function resourceCountCheck(id, category, name, resourceType, threshold, status = 'Warning', priority = 'Low') {
   return tech(id, category, name, function run(ctx) {
     const gate = storedFactGate(this, ctx, 'storeAllResources', 'resource rows');
     if (gate) return gate;
@@ -1397,10 +1413,10 @@ function resourceCountCheck(id, category, name, resourceType, threshold, status 
     return makeResult(this, affectedCount ? status : 'OK', {
       affectedCount,
       sampleUrls: rows.map((row) => row.url),
-      finding: affectedCount ? `${affectedCount} page(s) exceed the browser-captured ${resourceType} resource threshold.` : `No page exceeds ${threshold} browser-captured ${resourceType} resources.`,
+      finding: affectedCount ? `${affectedCount} page(s) exceed the stored ${resourceType} resource-count threshold.` : `No page exceeds ${threshold} stored ${resourceType} resources.`,
       recommendation: 'Use this as a template prioritisation signal. Confirm byte size, render-blocking impact and Core Web Vitals before treating resource count alone as a defect.',
-      details: 'Based on captured browser/network resource rows, not only static HTML tags.',
-      evidence: { threshold, resourceType, basis: 'browser_captured_resources', samples: rows },
+      details: 'Based on stored resource rows from raw HTML and, where enabled, browser-network capture.',
+      evidence: { threshold, resourceType, basis: 'stored_resource_rows', samples: rows },
       findingType: 'best_practice',
       confidence: affectedCount ? 'medium' : 'high',
       reviewRecommended: affectedCount > 0,
@@ -1411,7 +1427,7 @@ function resourceCountCheck(id, category, name, resourceType, threshold, status 
       limitations: 'Count-based JS/CSS checks do not know byte weight or execution cost unless resource metrics are imported.',
       requirements: { requiredFacts: ['resourceRows'], optionalFacts: ['resourceBytes', 'renderBlockingImpact'], missingFacts: [], minimumCoverage: 1, canCollectWithTargetedRun: true }
     });
-  });
+  }, { priority });
 }
 
 function resourceBytesCheck(id, category, name, resourceType, threshold, status = 'Warning') {
@@ -1538,7 +1554,9 @@ function thirdPartyScripts() {
       maturityImpact: rows.length ? 'low' : 'none',
       interpretation: 'Third-party scripts are surfaced as performance/privacy review evidence, not automatically as a JS optimisation defect.',
       limitations: 'The check does not measure main-thread execution cost or consent behaviour.',
-      requirements: { requiredFacts: ['resourceRows', 'resourceOriginClassification'], optionalFacts: ['executionCost', 'consentState'], missingFacts: [], minimumCoverage: 1, canCollectWithTargetedRun: true }
+      requirements: { requiredFacts: ['resourceRows', 'resourceOriginClassification'], optionalFacts: ['executionCost', 'consentState'], missingFacts: [], minimumCoverage: 1, canCollectWithTargetedRun: true },
+      scoreEligible: false,
+      scoreExclusionReason: 'Inventory/review signal without measured execution, transfer or consent impact.'
     });
   }, { priority: 'Low' });
 }
@@ -2292,7 +2310,10 @@ function schemaCoverageSummary() {
     return makeResult(this, !total ? 'NA' : rows.length ? 'OK' : 'Warning', {
       finding: rows.length ? 'Schema type coverage calculated.' : 'No parseable schema types found.',
       recommendation: 'Use structured data where it accurately describes page content.',
-      evidence: { totalHtmlPages: total, schemaTypes: rows }
+      evidence: { totalHtmlPages: total, schemaTypes: rows },
+      scoreEligible: false,
+      scoreExclusionReason: 'Inventory summary; schema presence is evaluated by page-type-specific checks.',
+      findingType: 'info'
     });
   }, { priority: 'Low', effort: 'S' });
 }
@@ -2421,7 +2442,7 @@ function speakableOpportunity() {
 function articleCoverage() {
   return tech('article_coverage_on_article_like_pages', 'Structured Data', 'Article coverage on article-like pages', function run(ctx) {
     return pageTypeSchemaCoverage(this, ctx, 'article', 'Article');
-  });
+  }, { priority: 'Low' });
 }
 
 function productCoverage() {
@@ -2543,7 +2564,7 @@ function breadcrumbCoverage() {
       evidence: { eligiblePages: total, pagesWithBreadcrumbList, coverage, sampleMissingUrls, samplePresentUrls },
       requirements: { requiredFacts: ['eligibleDetailPageClassification', 'schemaTypeExtraction'], optionalFacts: ['visibleBreadcrumb'], missingFacts: [], minimumCoverage: 1, canCollectWithTargetedRun: true }
     });
-  });
+  }, { priority: 'Low' });
 }
 
 function faqPageCoverage() {
@@ -2780,7 +2801,7 @@ function emptyAltTexts() {
       confidence: 'medium',
       reviewRecommended: decorativeEmpty > 0
     });
-  });
+  }, { priority: 'Low' });
 }
 
 function imageAttributeCheck(id, category, name, where, status = 'Warning', priority = 'Medium', options = {}) {
