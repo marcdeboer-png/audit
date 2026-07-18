@@ -361,9 +361,9 @@ function renderHtml(data) {
   </header>
   <main>
     <section class="grid">
-      ${scoreCard('Tech Score', scores.techScore)}
-      ${scoreCard('GEO Readiness Score', scores.geoScore)}
-      ${scoreCard('Overall Score', scores.overallScore)}
+      ${scoreCard('Tech Score', scores.techScore, scores.techScoreStatus)}
+      ${scoreCard('GEO Readiness Score', scores.geoScore, scores.geoScoreStatus)}
+      ${scoreCard('Overall Score', scores.overallScore, scores.scoreStatus)}
       ${metricCard('Processed URLs', run.processedUrls)}
       ${metricCard('Successful URLs', run.successfulUrls)}
       ${metricCard('Failed URLs', run.failedUrls)}
@@ -551,6 +551,11 @@ function lighthouseSummaryTable(lighthouseResults, samplingSummary) {
 
 function executiveSummary({ run, scores, reportStats, samplingSummary }) {
   const messages = [];
+  if (scores.scoreStatus === 'insufficient_coverage') {
+    messages.push(`No regular headline score is available because weighted evidence coverage is ${scores.weightedCoverage || 0}%.`);
+  } else if (scores.scoreStatus === 'provisional') {
+    messages.push(`The headline score is provisional at ${scores.weightedCoverage || 0}% weighted evidence coverage.`);
+  }
   if (reportStats.highPriorityErrorCount) {
     messages.push(`${reportStats.highPriorityErrorCount} critical issue(s) require review.`);
   } else {
@@ -576,6 +581,8 @@ function executiveSummary({ run, scores, reportStats, samplingSummary }) {
     ['Audit Type', run.auditType],
     ['Crawled URLs', run.processedUrls || 0],
     ['Overall Score', formatPercentScore(scores.overallScore)],
+    ['Score Status', scores.scoreStatus || 'historical_unknown'],
+    ['Weighted Coverage', scores.weightedCoverage === null || scores.weightedCoverage === undefined ? 'unknown' : `${scores.weightedCoverage}%`],
     ['Tech Score', formatPercentScore(scores.techScore)],
     ['GEO Score', formatPercentScore(scores.geoScore)],
     ['Action Items', reportStats.actionItemCount],
@@ -653,12 +660,46 @@ function samplingStatusNotice(summary = {}) {
   return `<div class="notice">${escapeHtml(messages.join(' '))}</div>`;
 }
 
-function scoreCard(label, value) {
-  return `<div class="card accent"><div class="muted">${escapeHtml(label)}</div><div class="metric">${value === null || value === undefined ? 'NA' : `${value}%`}</div></div>`;
+function scoreCard(label, value, status = null) {
+  return `<div class="card accent"><div class="muted">${escapeHtml(label)}</div><div class="metric">${value === null || value === undefined ? 'NA' : `${value}%`}</div>${status ? `<div class="muted">${escapeHtml(status)}</div>` : ''}</div>`;
 }
 
 function scoreBreakdownSection(breakdown = {}) {
   if (!breakdown || !breakdown.scoringModel) return '<p class="muted">No score breakdown is available.</p>';
+  if (breakdown.scoringVersion) {
+    const summary = [{
+      scoringVersion: breakdown.scoringVersion,
+      deduplicationVersion: breakdown.deduplicationVersion,
+      coverageModelVersion: breakdown.coverageModelVersion,
+      scoreStatus: breakdown.scoreStatus,
+      score: breakdown.score,
+      diagnosticScore: breakdown.diagnosticScore,
+      weightedCoverage: `${breakdown.weightedCoverage}%`,
+      rawFindings: breakdown.rawFindingCount,
+      scoredFindings: breakdown.scoredFindingCount,
+      rootCauses: breakdown.rootCauseCount,
+      deduplicatedFindings: breakdown.deduplicatedFindingCount,
+      rawPenalty: breakdown.rawPenalty,
+      appliedPenalty: breakdown.appliedPenalty
+    }];
+    const notice = breakdown.scoreStatus === 'insufficient_coverage'
+      ? 'Weighted evidence coverage is below 60%. No regular headline score is shown; the diagnostic value explains only the observed penalties.'
+      : breakdown.scoreStatus === 'provisional'
+        ? 'Weighted evidence coverage is between 60% and 80%. The score is provisional and may be biased by missing categories or measurements.'
+        : 'Weighted evidence coverage is at least 80%. The score is final for the configured and collected audit scope.';
+    return `<section class="summary">
+      <div class="notice">${escapeHtml(notice)}</div>
+      ${simpleTable(summary, ['scoringVersion', 'deduplicationVersion', 'coverageModelVersion', 'scoreStatus', 'score', 'diagnosticScore', 'weightedCoverage', 'rawFindings', 'scoredFindings', 'rootCauses', 'deduplicatedFindings', 'rawPenalty', 'appliedPenalty'])}
+      <h3>Category Coverage and Penalties</h3>
+      ${simpleTable((breakdown.categoryScores || []).slice(0, 30), ['category', 'scoreStatus', 'score', 'diagnosticScore', 'weightedCoverage', 'rootCauseCount', 'rawPenalty', 'appliedPenalty'], 'No category scores.')}
+      <h3>Root-Cause Deductions</h3>
+      ${simpleTable((breakdown.rootCauses || []).slice(0, 50), ['rootCauseId', 'rootCauseFamily', 'primaryCheckId', 'severity', 'confidence', 'scopeType', 'affectedUrlCount', 'relatedCheckIds', 'rawPenalty', 'appliedPenalty', 'deduplicationReason'], 'No score deductions.')}
+      <h3>Applied Caps</h3>
+      ${simpleTable((breakdown.capsApplied || []).slice(0, 30), ['type', 'limit', 'rawPenalty', 'appliedPenalty', 'reduction'], 'No caps were applied.')}
+      <h3>Score-free Results</h3>
+      ${simpleTable((breakdown.excluded || []).slice(0, 80), ['checkId', 'evaluationState', 'reason', 'weight'], 'No checks were excluded.')}
+    </section>`;
+  }
   const summary = [{
     model: breakdown.scoringModel,
     configuredChecks: breakdown.configuredChecks,
@@ -669,7 +710,7 @@ function scoreBreakdownSection(breakdown = {}) {
     coverageCeiling: `${breakdown.maximumScoreAtAvailableCoverage}%`
   }];
   return `<section class="summary">
-    <div class="notice">Scores are normalized across checks with sufficient evidence. The coverage ceiling shows how much configured check weight had assessable evidence; excluded states do not count as failures.</div>
+    <div class="notice">Historical scoring metadata is unavailable. This report preserves the legacy aggregate and does not apply root-cause scoring v2.</div>
     ${simpleTable(summary, ['model', 'configuredChecks', 'scoredChecks', 'excludedChecks', 'deduplicatedChecks', 'dataCoverage', 'coverageCeiling'])}
     <h3>Weighted Deductions</h3>
     ${simpleTable((breakdown.deductions || []).slice(0, 30), ['checkId', 'category', 'status', 'priority', 'findingType', 'weightedDeduction', 'deduplicationKey'], 'No score deductions.')}
@@ -738,6 +779,7 @@ function templatePerformanceSection({ renderingFindings, lighthouseResults, temp
 function csvExportLinks(runId) {
   const exports = [
     ['Findings CSV', 'findings'],
+    ['Score Root Causes CSV', 'score-root-causes'],
     ['URL Inventory CSV', 'pages'],
     ['Links CSV', 'links'],
     ['Images CSV', 'images'],

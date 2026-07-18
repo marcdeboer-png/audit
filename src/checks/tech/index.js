@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import {
   HTML_WHERE,
   all,
@@ -959,34 +960,44 @@ function duplicateField(id, category, name, field, status = 'Warning', priority 
 
 function duplicateContentField(id, category, name, field, status = 'Warning', priority = 'Medium') {
   return tech(id, category, name, function run(ctx) {
-    const groups = all(ctx.db, `
+    const allGroups = all(ctx.db, `
       SELECT ${field} AS value, COUNT(*) AS count
       FROM pages
       WHERE runId = ? AND ${INDEXABLE_CONTENT_HTML_WHERE} AND ${field} IS NOT NULL AND ${field} <> ''
       GROUP BY LOWER(${field})
       HAVING COUNT(*) > 1
       ORDER BY count DESC
-      LIMIT 10
     `, [ctx.run.id]);
-    const totals = ctx.db.prepare(`
-      SELECT COALESCE(SUM(groupCount), 0) AS affectedCount, COUNT(*) AS totalGroups
-      FROM (
-        SELECT COUNT(*) AS groupCount
-        FROM pages
-        WHERE runId = ? AND ${INDEXABLE_CONTENT_HTML_WHERE} AND ${field} IS NOT NULL AND ${field} <> ''
-        GROUP BY LOWER(${field})
-        HAVING COUNT(*) > 1
-      )
-    `).get(ctx.run.id);
-    const affectedCount = Number(totals.affectedCount || 0);
+    const groups = allGroups.slice(0, 10);
+    const affectedCount = allGroups.reduce((sum, group) => sum + Number(group.count || 0), 0);
+    const family = field === 'title' ? 'html_meta.duplicate_title' : 'html_meta.duplicate_description';
+    const rootCauseCandidates = allGroups.map((group) => ({
+      key: `${family}:${duplicateValueHash(field, group.value)}`,
+      family,
+      occurrenceCount: Number(group.count || 0),
+      affectedUrlCount: Number(group.count || 0),
+      scopeType: 'url',
+      deduplicationConfidence: 'high',
+      reason: `Distinct normalized duplicate ${field} value.`
+    }));
     return makeResult(this, affectedCount ? status : 'OK', {
       affectedCount,
+      occurrenceCount: affectedCount,
+      affectedUrlCount: affectedCount,
+      displayedSampleCount: groups.length,
+      rootCauseFamily: family,
+      scopeType: 'url',
       finding: affectedCount ? `${affectedCount} indexable content URLs share duplicate ${field} values.` : `No duplicate ${field} values found on indexable content pages.`,
       recommendation: `Make ${field} values unique where indexable content pages target different intents.`,
       details: 'Legal/noindex/non-content pages are excluded from this duplicate check.',
-      evidence: { totalAffected: affectedCount, totalGroups: Number(totals.totalGroups || 0), displayedSamples: groups.length, duplicateGroups: groups, scope: 'indexable_non_legal_html_pages' }
+      evidence: { totalAffected: affectedCount, totalGroups: allGroups.length, displayedSamples: groups.length, duplicateGroups: groups, rootCauseCandidates, scope: 'indexable_non_legal_html_pages' }
     });
   }, { priority });
+}
+
+function duplicateValueHash(field, value) {
+  const normalized = String(value || '').normalize('NFKC').trim().replace(/\s+/g, ' ').toLowerCase();
+  return crypto.createHash('sha256').update(`${field}:${normalized}`).digest('hex').slice(0, 20);
 }
 
 function openGraphMissing() {
@@ -2441,6 +2452,9 @@ function pageTypeSchemaCoverage(check, ctx, pageType, schemaType) {
     evidence: { pageType, schemaType, totalCandidatePages: total, evaluableCandidates: evaluable.length, uncertainCandidates: uncertain.length, uncertainSamples: uncertain.slice(0, 10).map((row) => row.url) },
     requirements: { requiredFacts: [`${pageType}PageClassification`, 'schemaTypeExtraction'], optionalFacts: [], missingFacts: ['reliablePageTypeEvidence'], minimumCoverage: 1, canCollectWithTargetedRun: true },
     reportGroupingKey: `schema.${schemaType.toLowerCase()}`,
+    rootCauseKey: schemaType === 'Article' ? 'structured_data.article_coverage' : `structured_data.${schemaType.toLowerCase()}_coverage`,
+    rootCauseFamily: `structured_data.${schemaType.toLowerCase()}`,
+    scopeType: 'template',
     relatedCheckIds: schemaType === 'Article' ? ['geo.article_blog_pages_article_schema'] : []
   });
   return makeResult(check, total ? (affectedCount ? 'Warning' : 'OK') : 'NA', {
@@ -2452,6 +2466,9 @@ function pageTypeSchemaCoverage(check, ctx, pageType, schemaType) {
     details: `Evaluated only pages classified as pageType=${pageType}.`,
     evidence: { pageType, schemaType, validArticleSubtypes: schemaType === 'Article' ? ['Article', 'BlogPosting', 'NewsArticle', 'Report', 'ScholarlyArticle', 'SocialMediaPosting', 'TechArticle'] : undefined, totalCandidatePages: total, evaluableCandidates: evaluable.length, uncertainCandidates: uncertain.length, affectedCount, displayedSamples: rows.length, sampleUrls: rows.map((row) => row.url) },
     reportGroupingKey: `schema.${schemaType.toLowerCase()}`,
+    rootCauseKey: schemaType === 'Article' ? 'structured_data.article_coverage' : `structured_data.${schemaType.toLowerCase()}_coverage`,
+    rootCauseFamily: `structured_data.${schemaType.toLowerCase()}`,
+    scopeType: 'template',
     relatedCheckIds: schemaType === 'Article' ? ['geo.article_blog_pages_article_schema'] : [],
     requirements: { requiredFacts: [`${pageType}PageClassification`, 'schemaTypeExtraction'], optionalFacts: [], missingFacts: [], minimumCoverage: 1, canCollectWithTargetedRun: true },
     findingType: 'opportunity',

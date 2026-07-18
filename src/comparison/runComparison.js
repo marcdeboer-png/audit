@@ -1,4 +1,4 @@
-import { computeScores } from '../utils/scoring.js';
+import { scoresForStoredRun } from '../checks/checkEngine.js';
 
 const ISSUE_STATUSES = new Set(['Warning', 'Error']);
 const STATUS_RANK = { OK: 0, NA: 1, Warning: 2, Error: 3 };
@@ -76,8 +76,8 @@ export function compareRuns(db, { baseRunId, compareRunId }) {
   const urlDelta = compareUrlDelta(basePages, comparePages);
   const templateDelta = compareTemplateDelta(baseTemplates, compareTemplates);
   const performanceDelta = comparePerformanceDelta(basePerformance, comparePerformance);
-  const baseScores = computeScores(baseFindings);
-  const compareScores = computeScores(compareFindings);
+  const baseScores = scoresForStoredRun(baseRun, baseFindings);
+  const compareScores = scoresForStoredRun(compareRun, compareFindings);
   const regressionFindings = buildRegressionFindings({ findingsDelta, urlDelta, performanceDelta, baseScores, compareScores });
   const summary = buildSummary({
     baseRun,
@@ -293,6 +293,8 @@ function loadFindings(db, runId) {
     auditType: row.checkId.startsWith('geo.') || row.checkId.startsWith('trust.') || row.checkId.startsWith('llm.') ? 'geo' : 'tech',
     sampleUrls: safeJson(row.sampleUrlsJson, []),
     evidence: safeJson(row.evidenceJson, {}),
+    facts: safeJson(row.factsJson, {}),
+    assessment: safeJson(row.assessmentJson, {}),
     reviewRecommended: Boolean(row.reviewRecommended)
   }));
 }

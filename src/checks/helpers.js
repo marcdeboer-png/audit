@@ -55,6 +55,14 @@ export function makeResult(check, status, options = {}) {
     scoreExclusionReason: scoreEligible ? null : (options.scoreExclusionReason || requirements.reason || evaluationState),
     requirements,
     scoreDeduplicationKey: options.scoreDeduplicationKey || check.scoreDeduplicationKey || null,
+    rootCauseKey: options.rootCauseKey || check.rootCauseKey || options.scoreDeduplicationKey || check.scoreDeduplicationKey || null,
+    rootCauseFamily: options.rootCauseFamily || check.rootCauseFamily || null,
+    scopeType: options.scopeType || check.scopeType || null,
+    occurrenceCount: Number.isFinite(Number(options.occurrenceCount)) ? Math.max(0, Number(options.occurrenceCount)) : affectedCount,
+    affectedUrlCount: Number.isFinite(Number(options.affectedUrlCount)) ? Math.max(0, Number(options.affectedUrlCount)) : affectedCount,
+    displayedSampleCount: Number.isFinite(Number(options.displayedSampleCount)) ? Math.max(0, Number(options.displayedSampleCount)) : sampleUrls.length,
+    deduplicationConfidence: normalizeConfidence(options.deduplicationConfidence || check.deduplicationConfidence || 'high'),
+    deduplicationReason: options.deduplicationReason || check.deduplicationReason || null,
     reportGroupingKey: options.reportGroupingKey || check.reportGroupingKey || null,
     findingType: normalizeFindingType(options.findingType || check.findingType || defaultFindingType(check, finalStatus)),
     confidence: normalizeConfidence(options.confidence || check.confidence || (finalStatus === 'NA' ? 'low' : 'high')),
@@ -346,11 +354,16 @@ function normalizeRequirements(value, evaluationState, evidence = {}, options = 
 
 function normalizeAssessment(value, defaults) {
   const input = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+  const defaultSeverity = defaults.status === 'Error'
+    ? 'high'
+    : defaults.status === 'Warning'
+      ? defaults.priority === 'High' ? 'high' : defaults.priority === 'Low' ? 'low' : 'medium'
+      : 'none';
   return {
     rationale: input.rationale || null,
     pageType: input.pageType || null,
     relevance: input.relevance || null,
-    severity: input.severity || (defaults.status === 'Error' ? 'high' : defaults.status === 'Warning' ? 'medium' : 'none'),
+    severity: input.severity || defaultSeverity,
     confidence: normalizeConfidence(input.confidence || defaults.confidence || (defaults.evaluationState === 'pass' || defaults.evaluationState === 'fail' ? 'high' : 'low')),
     validityConditions: Array.isArray(input.validityConditions) ? input.validityConditions.slice(0, 20) : [],
     evaluationState: defaults.evaluationState

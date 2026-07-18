@@ -114,6 +114,7 @@ Die Startseite enthaelt ein Audit-Formular und bisherige Runs. Die Run-Detailans
 CSV-Downloads stehen nach einem Run in der UI und per API bereit:
 
 - `/api/audits/:runId/export/findings.csv`
+- `/api/audits/:runId/export/score-root-causes.csv`
 - `/api/audits/:runId/export/pages.csv`
 - `/api/audits/:runId/export/links.csv`
 - `/api/audits/:runId/export/images.csv`
@@ -188,7 +189,13 @@ Checks koennen die Bewertungszustaende `pass`, `fail`, `not_applicable`, `insuff
 
 Die interne Suchseiten-Erkennung kombiniert URL-Pfad oder Suchparameter mit Resultat-Ueberschrift/-Text, Main-Content-Suchformular, Ergebnisliste und optional `SearchAction`. Ein Suchfeld im globalen Header, ein einzelner `q`-Parameter, Kategorie-/Tag-/Autorenarchive, Glossare und Filterseiten reichen nicht. Widerspruechliche Signale ergeben `insufficient_evidence`; die erkannten positiven und widersprechenden Signale stehen in der Evidence.
 
-Das Scoring aggregiert nur `pass`/`fail`, gewichtet optionale Low-Findings geringer und dedupliziert ausschliesslich Checks mit einem expliziten gemeinsamen Root-Cause-Key. Die maschinenlesbare `summary/scores.json` und der HTML-Report enthalten Kategorien, gewichtete Abzuege, ausgeschlossene Checks, Deduplizierungen, Datenabdeckung und den maximal abgedeckten Score-Anteil. Eine geringe Datenabdeckung kann deshalb neben einem hohen normalisierten Score stehen und muss separat interpretiert werden.
+Neue Runs verwenden das versionierte Modell `root-cause-scoring-v2` mit `deterministic-root-cause-v1` und `weighted-coverage-v1`. Ein Finding ist eine Check-Perspektive, ein Vorkommen ist eine gemessene betroffene Stelle und ein Root Cause ist die deterministisch belegte gemeinsame technische Ursache. Die Zuordnung verwendet zuerst explizite `rootCauseKey`-Werte, danach enge Regeln pro Check-Familie und fuehrt bei Unsicherheit keine Cross-Check-Zusammenfuehrung durch. Gleiche Empfehlungen allein sind kein Deduplizierungsgrund. `technical_error` erzeugt keinen Website-Root-Cause.
+
+Severity-Abzuege sind zentral mit Critical `30`, High `14`, Medium `5` und Low `1` kalibriert. Confidence wirkt nur abschwaechend (`high=1`, `medium=0.7`, `low=0`); Low Confidence bleibt damit scorefrei. Der Mengenfaktor ist logarithmisch: `min(2, (1 + 0.25 * log10(max(1, affected_url_count))) * scope_type_multiplier)`. Dadurch bleiben 1, 10, 100 und 1.000 URLs unterscheidbar, ohne URL-Anzahlen linear zu bestrafen. Optionale Low-Root-Causes sind zusammen auf fuenf Scorepunkte begrenzt. Die Kategorie-Caps betragen je nach Familie 35 (Technical), 30 (Crawling), 25 (HTML/Meta), 20 (Structured Data und Performance), 15 (Media, Content, Accessibility, Security und Other) beziehungsweise 12 (GEO); Roh- und angewandte Abzuege stehen im Breakdown.
+
+Die gewichtete Coverage zaehlt nur anwendbare Check-Einheiten. Ihr Gewicht richtet sich nach Check-Prioritaet und Finding-Typ; Kategorie-Abzugsfaktoren duerfen fehlende Evidenz nicht als bessere Abdeckung erscheinen lassen. `pass`/`fail` mit belastbarer Confidence gelten als ausgewertet; `insufficient_evidence`, `not_executed` und `technical_error` senken die Coverage, aber nicht den Score, waehrend `not_applicable` aus dem Nenner faellt. Ab 80 Prozent ist der Score `final`, von 60 bis unter 80 Prozent `provisional`, darunter `insufficient_coverage`; im letzten Zustand wird kein regulaerer Headline-Score ausgegeben. Kategorie-Coverage wird separat ausgewiesen. `summary/scores.json`, Root-Cause-CSV, Finding-/Detail-Export und HTML-Report verwenden denselben persistierten Score-Snapshot.
+
+Scoring-, Deduplizierungs-, Coverage- und Check-Logikversion werden pro neuem Run gespeichert. Historische Runs ohne diese Angaben bleiben ungeclustert und verwenden ihren nachweisbaren Legacy-Aggregator; fehlende Versionsangaben werden als unbekannt angezeigt. Das Oeffnen eines historischen Reports persistiert keine neue Bewertung. Eine explizite Rekonstruktion muss auf einer Kopie erfolgen und darf nie als Originalscore bezeichnet werden.
 
 Finding-Daten trennen additiv `facts`, `evidence`, `assessment` und `recommendationMeta`. Fakten sind Messwerte, Evidence beschreibt Quelle und Zeitpunkt, Assessment enthaelt Interpretation und Gueltigkeitsbedingungen, und die Empfehlung bleibt eine Handlungsempfehlung. Bestehende Textfelder bleiben fuer Kompatibilitaet erhalten.
 
@@ -241,6 +248,8 @@ Batch 4.1 erweitert `check_results` additiv um `reportGroupingKey`, `findingType
 Der Evidence-Gate-Batch erweitert `check_results` additiv um `evaluationState`, `scoreEligible`, `scoreExclusionReason`, `requirementsJson`, `factsJson`, `assessmentJson`, `recommendationMetaJson` und `scoreDeduplicationKey`. `OK`, `Warning`, `Error` und `NA` bleiben als kompatible Anzeigezustaende bestehen; die fachliche Bewertbarkeit wird separat gespeichert.
 
 Der Run-77-Belastbarkeits-Batch erweitert `runs` um Runtime-Version und Konfigurations-Provenienz, `check_results` um `checkVersion` und `provenanceJson`, `pages` um initiale/finale HTTP-, Textarten- und Browserfehlerkanaele, `page_links` um den verlinkten Originalwert und die Redirect-Kette, `page_images` um explizite Alt-Attributzustaende und `resources` um Quelle beziehungsweise Fehler der Groessenmessung. `http_timing_measurements` speichert gezielte wiederholte TTFB-Messungen. Alle Erweiterungen sind additiv; bestehende Run-Werte werden nicht veraendert.
+
+Der Root-Cause-Scoring-Batch erweitert `runs` additiv um die vier Modellversionen, Score-Status, persistierte Tech-/GEO-/Gesamtwerte und den maschinenlesbaren Breakdown. `check_results` erhaelt Root-Cause-ID/-Key/-Familie, Scope-, Vorkommens-, URL- und Sample-Zaehler, Primaercheck, Deduplizierungsbegruendung und Mehrfachmitgliedschaften. Unterschiedliche Duplicate-Title/-Description-Werte werden ueber stabile Hashes getrennt; vollstaendige Seitentexte oder URL-Listen werden nicht fuer Scoring-Snapshots gespeichert. Alte Runs und originale per-Check-Werte werden nicht ueberschrieben.
 
 Batch 5 fuegt `finding_reviews` hinzu. Originale `check_results` bleiben unveraendert; manuelle Felder wie `manualStatus`, `manualPriority`, `manualFinding` und `manualRecommendation` werden nur als Effective Values in UI, Report und Export genutzt.
 

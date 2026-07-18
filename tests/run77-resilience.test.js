@@ -352,10 +352,11 @@ test('additive migration upgrades a legacy schema and keeps old runs readable wi
   initDatabase(db);
   const projectId = db.prepare("INSERT INTO projects (inputDomain,finalDomain) VALUES ('old.invalid','https://old.invalid')").run().lastInsertRowid;
   const runId = db.prepare("INSERT INTO runs (projectId,status,auditType,maxUrls,maxDepth,concurrency,respectRobotsTxt,currentPhase) VALUES (?,'completed','tech',1,0,1,0,'completed')").run(projectId).lastInsertRowid;
-  for (const column of ['runtimeGitCommit', 'runtimeBuildVersion', 'runtimeConfigHash', 'runtimeProvenanceJson']) {
+  db.exec('DROP INDEX IF EXISTS idx_runs_scoring_version; DROP INDEX IF EXISTS idx_check_results_run_root_cause;');
+  for (const column of ['runtimeGitCommit', 'runtimeBuildVersion', 'runtimeConfigHash', 'runtimeProvenanceJson', 'scoringVersion', 'deduplicationVersion', 'coverageModelVersion', 'checkLogicVersion', 'scoreStatus', 'overallScore', 'techScore', 'geoScore', 'scoreBreakdownJson', 'scoreComputedAt']) {
     db.exec(`ALTER TABLE runs DROP COLUMN ${column}`);
   }
-  for (const column of ['checkVersion', 'provenanceJson']) db.exec(`ALTER TABLE check_results DROP COLUMN ${column}`);
+  for (const column of ['checkVersion', 'provenanceJson', 'rootCauseId', 'rootCauseKey', 'rootCauseFamily', 'scopeType', 'occurrenceCount', 'affectedUrlCount', 'displayedSampleCount', 'primaryCheckId', 'deduplicationConfidence', 'deduplicationReason', 'rootCauseMembershipsJson']) db.exec(`ALTER TABLE check_results DROP COLUMN ${column}`);
   db.close();
 
   db = new Database(dbPath);
@@ -363,7 +364,9 @@ test('additive migration upgrades a legacy schema and keeps old runs readable wi
   initDatabase(db);
   const old = getRunWithProject(db, runId);
   assert.equal(old.runtimeGitCommit, null);
+  assert.equal(old.scoringVersion, null);
   assert.ok(db.prepare("SELECT 1 FROM pragma_table_info('check_results') WHERE name='provenanceJson'").get());
+  assert.ok(db.prepare("SELECT 1 FROM pragma_table_info('check_results') WHERE name='rootCauseMembershipsJson'").get());
   const provenance = buildCheckProvenance({ run: old, project: { id: Number(projectId), finalDomain: 'https://old.invalid' }, check: { id: 'tech.old', version: 1 }, result: { evaluationState: 'pass' } });
   assert.equal(provenance.gitCommit, null);
   assert.equal(provenance.runId, Number(runId));

@@ -56,9 +56,22 @@ export function collectCheckDetailCsv(db, runId, checkResultId) {
     { key: 'isActionable', label: 'isActionable' },
     { key: 'displayReviewRecommended', label: 'displayReviewRecommended' }
   ];
-  const metadataKeys = new Set(metadataColumns.map((column) => column.key));
+  const scoringColumns = [
+    { key: 'rootCauseId', label: 'rootCauseId' },
+    { key: 'rootCauseKey', label: 'rootCauseKey' },
+    { key: 'rootCauseFamily', label: 'rootCauseFamily' },
+    { key: 'scopeType', label: 'scopeType' },
+    { key: 'occurrenceCount', label: 'occurrenceCount' },
+    { key: 'affectedUrlCount', label: 'affectedUrlCount' },
+    { key: 'displayedSampleCount', label: 'displayedSampleCount' },
+    { key: 'primaryCheckId', label: 'primaryCheckId' },
+    { key: 'deduplicationConfidence', label: 'deduplicationConfidence' },
+    { key: 'deduplicationReason', label: 'deduplicationReason' },
+    { key: 'rootCauseMemberships', label: 'rootCauseMemberships' }
+  ];
+  const metadataKeys = new Set([...metadataColumns, ...scoringColumns].map((column) => column.key));
   const detailColumns = (detail.columns || []).filter((column) => !metadataKeys.has(column.key));
-  const columns = [...metadataColumns, ...detailColumns];
+  const columns = [...metadataColumns, ...detailColumns, ...scoringColumns];
   const metadata = {
     checkId: detail.checkId,
     checkTitle: detail.title || '',
@@ -75,6 +88,17 @@ export function collectCheckDetailCsv(db, runId, checkResultId) {
     rawPriority: detail.rawPriority || detail.priority,
     rawFindingType: detail.rawFindingType || detail.findingType || '',
     confidence: detail.confidence || '',
+    rootCauseId: detail.rootCauseId || '',
+    rootCauseKey: detail.rootCauseKey || '',
+    rootCauseFamily: detail.rootCauseFamily || '',
+    scopeType: detail.scopeType || '',
+    occurrenceCount: detail.occurrenceCount || 0,
+    affectedUrlCount: detail.affectedUrlCount || 0,
+    displayedSampleCount: detail.displayedSampleCount || 0,
+    primaryCheckId: detail.primaryCheckId || '',
+    deduplicationConfidence: detail.deduplicationConfidence || '',
+    deduplicationReason: detail.deduplicationReason || '',
+    rootCauseMemberships: JSON.stringify(detail.rootCauseMemberships || []),
     affectedCount: detail.affectedCount || 0,
     reviewRecommended: detail.reviewRecommended || 0,
     reviewStatus: detail.reviewStatus || 'unreviewed',
@@ -427,6 +451,7 @@ function formatFindingForExport(row) {
   const recommendationMeta = safeJson(row.recommendationMetaJson, row.recommendationMeta || {});
   const requirements = safeJson(row.requirementsJson, row.requirements || {});
   const provenance = safeJson(row.provenanceJson, row.provenance || {});
+  const rootCauseMemberships = safeJson(row.rootCauseMembershipsJson, row.rootCauseMemberships || []);
   return {
     ...row,
     title: row.checkName || row.title || '',
@@ -447,7 +472,9 @@ function formatFindingForExport(row) {
     requirementsJson: row.requirementsJson || JSON.stringify(requirements),
     provenance,
     provenanceJson: row.provenanceJson || JSON.stringify(provenance),
-    relatedCheckIds: safeJson(row.relatedCheckIdsJson, row.relatedCheckIds || [])
+    relatedCheckIds: safeJson(row.relatedCheckIdsJson, row.relatedCheckIds || []),
+    rootCauseMemberships,
+    rootCauseMembershipsJson: row.rootCauseMembershipsJson || JSON.stringify(rootCauseMemberships)
   };
 }
 
@@ -488,6 +515,14 @@ function buildAuditSummary(db, runId, run) {
     scheduledRunId: run.scheduledRunId || null,
     comparisonId: run.comparisonId || null,
     scores,
+    scoring: {
+      scoringVersion: scores.scoringVersion || run.scoringVersion || null,
+      deduplicationVersion: scores.deduplicationVersion || run.deduplicationVersion || null,
+      coverageModelVersion: scores.coverageModelVersion || run.coverageModelVersion || null,
+      checkLogicVersion: scores.checkLogicVersion || run.checkLogicVersion || null,
+      scoreStatus: scores.scoreStatus || run.scoreStatus || 'historical_unknown',
+      weightedCoverage: scores.weightedCoverage ?? null
+    },
     processedUrls: run.processedUrls,
     successfulUrls: run.successfulUrls,
     failedUrls: run.failedUrls,
@@ -553,6 +588,14 @@ function buildRunConfig(run) {
       buildVersion: run.runtimeBuildVersion || null,
       configHash: run.runtimeConfigHash || null,
       runtime: safeJson(run.runtimeProvenanceJson, null)
+    },
+    scoring: {
+      scoringVersion: run.scoringVersion || null,
+      deduplicationVersion: run.deduplicationVersion || null,
+      coverageModelVersion: run.coverageModelVersion || null,
+      checkLogicVersion: run.checkLogicVersion || null,
+      scoreStatus: run.scoreStatus || (run.scoringVersion ? null : 'historical_unknown'),
+      scoreComputedAt: run.scoreComputedAt || null
     },
     sourceType: run.sourceType || 'crawl',
     crawlScaleMode: run.crawlScaleMode || 'medium',
@@ -633,6 +676,13 @@ function createExportManifest(db, runId, run) {
       gitCommit: run.runtimeGitCommit || null,
       buildVersion: run.runtimeBuildVersion || null,
       configHash: run.runtimeConfigHash || null
+    },
+    scoring: {
+      scoringVersion: run.scoringVersion || null,
+      deduplicationVersion: run.deduplicationVersion || null,
+      coverageModelVersion: run.coverageModelVersion || null,
+      checkLogicVersion: run.checkLogicVersion || null,
+      scoreStatus: run.scoreStatus || (run.scoringVersion ? null : 'historical_unknown')
     },
     sourceType: run.sourceType || 'crawl',
     storageProfile: run.storageProfile || 'standard',

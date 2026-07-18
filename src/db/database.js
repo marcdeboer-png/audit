@@ -139,6 +139,16 @@ export function initDatabase(database = getDb()) {
       runtimeBuildVersion TEXT,
       runtimeConfigHash TEXT,
       runtimeProvenanceJson TEXT,
+      scoringVersion TEXT,
+      deduplicationVersion TEXT,
+      coverageModelVersion TEXT,
+      checkLogicVersion TEXT,
+      scoreStatus TEXT,
+      overallScore REAL,
+      techScore REAL,
+      geoScore REAL,
+      scoreBreakdownJson TEXT,
+      scoreComputedAt TEXT,
       FOREIGN KEY (projectId) REFERENCES projects(id)
     );
 
@@ -490,6 +500,17 @@ export function initDatabase(database = getDb()) {
       relatedCheckIdsJson TEXT,
       checkVersion TEXT,
       provenanceJson TEXT,
+      rootCauseId TEXT,
+      rootCauseKey TEXT,
+      rootCauseFamily TEXT,
+      scopeType TEXT,
+      occurrenceCount INTEGER NOT NULL DEFAULT 0,
+      affectedUrlCount INTEGER NOT NULL DEFAULT 0,
+      displayedSampleCount INTEGER NOT NULL DEFAULT 0,
+      primaryCheckId TEXT,
+      deduplicationConfidence TEXT,
+      deduplicationReason TEXT,
+      rootCauseMembershipsJson TEXT,
       createdAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (runId) REFERENCES runs(id)
     );
@@ -887,7 +908,17 @@ export function initDatabase(database = getDb()) {
     ['runtimeGitCommit', 'TEXT'],
     ['runtimeBuildVersion', 'TEXT'],
     ['runtimeConfigHash', 'TEXT'],
-    ['runtimeProvenanceJson', 'TEXT']
+    ['runtimeProvenanceJson', 'TEXT'],
+    ['scoringVersion', 'TEXT'],
+    ['deduplicationVersion', 'TEXT'],
+    ['coverageModelVersion', 'TEXT'],
+    ['checkLogicVersion', 'TEXT'],
+    ['scoreStatus', 'TEXT'],
+    ['overallScore', 'REAL'],
+    ['techScore', 'REAL'],
+    ['geoScore', 'REAL'],
+    ['scoreBreakdownJson', 'TEXT'],
+    ['scoreComputedAt', 'TEXT']
   ]);
 
   ensureColumns(database, 'scheduled_runs', [
@@ -968,7 +999,18 @@ export function initDatabase(database = getDb()) {
     ['limitations', 'TEXT'],
     ['relatedCheckIdsJson', 'TEXT'],
     ['checkVersion', 'TEXT'],
-    ['provenanceJson', 'TEXT']
+    ['provenanceJson', 'TEXT'],
+    ['rootCauseId', 'TEXT'],
+    ['rootCauseKey', 'TEXT'],
+    ['rootCauseFamily', 'TEXT'],
+    ['scopeType', 'TEXT'],
+    ['occurrenceCount', 'INTEGER NOT NULL DEFAULT 0'],
+    ['affectedUrlCount', 'INTEGER NOT NULL DEFAULT 0'],
+    ['displayedSampleCount', 'INTEGER NOT NULL DEFAULT 0'],
+    ['primaryCheckId', 'TEXT'],
+    ['deduplicationConfidence', 'TEXT'],
+    ['deduplicationReason', 'TEXT'],
+    ['rootCauseMembershipsJson', 'TEXT']
   ]);
 
   ensureColumns(database, 'playwright_results', [
@@ -1033,6 +1075,10 @@ export function initDatabase(database = getDb()) {
       ON runs(scheduledRunId, status);
     CREATE INDEX IF NOT EXISTS idx_runs_source_type
       ON runs(sourceType, status);
+    CREATE INDEX IF NOT EXISTS idx_runs_scoring_version
+      ON runs(scoringVersion, scoreStatus);
+    CREATE INDEX IF NOT EXISTS idx_check_results_run_root_cause
+      ON check_results(runId, rootCauseId);
     CREATE INDEX IF NOT EXISTS idx_page_snapshots_run_url
       ON page_snapshots(runId, normalizedUrl);
     CREATE INDEX IF NOT EXISTS idx_import_files_run

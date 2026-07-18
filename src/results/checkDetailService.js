@@ -99,6 +99,17 @@ export function getCheckDetail(db, runId, checkResultId, options = {}) {
     scoreEligible: Boolean(checkResult.scoreEligible),
     scoreExclusionReason: checkResult.scoreExclusionReason || null,
     scoreDeduplicationKey: checkResult.scoreDeduplicationKey || null,
+    rootCauseId: checkResult.rootCauseId || null,
+    rootCauseKey: checkResult.rootCauseKey || null,
+    rootCauseFamily: checkResult.rootCauseFamily || null,
+    scopeType: checkResult.scopeType || null,
+    occurrenceCount: Number(checkResult.occurrenceCount || 0),
+    affectedUrlCount: Number(checkResult.affectedUrlCount || checkResult.affectedCount || 0),
+    displayedSampleCount: Number(checkResult.displayedSampleCount || checkResult.sampleUrls?.length || 0),
+    primaryCheckId: checkResult.primaryCheckId || null,
+    deduplicationConfidence: checkResult.deduplicationConfidence || null,
+    deduplicationReason: checkResult.deduplicationReason || null,
+    rootCauseMemberships: checkResult.rootCauseMemberships || [],
     facts: checkResult.facts,
     evidence: checkResult.evidence,
     assessment: checkResult.assessment,
@@ -152,7 +163,8 @@ function loadCheckResult(db, runId, checkResultId) {
     recommendationMeta: safeJson(row.recommendationMetaJson, {}),
     requirements: safeJson(row.requirementsJson, {}),
     provenance: safeJson(row.provenanceJson, {}),
-    relatedCheckIds: safeJson(row.relatedCheckIdsJson, [])
+    relatedCheckIds: safeJson(row.relatedCheckIdsJson, []),
+    rootCauseMemberships: safeJson(row.rootCauseMembershipsJson, [])
   }));
 }
 

@@ -1,4 +1,10 @@
-import { scoreForStatus } from '../utils/scoring.js';
+import {
+  CHECK_LOGIC_VERSION,
+  COVERAGE_MODEL_VERSION,
+  DEDUPLICATION_VERSION,
+  SCORING_VERSION,
+  scoreForStatus
+} from '../utils/scoring.js';
 import { crawlerDefaults } from '../crawler/defaults.js';
 import {
   normalizeAutomationCoverage,
@@ -47,7 +53,8 @@ export function createRun(db, projectId, config) {
       storageEstimateJson,
       enableLlmChecks, llmProvider, llmModel, llmMaxSampleUrls, llmMaxChecks,
       llmMaxTokens, llmDryRun, llmWarningsJson,
-      primaryHost, runtimeGitCommit, runtimeBuildVersion, runtimeConfigHash, runtimeProvenanceJson
+      primaryHost, runtimeGitCommit, runtimeBuildVersion, runtimeConfigHash, runtimeProvenanceJson,
+      scoringVersion, deduplicationVersion, coverageModelVersion, checkLogicVersion
     )
     VALUES (
       @projectId, 'pending', @auditType, @maxUrls, @maxDepth, @concurrency,
@@ -69,7 +76,8 @@ export function createRun(db, projectId, config) {
       @storageEstimateJson,
       @enableLlmChecks, @llmProvider, @llmModel, @llmMaxSampleUrls, @llmMaxChecks,
       @llmMaxTokens, @llmDryRun, @llmWarningsJson,
-      @primaryHost, @runtimeGitCommit, @runtimeBuildVersion, @runtimeConfigHash, @runtimeProvenanceJson
+      @primaryHost, @runtimeGitCommit, @runtimeBuildVersion, @runtimeConfigHash, @runtimeProvenanceJson,
+      @scoringVersion, @deduplicationVersion, @coverageModelVersion, @checkLogicVersion
     )
   `).run({
     projectId,
@@ -136,7 +144,11 @@ export function createRun(db, projectId, config) {
     runtimeGitCommit: runtime.gitCommit,
     runtimeBuildVersion: runtime.buildVersion,
     runtimeConfigHash: runtime.configHash,
-    runtimeProvenanceJson: JSON.stringify(runtime)
+    runtimeProvenanceJson: JSON.stringify(runtime),
+    scoringVersion: SCORING_VERSION,
+    deduplicationVersion: DEDUPLICATION_VERSION,
+    coverageModelVersion: COVERAGE_MODEL_VERSION,
+    checkLogicVersion: CHECK_LOGIC_VERSION
   });
   return result.lastInsertRowid;
 }
@@ -862,6 +874,16 @@ export function clearRunArtifacts(db, runId) {
   db.prepare('DELETE FROM finding_reviews WHERE runId = ?').run(runId);
   db.prepare('DELETE FROM check_results WHERE runId = ?').run(runId);
   db.prepare('DELETE FROM llm_results WHERE runId = ?').run(runId);
+  db.prepare(`
+    UPDATE runs
+    SET scoreStatus = NULL,
+        overallScore = NULL,
+        techScore = NULL,
+        geoScore = NULL,
+        scoreBreakdownJson = NULL,
+        scoreComputedAt = NULL
+    WHERE id = ?
+  `).run(runId);
 }
 
 export function clearSamplingArtifacts(db, runId) {
@@ -889,6 +911,9 @@ export function insertCheckResults(db, runId, results) {
       reportGroupingKey, findingType, confidence, reviewRecommended,
       maturityImpact, dataBasis, evidenceLevel, reviewReason, automationCoverage,
       interpretation, limitations, relatedCheckIdsJson, checkVersion, provenanceJson
+      , rootCauseId, rootCauseKey, rootCauseFamily, scopeType,
+      occurrenceCount, affectedUrlCount, displayedSampleCount, primaryCheckId,
+      deduplicationConfidence, deduplicationReason, rootCauseMembershipsJson
     )
     VALUES (
       @runId, @checkId, @category, @checkName, @status, @priority, @effort, @score,
@@ -898,6 +923,9 @@ export function insertCheckResults(db, runId, results) {
       @reportGroupingKey, @findingType, @confidence, @reviewRecommended,
       @maturityImpact, @dataBasis, @evidenceLevel, @reviewReason, @automationCoverage,
       @interpretation, @limitations, @relatedCheckIdsJson, @checkVersion, @provenanceJson
+      , @rootCauseId, @rootCauseKey, @rootCauseFamily, @scopeType,
+      @occurrenceCount, @affectedUrlCount, @displayedSampleCount, @primaryCheckId,
+      @deduplicationConfidence, @deduplicationReason, @rootCauseMembershipsJson
     )
   `);
 
@@ -945,12 +973,107 @@ export function insertCheckResults(db, runId, results) {
         limitations: truncateText(storedItem.limitations || null, 2000),
         relatedCheckIdsJson: JSON.stringify(Array.isArray(storedItem.relatedCheckIds) ? storedItem.relatedCheckIds.slice(0, 20) : []),
         checkVersion: String(storedItem.provenance?.checkVersion || storedItem.checkVersion || '1'),
-        provenanceJson: boundedJson(storedItem.provenance || {}, retentionPolicy)
+        provenanceJson: boundedJson(storedItem.provenance || {}, retentionPolicy),
+        rootCauseId: truncateText(storedItem.rootCauseId || null, 100),
+        rootCauseKey: truncateText(storedItem.rootCauseKey || storedItem.scoreDeduplicationKey || null, 500),
+        rootCauseFamily: truncateText(storedItem.rootCauseFamily || null, 300),
+        scopeType: truncateText(storedItem.scopeType || null, 50),
+        occurrenceCount: Math.max(0, Number(storedItem.occurrenceCount ?? storedItem.affectedCount ?? 0)),
+        affectedUrlCount: Math.max(0, Number(storedItem.affectedUrlCount ?? storedItem.affectedCount ?? 0)),
+        displayedSampleCount: Math.max(0, Number(storedItem.displayedSampleCount ?? sampleUrls.length)),
+        primaryCheckId: truncateText(storedItem.primaryCheckId || null, 300),
+        deduplicationConfidence: normalizeConfidence(storedItem.deduplicationConfidence || 'high'),
+        deduplicationReason: truncateText(storedItem.deduplicationReason || null, 2000),
+        rootCauseMembershipsJson: JSON.stringify(Array.isArray(storedItem.rootCauseMemberships) ? storedItem.rootCauseMemberships : [])
       });
     }
   });
 
   tx(results);
+}
+
+export function persistRunScores(db, runId, scores) {
+  requireRunId(runId, 'persist run scores');
+  if (!scores?.breakdown || scores.scoringVersion !== SCORING_VERSION) {
+    throw new Error(`Cannot persist unsupported scoring snapshot for run ${runId}.`);
+  }
+  const roots = Array.isArray(scores.breakdown.rootCauses) ? scores.breakdown.rootCauses : [];
+  const memberships = new Map();
+  for (const root of roots) {
+    for (const checkId of root.relatedCheckIds || []) {
+      const rows = memberships.get(checkId) || [];
+      rows.push({
+        rootCauseId: root.rootCauseId,
+        rootCauseKey: root.rootCauseKey,
+        rootCauseFamily: root.rootCauseFamily,
+        scopeType: root.scopeType,
+        occurrenceCount: root.occurrenceCount,
+        affectedUrlCount: root.affectedUrlCount,
+        displayedSampleCount: root.displayedSampleCount,
+        primaryCheckId: root.primaryCheckId,
+        deduplicationConfidence: root.deduplicationConfidence,
+        deduplicationReason: root.deduplicationReason,
+        rawPenalty: root.rawPenalty,
+        appliedPenalty: root.appliedPenalty
+      });
+      memberships.set(checkId, rows);
+    }
+  }
+  const updateFinding = db.prepare(`
+    UPDATE check_results
+    SET rootCauseId = @rootCauseId,
+        rootCauseKey = @rootCauseKey,
+        rootCauseFamily = @rootCauseFamily,
+        scopeType = COALESCE(@scopeType, scopeType),
+        occurrenceCount = @occurrenceCount,
+        affectedUrlCount = @affectedUrlCount,
+        displayedSampleCount = @displayedSampleCount,
+        primaryCheckId = @primaryCheckId,
+        deduplicationConfidence = @deduplicationConfidence,
+        deduplicationReason = @deduplicationReason,
+        rootCauseMembershipsJson = @rootCauseMembershipsJson
+    WHERE runId = @runId AND checkId = @checkId
+  `);
+  const transaction = db.transaction(() => {
+    db.prepare(`
+      UPDATE runs
+      SET scoringVersion = @scoringVersion,
+          deduplicationVersion = @deduplicationVersion,
+          coverageModelVersion = @coverageModelVersion,
+          checkLogicVersion = @checkLogicVersion,
+          scoreStatus = @scoreStatus,
+          overallScore = @overallScore,
+          techScore = @techScore,
+          geoScore = @geoScore,
+          scoreBreakdownJson = @scoreBreakdownJson,
+          scoreComputedAt = @scoreComputedAt
+      WHERE id = @runId
+    `).run({
+      runId,
+      scoringVersion: scores.scoringVersion,
+      deduplicationVersion: scores.deduplicationVersion,
+      coverageModelVersion: scores.coverageModelVersion,
+      checkLogicVersion: scores.checkLogicVersion,
+      scoreStatus: scores.scoreStatus,
+      overallScore: scores.overallScore,
+      techScore: scores.techScore,
+      geoScore: scores.geoScore,
+      scoreBreakdownJson: JSON.stringify(scores),
+      scoreComputedAt: new Date().toISOString()
+    });
+    for (const [checkId, memberRoots] of memberships.entries()) {
+      const sorted = [...memberRoots].sort((left, right) => right.appliedPenalty - left.appliedPenalty || left.rootCauseKey.localeCompare(right.rootCauseKey));
+      const primary = sorted[0];
+      updateFinding.run({
+        runId,
+        checkId,
+        ...primary,
+        rootCauseMembershipsJson: JSON.stringify(sorted)
+      });
+    }
+  });
+  transaction();
+  return scores;
 }
 
 export function getLatestLogs(db, runId, limit = 100) {

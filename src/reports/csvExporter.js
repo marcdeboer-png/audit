@@ -1,6 +1,7 @@
 import { once } from 'node:events';
 import { applyDisplaySemantics } from '../reviews/displaySemantics.js';
 import { createRunScope, requireRunId, scopeSafeCheckResult } from '../scope/runScope.js';
+import { loadResultsWithScores } from '../checks/checkEngine.js';
 
 const EXPORTS = {
   findings: {
@@ -14,6 +15,9 @@ const EXPORTS = {
       'confidence', 'reportSection', 'reviewRecommended', 'evidenceJson', 'sampleUrls',
       'evaluationState', 'scoreEligible', 'scoreExclusionReason', 'requirementsJson',
       'factsJson', 'assessmentJson', 'recommendationMetaJson', 'scoreDeduplicationKey',
+      'rootCauseId', 'rootCauseKey', 'rootCauseFamily', 'scopeType',
+      'occurrenceCount', 'affectedUrlCount', 'displayedSampleCount', 'primaryCheckId',
+      'deduplicationConfidence', 'deduplicationReason', 'rootCauseMembershipsJson',
       'checkName', 'status', 'priority', 'effort', 'score',
       'finding', 'details', 'evidence',
       'reviewStatus', 'actionStatus', 'reviewerName', 'reviewNote',
@@ -49,6 +53,17 @@ const EXPORTS = {
         cr.scoreEligible,
         cr.scoreExclusionReason,
         cr.scoreDeduplicationKey,
+        cr.rootCauseId,
+        cr.rootCauseKey,
+        cr.rootCauseFamily,
+        cr.scopeType,
+        cr.occurrenceCount,
+        cr.affectedUrlCount,
+        cr.displayedSampleCount,
+        cr.primaryCheckId,
+        cr.deduplicationConfidence,
+        cr.deduplicationReason,
+        cr.rootCauseMembershipsJson,
         COALESCE(fr.reviewStatus, 'unreviewed') AS reviewStatus,
         COALESCE(fr.actionStatus, 'open') AS actionStatus,
         fr.reviewerName,
@@ -300,6 +315,20 @@ const EXPORTS = {
         templateClusterKey ASC
     `,
     transform: normalizeTemplatePerformance
+  },
+  'score-root-causes': {
+    filename: (runId) => `run-${runId}-score-root-causes.csv`,
+    columns: [
+      'scoringVersion', 'deduplicationVersion', 'coverageModelVersion', 'checkLogicVersion',
+      'scoreStatus', 'score', 'diagnosticScore', 'weightedCoverage',
+      'rawFindingCount', 'scoredFindingCount', 'rootCauseCount', 'deduplicatedFindingCount',
+      'rawPenaltyTotal', 'appliedPenaltyTotal', 'capsAppliedJson',
+      'rootCauseId', 'rootCauseKey', 'rootCauseFamily', 'category', 'severity', 'confidence',
+      'scopeType', 'occurrenceCount', 'affectedUrlCount', 'displayedSampleCount',
+      'primaryCheckId', 'relatedCheckIds', 'deduplicationConfidence', 'deduplicationReason',
+      'basePenalty', 'scopeFactor', 'confidenceFactor', 'rawPenalty', 'appliedPenalty', 'rootCapsAppliedJson'
+    ],
+    rows: scoreRootCauseRows
   }
 };
 
@@ -340,8 +369,8 @@ export async function streamCsvExport(db, runId, type, writable) {
   };
 
   await write(writable, `${spec.columns.map(csvEscape).join(',')}\n`);
-  const statement = db.prepare(spec.sql);
-  for (const rawRow of statement.iterate(runId)) {
+  const sourceRows = spec.rows ? spec.rows(db, runId) : db.prepare(spec.sql).iterate(runId);
+  for (const rawRow of sourceRows) {
     const scopedRow = scopeSafeExportRow(rawRow, context.scope);
     const row = spec.transform ? spec.transform(scopedRow, context) : scopedRow;
     await write(writable, csvLine(spec.columns, row));
@@ -357,12 +386,43 @@ export function collectCsvExport(db, runId, type) {
     scope: exportRunScope(db, runId)
   };
   const lines = [`${spec.columns.map(csvEscape).join(',')}\n`];
-  for (const rawRow of db.prepare(spec.sql).iterate(runId)) {
+  const sourceRows = spec.rows ? spec.rows(db, runId) : db.prepare(spec.sql).iterate(runId);
+  for (const rawRow of sourceRows) {
     const scopedRow = scopeSafeExportRow(rawRow, context.scope);
     const row = spec.transform ? spec.transform(scopedRow, context) : scopedRow;
     lines.push(csvLine(spec.columns, row));
   }
   return lines.join('');
+}
+
+function scoreRootCauseRows(db, runId) {
+  const scores = loadResultsWithScores(db, runId).scores;
+  const breakdown = scores.breakdown || {};
+  const common = {
+    scoringVersion: scores.scoringVersion || '',
+    deduplicationVersion: scores.deduplicationVersion || '',
+    coverageModelVersion: scores.coverageModelVersion || '',
+    checkLogicVersion: scores.checkLogicVersion || '',
+    scoreStatus: scores.scoreStatus || 'historical_unknown',
+    score: scores.overallScore,
+    diagnosticScore: scores.diagnosticOverallScore ?? breakdown.diagnosticScore ?? '',
+    weightedCoverage: scores.weightedCoverage ?? breakdown.weightedCoverage ?? breakdown.dataCoveragePct ?? '',
+    rawFindingCount: breakdown.rawFindingCount ?? breakdown.configuredChecks ?? 0,
+    scoredFindingCount: breakdown.scoredFindingCount ?? breakdown.eligibleChecks ?? 0,
+    rootCauseCount: breakdown.rootCauseCount ?? 0,
+    deduplicatedFindingCount: breakdown.deduplicatedFindingCount ?? breakdown.deduplicatedChecks ?? 0,
+    rawPenaltyTotal: breakdown.rawPenalty ?? '',
+    appliedPenaltyTotal: breakdown.appliedPenalty ?? '',
+    capsAppliedJson: JSON.stringify(breakdown.capsApplied || [])
+  };
+  const roots = breakdown.rootCauses || [];
+  if (!roots.length) return [{ ...common }];
+  return roots.map((root) => ({
+    ...common,
+    ...root,
+    relatedCheckIds: JSON.stringify(root.relatedCheckIds || []),
+    rootCapsAppliedJson: JSON.stringify(root.capsApplied || [])
+  }));
 }
 
 function exportRunScope(db, runId) {

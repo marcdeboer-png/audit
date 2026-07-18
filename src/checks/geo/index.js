@@ -926,6 +926,9 @@ function articleBlogWithArticleSchema() {
       evidence: { candidateCount, evaluableCandidates: evaluable.length, uncertainCandidates: uncertain.length, acceptedTypes: ['Article', 'BlogPosting', 'NewsArticle', 'Report', 'ScholarlyArticle', 'SocialMediaPosting', 'TechArticle'], uncertainSamples: uncertain.slice(0, 10).map((row) => row.url) },
       requirements: { requiredFacts: ['reliableArticlePageClassification', 'schemaTypeExtraction'], missingFacts: ['reliableArticlePageClassification'], minimumCoverage: 1, canCollectWithTargetedRun: true },
       reportGroupingKey: 'schema.article',
+      rootCauseKey: 'structured_data.article_coverage',
+      rootCauseFamily: 'structured_data.article',
+      scopeType: 'template',
       relatedCheckIds: ['tech.article_coverage_on_article_like_pages']
     });
     const status = candidateCount ? (rows.length ? 'Warning' : 'OK') : 'NA';
@@ -938,6 +941,9 @@ function articleBlogWithArticleSchema() {
       evidence: { candidateCount, evaluableCandidates: evaluable.length, uncertainCandidates: uncertain.length, affectedCount: missing.length, displayedSamples: rows.length, acceptedTypes: ['Article', 'BlogPosting', 'NewsArticle', 'Report', 'ScholarlyArticle', 'SocialMediaPosting', 'TechArticle'], missingArticleSchemaSamples: rows.map((row) => row.url) },
       findingType: 'opportunity',
       reportGroupingKey: 'schema.article',
+      rootCauseKey: 'structured_data.article_coverage',
+      rootCauseFamily: 'structured_data.article',
+      scopeType: 'template',
       relatedCheckIds: ['tech.article_coverage_on_article_like_pages']
     });
   });

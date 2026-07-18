@@ -1,5 +1,5 @@
-import { clearRunArtifacts, getRunWithProject, hydrateInternalLinkHttpFacts, insertCheckResults, logRun } from '../db/repositories.js';
-import { computeScores, scoreForStatus } from '../utils/scoring.js';
+import { clearRunArtifacts, getRunWithProject, hydrateInternalLinkHttpFacts, insertCheckResults, logRun, persistRunScores } from '../db/repositories.js';
+import { SCORING_VERSION, computeEvidenceGatedLegacyScores, computeLegacyScores, computeScores, scoreForStatus } from '../utils/scoring.js';
 import { techChecks } from './tech/index.js';
 import { geoChecks } from './geo/index.js';
 import { applyEffectiveValues } from '../reviews/reviewWorkflow.js';
@@ -99,6 +99,7 @@ export async function runChecks(db, runId) {
 
   insertCheckResults(db, runId, results);
   const scores = computeScores(results);
+  persistRunScores(db, runId, scores);
   logRun(db, runId, 'info', 'Checks completed', { checks: results.length, scores });
   return { results, scores };
 }
@@ -189,14 +190,36 @@ export function loadResultsWithScores(db, runId) {
     requirements: safeParse(row.requirementsJson, {}),
     provenance: safeParse(row.provenanceJson, {}),
     scoreEligible: Boolean(row.scoreEligible),
-    relatedCheckIds: safeParse(row.relatedCheckIdsJson, [])
+    relatedCheckIds: safeParse(row.relatedCheckIdsJson, []),
+    rootCauseMemberships: safeParse(row.rootCauseMembershipsJson, [])
   })).map(applyEffectiveValues).map((row) => readScope
     ? scopeSafeCheckResult(row, readScope, { id: row.checkId })
     : row);
 
+  return { scores: scoresForStoredRun(run, rows), results: rows };
+}
+
+export function scoresForStoredRun(run, rows) {
+  if (!run?.scoringVersion) {
+    return rows.some((row) => row.evaluationState)
+      ? computeEvidenceGatedLegacyScores(rows)
+      : computeLegacyScores(rows);
+  }
+  const stored = safeParse(run.scoreBreakdownJson, null);
+  if (stored && stored.scoringVersion === run.scoringVersion) return stored;
+  if (run.scoringVersion === SCORING_VERSION) return computeScores(rows);
+  const fallback = rows.some((row) => row.evaluationState)
+    ? computeEvidenceGatedLegacyScores(rows)
+    : computeLegacyScores(rows);
   return {
-    scores: computeScores(rows),
-    results: rows
+    ...fallback,
+    scoreStatus: 'historical_unknown',
+    scoringVersion: run.scoringVersion,
+    breakdown: {
+      ...fallback.breakdown,
+      scoringModel: run.scoringVersion,
+      unsupportedHistoricalScoringVersion: true
+    }
   };
 }
 

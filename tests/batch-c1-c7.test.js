@@ -181,28 +181,36 @@ test('synthetic check passes root, nested, unknown-file and query probes on stab
 
 test('score calibration prioritizes critical risks, deduplicates root causes and excludes unavailable checks', () => {
   const pass = resultRow('pass', 'OK', 'High', 'core_issue');
-  const critical = resultRow('critical', 'Error', 'High', 'core_issue');
+  const critical = { ...resultRow('critical', 'Error', 'High', 'core_issue'), assessment: { severity: 'critical' } };
   const lowOptional = Array.from({ length: 23 }, (_, index) => resultRow(`optional-${index}`, 'Warning', 'Low', 'opportunity'));
-  const criticalScore = computeScores([pass, critical]).overallScore;
-  const optionalScore = computeScores([pass, ...lowOptional]).overallScore;
+  const criticalResult = computeScores([pass, critical]);
+  const optionalResult = computeScores([pass, ...lowOptional]);
+  const criticalScore = criticalResult.overallScore;
+  const optionalScore = optionalResult.overallScore;
   assert.ok(criticalScore < optionalScore, { criticalScore, optionalScore });
+  assert.ok(criticalResult.breakdown.appliedPenalty > optionalResult.breakdown.appliedPenalty);
+  assert.ok(optionalResult.breakdown.capsApplied.some((cap) => cap.type === 'optional_low_global'));
 
   const oneUrl = computeScores([{ ...resultRow('sitewide', 'Warning'), affectedCount: 1 }]);
   const manyUrls = computeScores([{ ...resultRow('sitewide', 'Warning'), affectedCount: 1000 }]);
-  assert.equal(oneUrl.overallScore, manyUrls.overallScore);
+  assert.ok(manyUrls.overallScore < oneUrl.overallScore);
+  assert.ok(manyUrls.breakdown.appliedPenalty < oneUrl.breakdown.appliedPenalty * 3);
 
   const deduplicated = computeScores([
     { ...resultRow('social-image', 'Warning', 'Low', 'opportunity'), scoreDeduplicationKey: 'social.open_graph' },
     { ...resultRow('open-graph', 'Warning', 'Low', 'opportunity'), scoreDeduplicationKey: 'social.open_graph' }
   ]);
   assert.equal(deduplicated.breakdown.deduplicatedChecks, 1);
-  assert.equal(deduplicated.breakdown.eligibleChecks, 1);
+  assert.equal(deduplicated.breakdown.rootCauseCount, 1);
+  assert.equal(deduplicated.breakdown.scoredFindingCount, 2);
 
   const restricted = computeScores([
     pass,
     { ...resultRow('missing-data', 'NA'), score: null, evaluationState: 'insufficient_evidence', scoreEligible: false, scoreExclusionReason: 'missing extractor fact' }
   ]);
   assert.equal(restricted.overallScore, 100);
+  assert.equal(restricted.diagnosticOverallScore, 100);
+  assert.equal(restricted.scoreStatus, 'provisional');
   assert.equal(restricted.breakdown.excludedChecks, 1);
   assert.ok(restricted.breakdown.dataCoveragePct < 100);
   assert.equal(restricted.breakdown.excluded[0].reason, 'missing extractor fact');
