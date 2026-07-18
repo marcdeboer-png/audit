@@ -3,7 +3,7 @@ import crypto from 'node:crypto';
 export const SCORING_VERSION = 'root-cause-scoring-v3';
 export const DEDUPLICATION_VERSION = 'deterministic-root-cause-v1';
 export const COVERAGE_MODEL_VERSION = 'weighted-coverage-v2';
-export const CHECK_LOGIC_VERSION = 'calibration-v3';
+export const CHECK_LOGIC_VERSION = 'csr-render-provenance-v1';
 
 export const scoringConfig = Object.freeze({
   severityPenalties: Object.freeze({ critical: 30, high: 14, medium: 5, low: 1 }),

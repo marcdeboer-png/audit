@@ -46,6 +46,13 @@ export async function runTemplateSampling(db, runId) {
         timeoutMs: run.playwrightTimeoutMs || crawlerDefaults.playwrightTimeoutMs,
         userAgent: run.userAgent || crawlerDefaults.userAgent,
         collectScreenshots: Boolean(run.collectScreenshots),
+        settling: {
+          maxDurationMs: run.renderSettlingMaxMs,
+          intervalMs: run.renderSettlingIntervalMs,
+          maxSnapshots: run.renderSettlingMaxSnapshots,
+          stableSnapshots: run.renderSettlingStableSnapshots,
+          minimumObservationMs: run.renderSettlingMinimumObservationMs
+        },
         screenshotDir: path.join(process.cwd(), 'reports', 'screenshots', `run-${runId}`),
         log: (level, message, data) => logRun(db, runId, level, message, data)
       });
@@ -196,14 +203,20 @@ function insertPlaywrightResult(db, runId, sample, result) {
       h1Count, renderedWordCount, renderedLinksCount, rawRenderedWordDelta,
       consoleErrorsCount, consoleErrorsJson, pageErrorsCount, pageErrorsJson, cspViolationsJson,
       networkErrorsCount, networkErrorsJson, navigationError, textNormalizationVersion,
-      jsRequiredLikely, screenshotPath, loadTimeMs, domContentLoadedMs
+      jsRequiredLikely, screenshotPath, loadTimeMs, domContentLoadedMs,
+      settlingStatus, settlingDurationMs, renderSnapshotCount, renderFingerprint,
+      initialRenderedStateJson, settledRenderedStateJson, renderProvenanceJson,
+      browserEventsJson, renderProvenanceVersion, settlingPolicyVersion
     )
     VALUES (
       @runId, @templateClusterId, @templateClusterKey, @url, @status, @finalUrl, @title,
       @h1Count, @renderedWordCount, @renderedLinksCount, @rawRenderedWordDelta,
       @consoleErrorsCount, @consoleErrorsJson, @pageErrorsCount, @pageErrorsJson, @cspViolationsJson,
       @networkErrorsCount, @networkErrorsJson, @navigationError, @textNormalizationVersion,
-      @jsRequiredLikely, @screenshotPath, @loadTimeMs, @domContentLoadedMs
+      @jsRequiredLikely, @screenshotPath, @loadTimeMs, @domContentLoadedMs,
+      @settlingStatus, @settlingDurationMs, @renderSnapshotCount, @renderFingerprint,
+      @initialRenderedStateJson, @settledRenderedStateJson, @renderProvenanceJson,
+      @browserEventsJson, @renderProvenanceVersion, @settlingPolicyVersion
     )
   `).run({
     runId,

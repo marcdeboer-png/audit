@@ -11,6 +11,7 @@ import {
 import { selectedHeaders } from '../utils/http.js';
 import { detectPageType } from './pageType.js';
 import { countVisibleWords, extractTextKinds, normalizeVisibleText, VISIBLE_TEXT_NORMALIZATION_VERSION } from './visibleText.js';
+import { createDocumentState } from './documentState.js';
 
 export function extractHtml(rawHtml, pageUrl, finalDomain, responseHeaders = {}) {
   const $ = cheerio.load(rawHtml || '');
@@ -31,6 +32,7 @@ export function extractHtml(rawHtml, pageUrl, finalDomain, responseHeaders = {})
   );
   const manifest = absoluteUrl($('link[rel="manifest"]').first().attr('href'), pageUrl);
   const og = extractOpenGraph($);
+  const twitter = extractTwitterMetadata($);
   const h1 = headings($, 'h1');
   const h2 = headings($, 'h2');
   const links = extractLinks($, pageUrl, finalDomain);
@@ -46,6 +48,25 @@ export function extractHtml(rawHtml, pageUrl, finalDomain, responseHeaders = {})
   const semanticSignals = extractSemanticSignals($);
   const pageType = detectPageType({ url: pageUrl, schemaTypes, title, h1, h2, bodyText, rawHtml, semanticSignals });
   const featureFlags = extractFeatureFlags($, bodyText, links, h2.length, pageUrl, pageType, semanticSignals);
+  const observedAt = new Date().toISOString();
+  const mainRoot = $('main,[role="main"],article').first();
+  const mainText = mainRoot.length ? extractTextKinds(mainRoot.toString()).visibleText : '';
+  const rawDocumentState = createDocumentState({
+    title,
+    metaDescription,
+    canonical,
+    htmlLang,
+    robots: metaRobots,
+    hreflang: extractHreflang($),
+    openGraph: og,
+    twitter,
+    h1,
+    visibleText: bodyText,
+    mainText,
+    links: links.filter((link) => link.linkType === 'internal').map((link) => link.normalizedTargetUrl),
+    structuredData: [...new Set(schemas.map((schema) => schema.rawJson).filter(Boolean))],
+    mainContentPresent: mainRoot.length > 0
+  }, { url: pageUrl, source: 'raw_html', observedAt, snapshotId: 'raw' });
 
   return {
     page: {
@@ -78,6 +99,7 @@ export function extractHtml(rawHtml, pageUrl, finalDomain, responseHeaders = {})
         structured_data_text: { length: textKinds.structuredDataTextLength, hash: textKinds.structuredDataTextHash },
         metadata_text: { length: textKinds.metadataTextLength, hash: textKinds.metadataTextHash }
       }),
+      rawDocumentStateJson: JSON.stringify(rawDocumentState),
       internalLinksCount: links.filter((link) => link.linkType === 'internal').length,
       externalLinksCount: links.filter((link) => link.linkType === 'external').length,
       schemaTypesJson: JSON.stringify(schemaTypes),
@@ -153,6 +175,22 @@ function extractOpenGraph($) {
     output[property] = $(`meta[property="${property}"]`).first().attr('content')?.trim() || null;
   }
   return output;
+}
+
+function extractTwitterMetadata($) {
+  const output = {};
+  $('meta[name^="twitter:"]').each((_, element) => {
+    const name = String($(element).attr('name') || '').trim().toLowerCase();
+    if (name && output[name] === undefined) output[name] = $(element).attr('content')?.trim() || null;
+  });
+  return output;
+}
+
+function extractHreflang($) {
+  return $('link[rel~="alternate"][hreflang]').map((_, element) => ({
+    hreflang: String($(element).attr('hreflang') || '').trim(),
+    href: String($(element).attr('href') || '').trim()
+  })).get();
 }
 
 function extractLinks($, pageUrl, finalDomain) {
@@ -345,10 +383,7 @@ export function collectSchemaTypes(value, output = new Set()) {
 
 function extractFeatureFlags($, bodyText, links, h2Count, pageUrl, pageType, semanticSignals = extractSemanticSignals($)) {
   const externalLinks = links.filter((link) => link.linkType === 'external');
-  const sourceLinks = externalLinks.filter((link) => {
-    const haystack = `${link.anchorText || ''} ${link.targetUrl || ''}`.toLowerCase();
-    return /source|quelle|reference|citation|study|studie|report|doi\.org|pubmed|research|whitepaper|paper/.test(haystack);
-  });
+  const sourceLinks = extractSemanticSourceLinks($, pageUrl);
   const headingQuestions = $('h1,h2,h3,h4,summary')
     .map((_, element) => cleanText($(element).text()))
     .get()
@@ -366,9 +401,9 @@ function extractFeatureFlags($, bodyText, links, h2Count, pageUrl, pageType, sem
   const faqStrongItemCount = Math.max(headingQuestions.length, faqContainerQuestionCount, detailsQuestionCount);
   const hasFaqPattern = faqStrongItemCount >= 2 && (faqKeyword || faqContainers.length > 0 || detailsQuestionCount >= 2);
   const hasWeakFaqPattern = !hasFaqPattern && (faqKeyword || headingQuestions.length === 1 || faqContainers.length > 0 || detailsQuestionCount === 1);
-  const visibleTimeSamples = visibleSelectorTexts($, 'time, article [class*="date"], article [class*="publish"], main [class*="date"], main [class*="publish"]');
+  const visibleTimeSamples = visibleSelectorTexts($, 'article time, main time, article [class*="date"], article [class*="publish"], main [class*="date"], main [class*="publish"]');
   const hasVisibleDate = visibleTimeSamples.some((text) => hasDatePattern(text));
-  const visibleAuthorSamples = visibleSelectorTexts($, '[rel="author"], article .author, article .byline, article [class*="author"], article [class*="byline"], main [rel="author"], main .byline');
+  const visibleAuthorSamples = visibleSelectorTextsWithImageAlt($, 'article [rel="author"], main [rel="author"], article .author, article .byline, article [class*="author"], article [class*="byline"], main .author, main .byline, main [class*="author"], main [class*="byline"]');
   const hasAuthorPattern = visibleAuthorSamples.some((text) => text.length > 0);
   const videosCount = $('video, iframe[src*="youtube"], iframe[src*="youtu.be"], iframe[src*="vimeo"], iframe[src*="wistia"], iframe[src*="loom"]').length;
   const articleLike = pageType === 'article';
@@ -433,6 +468,21 @@ function extractFeatureFlags($, bodyText, links, h2Count, pageUrl, pageType, sem
     productLike: pageType === 'product',
     lowStructuredSections: countWords(bodyText) > 250 && h2Count < 2 && !hasLists && !hasTables
   };
+}
+
+function extractSemanticSourceLinks($, pageUrl) {
+  const output = new Map();
+  $('main a[href], article a[href]').each((_, element) => {
+    if (!isStaticallyVisible($, element) || $(element).closest('nav,footer,[role="navigation"],[role="contentinfo"]').length) return;
+    const targetUrl = normalizeUrl($(element).attr('href'), pageUrl);
+    if (!targetUrl || isInternalUrl(targetUrl, pageUrl)) return;
+    const anchorText = cleanText($(element).text());
+    const semanticRegion = $(element).closest('[class*="source" i],[id*="source" i],[class*="reference" i],[id*="reference" i],[class*="citation" i],[id*="citation" i],[class*="bibliograph" i],[id*="bibliograph" i],[class*="footnote" i],[id*="footnote" i]');
+    const explicitLabel = /\b(source|sources|quelle|quellen|reference|references|referenz|referenzen|citation|citations|study|studie|report|doi|research|whitepaper|literatur|bibliografie|paper)\b/i.test(`${anchorText} ${targetUrl}`);
+    if (!semanticRegion.length && !explicitLabel) return;
+    output.set(targetUrl, { targetUrl, anchorText, context: semanticRegion.length ? 'semantic_source_region' : 'explicit_source_label' });
+  });
+  return [...output.values()];
 }
 
 function extractSearchSignals($, bodyText, htmlSample) {
@@ -552,6 +602,19 @@ function visibleSelectorTexts($, selector) {
     .filter(Boolean);
 }
 
+function visibleSelectorTextsWithImageAlt($, selector) {
+  return $(selector)
+    .filter((_, element) => isStaticallyVisible($, element))
+    .map((_, element) => {
+      const node = $(element);
+      const text = cleanText(node.text());
+      if (text) return text;
+      return cleanText(node.find('img[alt]').map((__, image) => $(image).attr('alt') || '').get().join(' '));
+    })
+    .get()
+    .filter(Boolean);
+}
+
 function isStaticallyVisible($, element) {
   const node = $(element);
   if (node.is('[hidden], [aria-hidden="true"]')) return false;
@@ -563,7 +626,9 @@ function isStaticallyVisible($, element) {
 function hasDatePattern(text) {
   return /\b(20\d{2}|19\d{2})[-/.](0?[1-9]|1[0-2])[-/.](0?[1-9]|[12]\d|3[01])\b/.test(text) ||
     /\b(0?[1-9]|[12]\d|3[01])\.\s?(0?[1-9]|1[0-2])\.\s?(20\d{2}|19\d{2})\b/.test(text) ||
-    /\b(january|february|march|april|may|june|july|august|september|october|november|december|januar|februar|maerz|märz|april|mai|juni|juli|august|september|oktober|november|dezember)\s+\d{1,2},?\s+(20\d{2}|19\d{2})\b/i.test(text);
+    /\b(january|february|march|april|may|june|july|august|september|october|november|december|januar|februar|maerz|märz|april|mai|juni|juli|august|september|oktober|november|dezember)\s+\d{1,2},?\s+(20\d{2}|19\d{2})\b/i.test(text) ||
+    /\b(0?[1-9]|[12]\d|3[01])\.?\s+(january|february|march|april|may|june|july|august|september|october|november|december|januar|februar|maerz|märz|april|mai|juni|juli|august|september|oktober|november|dezember)\s+(20\d{2}|19\d{2})\b/i.test(text) ||
+    /\b(january|february|march|april|may|june|july|august|september|october|november|december|januar|februar|maerz|märz|april|mai|juni|juli|august|september|oktober|november|dezember)\s+(20\d{2}|19\d{2})\b/i.test(text);
 }
 
 export function domainFromUrl(url) {

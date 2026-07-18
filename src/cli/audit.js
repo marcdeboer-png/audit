@@ -42,6 +42,12 @@ program
   .option('--lighthouseCategories <categories>', 'Comma-separated Lighthouse categories', 'performance,accessibility,best-practices,seo')
   .option('--lighthouseTimeoutMs <number>', 'Lighthouse timeout in milliseconds', '60000')
   .option('--playwrightTimeoutMs <number>', 'Playwright sampling timeout in milliseconds', '30000')
+  .option('--renderSettlingMaxMs <number>', 'Maximum bounded DOM settling duration in milliseconds', String(crawlerDefaults.renderSettlingMaxMs))
+  .option('--renderSettlingIntervalMs <number>', 'DOM snapshot interval in milliseconds', String(crawlerDefaults.renderSettlingIntervalMs))
+  .option('--renderSettlingMaxSnapshots <number>', 'Maximum semantic DOM snapshots', String(crawlerDefaults.renderSettlingMaxSnapshots))
+  .option('--renderSettlingStableSnapshots <number>', 'Consecutive equal semantic snapshots required', String(crawlerDefaults.renderSettlingStableSnapshots))
+  .option('--renderSettlingMinimumObservationMs <number>', 'Minimum observation time before settling', String(crawlerDefaults.renderSettlingMinimumObservationMs))
+  .option('--maxConcurrentRenderedPages <number>', 'Maximum concurrent Playwright page renderings', String(crawlerDefaults.maxConcurrentRenderedPages))
   .option('--collectScreenshots <boolean>', 'Store Playwright sample screenshots', 'false')
   .option('--sampleOnlyIndexable <boolean>', 'Sample only indexable pages from template clusters', 'true')
   .option('--usePlaywright <boolean>', 'Enable Playwright rendering', 'false')
@@ -97,6 +103,12 @@ const { runId } = await startAudit({
   lighthouseCategories: options.lighthouseCategories,
   lighthouseTimeoutMs: Number(options.lighthouseTimeoutMs),
   playwrightTimeoutMs: Number(options.playwrightTimeoutMs),
+  renderSettlingMaxMs: Number(options.renderSettlingMaxMs),
+  renderSettlingIntervalMs: Number(options.renderSettlingIntervalMs),
+  renderSettlingMaxSnapshots: Number(options.renderSettlingMaxSnapshots),
+  renderSettlingStableSnapshots: Number(options.renderSettlingStableSnapshots),
+  renderSettlingMinimumObservationMs: Number(options.renderSettlingMinimumObservationMs),
+  maxConcurrentRenderedPages: Number(options.maxConcurrentRenderedPages),
   collectScreenshots: options.collectScreenshots === 'true',
   sampleOnlyIndexable: options.sampleOnlyIndexable !== 'false',
   usePlaywright: options.usePlaywright === 'true',

@@ -130,24 +130,24 @@ export function techChecks() {
     noindexPagesCheck(),
     nofollowPagesCheck(),
     canonicalMissing(),
-    pageStatusCheck('canonical_non_self', 'Crawling & Indexing', 'Canonical non-self', `${INDEXABLE_CONTENT_HTML_WHERE} AND canonical IS NOT NULL AND canonical <> normalizedUrl`, 'Warning', 'Low', INDEXABLE_CONTENT_HTML_WHERE),
+    effectiveCanonicalNonSelf(),
     canonicalOtherDomain(),
     canonicalTargetNon200(),
     internalLinksToStatus('internal_links_to_3xx', 'Internal links to 3xx', 'l.initialStatusCode >= 300 AND l.initialStatusCode < 400', 'Warning'),
     internalLinksToStatus('internal_links_to_4xx_5xx', 'Internal links to 4xx/5xx', 'COALESCE(l.finalStatusCode, p.statusCode) >= 400', 'Error', 'High'),
     orphanLikeSitemapUrls(),
-    contentMissingField('title_missing', 'HTML Head & Meta', 'Title missing', 'title', 'Error'),
-    contentLengthCheck('title_too_short', 'HTML Head & Meta', `Title too short < ${thresholds.titleTooShort}`, `titleLength < ${thresholds.titleTooShort} AND COALESCE(title, '') <> ''`, 'Warning', 'Low'),
-    contentLengthCheck('title_too_long', 'HTML Head & Meta', `Title too long > ${thresholds.titleTooLong}`, `titleLength > ${thresholds.titleTooLong}`, 'Warning', 'Low'),
-    duplicateContentField('duplicate_titles', 'HTML Head & Meta', 'Duplicate titles', 'title', 'Warning'),
-    contentMissingField('meta_description_missing', 'HTML Head & Meta', 'Meta description missing', 'metaDescription', 'Warning'),
-    contentLengthCheck('meta_description_too_short', 'HTML Head & Meta', `Meta description too short < ${thresholds.descriptionTooShort}`, `metaDescriptionLength < ${thresholds.descriptionTooShort} AND COALESCE(metaDescription, '') <> ''`, 'Warning', 'Low'),
-    contentLengthCheck('meta_description_too_long', 'HTML Head & Meta', `Meta description too long > ${thresholds.descriptionTooLong}`, `metaDescriptionLength > ${thresholds.descriptionTooLong}`, 'Warning', 'Low'),
-    duplicateContentField('duplicate_meta_descriptions', 'HTML Head & Meta', 'Duplicate meta descriptions', 'metaDescription', 'Warning', 'Low'),
-    pageStatusCheck('h1_missing', 'HTML Head & Meta', 'H1 missing', `${INDEXABLE_CONTENT_HTML_WHERE} AND h1Count = 0 AND NOT (renderStatus = 'success' AND renderedH1Count > 0)`, 'Error', 'Medium', INDEXABLE_CONTENT_HTML_WHERE),
-    pageStatusCheck('multiple_h1', 'HTML Head & Meta', 'Multiple H1', `${HTML_WHERE} AND h1Count > 1`, 'Warning'),
+    effectiveMetadataMissing('title_missing', 'HTML Head & Meta', 'Title missing', 'title', 'effectiveTitle', 'Error'),
+    effectiveMetadataLength('title_too_short', 'HTML Head & Meta', `Title too short < ${thresholds.titleTooShort}`, 'title', 'effectiveTitle', '<', thresholds.titleTooShort, 'Warning', 'Low'),
+    effectiveMetadataLength('title_too_long', 'HTML Head & Meta', `Title too long > ${thresholds.titleTooLong}`, 'title', 'effectiveTitle', '>', thresholds.titleTooLong, 'Warning', 'Low'),
+    effectiveDuplicateMetadata('duplicate_titles', 'HTML Head & Meta', 'Duplicate titles', 'title', 'effectiveTitle', 'Warning'),
+    effectiveMetadataMissing('meta_description_missing', 'HTML Head & Meta', 'Meta description missing', 'metaDescription', 'effectiveMetaDescription', 'Warning'),
+    effectiveMetadataLength('meta_description_too_short', 'HTML Head & Meta', `Meta description too short < ${thresholds.descriptionTooShort}`, 'metaDescription', 'effectiveMetaDescription', '<', thresholds.descriptionTooShort, 'Warning', 'Low'),
+    effectiveMetadataLength('meta_description_too_long', 'HTML Head & Meta', `Meta description too long > ${thresholds.descriptionTooLong}`, 'metaDescription', 'effectiveMetaDescription', '>', thresholds.descriptionTooLong, 'Warning', 'Low'),
+    effectiveDuplicateMetadata('duplicate_meta_descriptions', 'HTML Head & Meta', 'Duplicate meta descriptions', 'metaDescription', 'effectiveMetaDescription', 'Warning', 'Low'),
+    effectiveH1Missing(),
+    effectiveMultipleH1(),
     htmlSemanticsSummary(),
-    missingField('html_lang_missing', 'HTML Head & Meta', 'HTML lang missing', 'htmlLang', 'Warning'),
+    effectiveMetadataMissing('html_lang_missing', 'HTML Head & Meta', 'HTML lang missing', 'htmlLang', 'effectiveHtmlLang', 'Warning', 'Medium', SUCCESSFUL_HTML_WHERE),
     missingField('viewport_missing', 'HTML Head & Meta', 'Viewport missing', 'viewport', 'Warning'),
     openGraphMissing(),
     faviconMissing(),
@@ -942,7 +942,7 @@ function lengthCheck(id, category, name, where, status = 'Warning', priority = '
 }
 
 function canonicalMissing() {
-  return pageStatusCheck('canonical_missing', 'Crawling & Indexing', 'Canonical missing', `${INDEXABLE_CONTENT_HTML_WHERE} AND (canonical IS NULL OR canonical = '')`, 'Warning');
+  return effectiveMetadataMissing('canonical_missing', 'Crawling & Indexing', 'Canonical missing', 'canonical', 'effectiveCanonical', 'Warning');
 }
 
 function contentMissingField(id, category, name, field, status = 'Warning', priority = 'Medium') {
@@ -1011,6 +1011,137 @@ function duplicateContentField(id, category, name, field, status = 'Warning', pr
   }, { priority });
 }
 
+function effectiveMetadataMissing(id, category, name, legacyField, effectiveField, status = 'Warning', priority = 'Medium', scope = INDEXABLE_CONTENT_HTML_WHERE) {
+  return tech(id, category, name, function run(ctx) {
+    const total = count(ctx.db, `SELECT COUNT(*) AS count FROM pages WHERE runId = ? AND ${scope}`, [ctx.run.id]);
+    if (!total) return availabilityResult(this, 'not_applicable', {
+      finding: `${name}: no eligible HTML page is in scope.`,
+      evidence: { eligiblePages: 0 },
+      requirements: { requiredFacts: ['successfulHtmlExtraction'], missingFacts: [], minimumCoverage: 1, canCollectWithTargetedRun: true }
+    });
+    const currentModelRows = count(ctx.db, `SELECT COUNT(*) AS count FROM pages WHERE runId = ? AND ${scope} AND rawDocumentStateJson IS NOT NULL`, [ctx.run.id]);
+    const incomplete = currentModelRows ? count(ctx.db, `SELECT COUNT(*) AS count FROM pages WHERE runId = ? AND ${scope} AND rawDocumentStateJson IS NOT NULL AND COALESCE(metadataProvenanceComplete, 0) = 0`, [ctx.run.id]) : 0;
+    const valueSql = currentModelRows ? effectiveField : legacyField;
+    const completenessSql = currentModelRows ? 'AND COALESCE(metadataProvenanceComplete, 0) = 1' : '';
+    const where = `${scope} ${completenessSql} AND (${valueSql} IS NULL OR TRIM(${valueSql}) = '')`;
+    const affectedCount = count(ctx.db, `SELECT COUNT(*) AS count FROM pages WHERE runId = ? AND ${where}`, [ctx.run.id]);
+    const rows = all(ctx.db, `SELECT url, ${legacyField} AS rawValue, ${effectiveField} AS effectiveValue, renderStatus, settlingStatus, effectiveDocumentStateJson FROM pages WHERE runId = ? AND ${where} ORDER BY id LIMIT 10`, [ctx.run.id]);
+    if (!affectedCount && incomplete) return availabilityResult(this, 'insufficient_evidence', {
+      finding: `${name}: ${incomplete}/${total} eligible page(s) have no stable effective document state.`,
+      evidence: { eligiblePages: total, incompleteEffectiveStates: incomplete, field: legacyField },
+      requirements: { requiredFacts: ['rawDocumentState', 'stableRenderedDocumentStateWhenExecuted'], missingFacts: ['stableEffectiveDocumentState'], minimumCoverage: 1, canCollectWithTargetedRun: true }
+    });
+    return makeResult(this, affectedCount ? status : 'OK', {
+      priority,
+      affectedCount,
+      sampleUrls: rows.map((row) => row.url),
+      finding: affectedCount ? `${affectedCount} eligible page(s) have no effective ${legacyField} value.` : `All ${total} eligible page(s) have an effective ${legacyField} value.`,
+      recommendation: `Add a stable ${legacyField} value to the effective document head for affected pages.`,
+      evidence: { field: legacyField, eligiblePages: total, evaluatedPages: total - incomplete, incompleteEffectiveStates: incomplete, samples: rows.map((row) => ({ url: row.url, rawValue: row.rawValue, effectiveValue: row.effectiveValue, renderStatus: row.renderStatus, settlingStatus: row.settlingStatus })) },
+      facts: { sourceModel: currentModelRows ? 'effective_document_state' : 'legacy_raw_html', affectedCount, incomplete },
+      requirements: { requiredFacts: ['successfulHtmlExtraction', 'effectiveDocumentState'], optionalFacts: ['rawRenderedDelta'], missingFacts: incomplete ? ['stableEffectiveDocumentState'] : [], minimumCoverage: 1, canCollectWithTargetedRun: true },
+      limitations: incomplete ? 'Some rendered pages were excluded because the bounded settling policy did not produce a stable state.' : ''
+    });
+  }, { priority });
+}
+
+function effectiveDuplicateMetadata(id, category, name, legacyField, effectiveField, status = 'Warning', priority = 'Medium') {
+  return tech(id, category, name, function run(ctx) {
+    const total = count(ctx.db, `SELECT COUNT(*) AS count FROM pages WHERE runId = ? AND ${INDEXABLE_CONTENT_HTML_WHERE}`, [ctx.run.id]);
+    const currentModelRows = count(ctx.db, `SELECT COUNT(*) AS count FROM pages WHERE runId = ? AND ${INDEXABLE_CONTENT_HTML_WHERE} AND rawDocumentStateJson IS NOT NULL`, [ctx.run.id]);
+    const incomplete = currentModelRows ? count(ctx.db, `SELECT COUNT(*) AS count FROM pages WHERE runId = ? AND ${INDEXABLE_CONTENT_HTML_WHERE} AND COALESCE(metadataProvenanceComplete, 0) = 0`, [ctx.run.id]) : 0;
+    const field = currentModelRows ? effectiveField : legacyField;
+    const complete = currentModelRows ? 'AND COALESCE(metadataProvenanceComplete, 0) = 1' : '';
+    const allGroups = all(ctx.db, `
+      SELECT ${field} AS value, COUNT(*) AS count
+      FROM pages
+      WHERE runId = ? AND ${INDEXABLE_CONTENT_HTML_WHERE} ${complete} AND ${field} IS NOT NULL AND TRIM(${field}) <> ''
+      GROUP BY LOWER(TRIM(${field})) HAVING COUNT(*) > 1 ORDER BY count DESC
+    `, [ctx.run.id]);
+    if (!allGroups.length && incomplete) return availabilityResult(this, 'insufficient_evidence', {
+      finding: `${name}: duplicate absence cannot be established because ${incomplete}/${total} effective state(s) are incomplete.`,
+      evidence: { eligiblePages: total, incompleteEffectiveStates: incomplete, field: legacyField },
+      requirements: { requiredFacts: ['completeEffectiveMetadataCoverage'], missingFacts: ['stableEffectiveDocumentState'], minimumCoverage: 1, canCollectWithTargetedRun: true }
+    });
+    const groups = allGroups.slice(0, 10);
+    const affectedCount = allGroups.reduce((sum, group) => sum + Number(group.count || 0), 0);
+    const family = legacyField === 'title' ? 'html_meta.duplicate_title' : 'html_meta.duplicate_description';
+    return makeResult(this, affectedCount ? status : 'OK', {
+      priority,
+      affectedCount,
+      occurrenceCount: affectedCount,
+      affectedUrlCount: affectedCount,
+      displayedSampleCount: groups.length,
+      rootCauseFamily: family,
+      scopeType: 'url',
+      finding: affectedCount ? `${affectedCount} indexable content URLs share duplicate effective ${legacyField} values.` : `No duplicate effective ${legacyField} values found.`,
+      recommendation: `Make effective ${legacyField} values unique where pages target different intents.`,
+      evidence: { sourceModel: currentModelRows ? 'effective_document_state' : 'legacy_raw_html', totalAffected: affectedCount, totalGroups: allGroups.length, displayedSamples: groups.length, incompleteEffectiveStates: incomplete, duplicateGroups: groups }
+    });
+  }, { priority });
+}
+
+function effectiveMetadataLength(id, category, name, legacyField, effectiveField, operator, threshold, status = 'Warning', priority = 'Low') {
+  return tech(id, category, name, function run(ctx) {
+    const current = count(ctx.db, `SELECT COUNT(*) AS count FROM pages WHERE runId = ? AND ${INDEXABLE_CONTENT_HTML_WHERE} AND rawDocumentStateJson IS NOT NULL`, [ctx.run.id]);
+    const field = current ? effectiveField : legacyField;
+    const incomplete = current ? count(ctx.db, `SELECT COUNT(*) AS count FROM pages WHERE runId = ? AND ${INDEXABLE_CONTENT_HTML_WHERE} AND COALESCE(metadataProvenanceComplete, 0) = 0`, [ctx.run.id]) : 0;
+    const complete = current ? 'AND COALESCE(metadataProvenanceComplete, 0) = 1' : '';
+    const where = `${INDEXABLE_CONTENT_HTML_WHERE} ${complete} AND COALESCE(${field}, '') <> '' AND LENGTH(${field}) ${operator} ?`;
+    const affectedCount = count(ctx.db, `SELECT COUNT(*) AS count FROM pages WHERE runId = ? AND ${where}`, [ctx.run.id, threshold]);
+    const rows = all(ctx.db, `SELECT url, ${legacyField} AS rawValue, ${effectiveField} AS effectiveValue, LENGTH(${field}) AS effectiveLength, renderStatus, settlingStatus FROM pages WHERE runId = ? AND ${where} LIMIT 10`, [ctx.run.id, threshold]);
+    if (!affectedCount && incomplete) return availabilityResult(this, 'insufficient_evidence', { finding: `${name}: ${incomplete} effective state(s) are incomplete.`, evidence: { incompleteEffectiveStates: incomplete, threshold, operator }, requirements: { requiredFacts: ['effectiveMetadataValue'], missingFacts: ['stableEffectiveDocumentState'], minimumCoverage: 1, canCollectWithTargetedRun: true } });
+    return makeResult(this, affectedCount ? status : 'OK', { priority, affectedCount, sampleUrls: rows.map((row) => row.url), finding: affectedCount ? `${affectedCount} effective ${legacyField} value(s) match the length condition.` : `No effective ${legacyField} value matches the length condition.`, recommendation: `Review ${legacyField} length for affected pages without changing valid intent-specific values mechanically.`, evidence: { sourceModel: current ? 'effective_document_state' : 'legacy_raw_html', threshold, operator, incomplete, samples: rows } });
+  }, { priority });
+}
+
+function effectiveCanonicalNonSelf() {
+  return tech('canonical_non_self', 'Crawling & Indexing', 'Canonical non-self', function run(ctx) {
+    const eligible = count(ctx.db, `SELECT COUNT(*) AS count FROM pages WHERE runId = ? AND ${INDEXABLE_CONTENT_HTML_WHERE}`, [ctx.run.id]);
+    if (!eligible) return availabilityResult(this, 'not_applicable', { finding: 'Canonical non-self: no eligible successful indexable HTML page is in scope.', evidence: { eligiblePages: 0 }, requirements: { requiredFacts: ['eligibleSuccessfulHtmlPage'], missingFacts: [], minimumCoverage: 1, canCollectWithTargetedRun: true } });
+    const current = count(ctx.db, `SELECT COUNT(*) AS count FROM pages WHERE runId = ? AND ${INDEXABLE_CONTENT_HTML_WHERE} AND rawDocumentStateJson IS NOT NULL`, [ctx.run.id]);
+    const field = current ? 'effectiveCanonical' : 'canonical';
+    const complete = current ? 'AND COALESCE(metadataProvenanceComplete, 0) = 1' : '';
+    const incomplete = current ? count(ctx.db, `SELECT COUNT(*) AS count FROM pages WHERE runId = ? AND ${INDEXABLE_CONTENT_HTML_WHERE} AND COALESCE(metadataProvenanceComplete, 0) = 0`, [ctx.run.id]) : 0;
+    const where = `${INDEXABLE_CONTENT_HTML_WHERE} ${complete} AND ${field} IS NOT NULL AND ${field} <> normalizedUrl`;
+    const affectedCount = count(ctx.db, `SELECT COUNT(*) AS count FROM pages WHERE runId = ? AND ${where}`, [ctx.run.id]);
+    const rows = all(ctx.db, `SELECT url, normalizedUrl, canonical AS rawCanonical, effectiveCanonical, settlingStatus FROM pages WHERE runId = ? AND ${where} LIMIT 10`, [ctx.run.id]);
+    if (!affectedCount && incomplete) return availabilityResult(this, 'insufficient_evidence', { finding: `Canonical non-self: ${incomplete} page(s) lack a stable effective canonical state.`, evidence: { incomplete }, requirements: { requiredFacts: ['effectiveCanonical'], missingFacts: ['stableEffectiveDocumentState'], minimumCoverage: 1, canCollectWithTargetedRun: true } });
+    return makeResult(this, affectedCount ? 'Warning' : 'OK', { priority: 'Low', affectedCount, sampleUrls: rows.map((row) => row.url), finding: affectedCount ? `${affectedCount} effective canonical value(s) are not self-referential.` : 'No effective non-self canonical found.', recommendation: 'Confirm that each non-self canonical intentionally consolidates an equivalent page.', evidence: { fieldSource: current ? 'effective_document_state' : 'legacy_raw_html', incomplete, samples: rows } });
+  }, { priority: 'Low' });
+}
+
+function effectiveH1Missing() {
+  return tech('h1_missing', 'HTML Head & Meta', 'H1 missing', function run(ctx) {
+    const eligible = count(ctx.db, `SELECT COUNT(*) AS count FROM pages WHERE runId = ? AND ${INDEXABLE_CONTENT_HTML_WHERE}`, [ctx.run.id]);
+    if (!eligible) return availabilityResult(this, 'not_applicable', { finding: 'H1 missing: no eligible successful indexable HTML page is in scope.', evidence: { eligiblePages: 0 }, requirements: { requiredFacts: ['eligibleSuccessfulHtmlPage'], missingFacts: [], minimumCoverage: 1, canCollectWithTargetedRun: true } });
+    const current = count(ctx.db, `SELECT COUNT(*) AS count FROM pages WHERE runId = ? AND ${INDEXABLE_CONTENT_HTML_WHERE} AND rawDocumentStateJson IS NOT NULL`, [ctx.run.id]);
+    const field = current ? 'effectiveH1Count' : 'h1Count';
+    const complete = current ? 'AND COALESCE(metadataProvenanceComplete, 0) = 1' : '';
+    const incomplete = current ? count(ctx.db, `SELECT COUNT(*) AS count FROM pages WHERE runId = ? AND ${INDEXABLE_CONTENT_HTML_WHERE} AND COALESCE(metadataProvenanceComplete, 0) = 0`, [ctx.run.id]) : 0;
+    const legacyRenderedFallback = current ? '' : "AND NOT (renderStatus = 'success' AND renderedH1Count > 0)";
+    const where = `${INDEXABLE_CONTENT_HTML_WHERE} ${complete} AND COALESCE(${field}, 0) = 0 ${legacyRenderedFallback}`;
+    const affectedCount = count(ctx.db, `SELECT COUNT(*) AS count FROM pages WHERE runId = ? AND ${where}`, [ctx.run.id]);
+    const rows = all(ctx.db, `SELECT url, h1Count AS rawH1Count, effectiveH1Count, renderStatus, settlingStatus FROM pages WHERE runId = ? AND ${where} LIMIT 10`, [ctx.run.id]);
+    if (!affectedCount && incomplete) return availabilityResult(this, 'insufficient_evidence', { finding: `H1 missing: ${incomplete} page(s) lack a stable effective H1 state.`, evidence: { incomplete }, requirements: { requiredFacts: ['effectiveH1'], missingFacts: ['stableEffectiveDocumentState'], minimumCoverage: 1, canCollectWithTargetedRun: true } });
+    return makeResult(this, affectedCount ? 'Error' : 'OK', { priority: 'Medium', affectedCount, sampleUrls: rows.map((row) => row.url), finding: affectedCount ? `${affectedCount} effective document state(s) have no H1.` : 'All eligible effective document states include an H1.', recommendation: 'Provide a descriptive H1 in the stable effective DOM.', evidence: { sourceModel: current ? 'effective_document_state' : 'legacy_raw_html', incomplete, samples: rows } });
+  }, { priority: 'Medium' });
+}
+
+function effectiveMultipleH1() {
+  return tech('multiple_h1', 'HTML Head & Meta', 'Multiple H1', function run(ctx) {
+    const current = count(ctx.db, `SELECT COUNT(*) AS count FROM pages WHERE runId = ? AND ${SUCCESSFUL_HTML_WHERE} AND rawDocumentStateJson IS NOT NULL`, [ctx.run.id]);
+    const field = current ? 'effectiveH1Count' : 'h1Count';
+    const incomplete = current ? count(ctx.db, `SELECT COUNT(*) AS count FROM pages WHERE runId = ? AND ${SUCCESSFUL_HTML_WHERE} AND COALESCE(metadataProvenanceComplete, 0) = 0`, [ctx.run.id]) : 0;
+    const complete = current ? 'AND COALESCE(metadataProvenanceComplete, 0) = 1' : '';
+    const where = `${SUCCESSFUL_HTML_WHERE} ${complete} AND COALESCE(${field}, 0) > 1`;
+    const affectedCount = count(ctx.db, `SELECT COUNT(*) AS count FROM pages WHERE runId = ? AND ${where}`, [ctx.run.id]);
+    const rows = all(ctx.db, `SELECT url, h1Count AS rawH1Count, effectiveH1Count, renderStatus, settlingStatus FROM pages WHERE runId = ? AND ${where} LIMIT 10`, [ctx.run.id]);
+    if (!affectedCount && incomplete) return availabilityResult(this, 'insufficient_evidence', { finding: `Multiple H1: ${incomplete} effective state(s) are incomplete.`, evidence: { incomplete }, requirements: { requiredFacts: ['effectiveH1'], missingFacts: ['stableEffectiveDocumentState'], minimumCoverage: 1, canCollectWithTargetedRun: true } });
+    return makeResult(this, affectedCount ? 'Warning' : 'OK', { affectedCount, sampleUrls: rows.map((row) => row.url), finding: affectedCount ? `${affectedCount} effective document state(s) contain multiple H1 elements.` : 'No effective document state with multiple H1 elements found.', recommendation: 'Review heading semantics; multiple H1 elements are not automatically invalid when the document structure is intentional.', evidence: { sourceModel: current ? 'effective_document_state' : 'legacy_raw_html', incomplete, samples: rows } });
+  }, { priority: 'Medium' });
+}
+
 function duplicateValueHash(field, value) {
   const normalized = String(value || '').normalize('NFKC').trim().replace(/\s+/g, ' ').toLowerCase();
   return crypto.createHash('sha256').update(`${field}:${normalized}`).digest('hex').slice(0, 20);
@@ -1019,7 +1150,8 @@ function duplicateValueHash(field, value) {
 function openGraphMissing() {
   return tech('open_graph_basics_missing', 'HTML Head & Meta Opportunity', 'Open Graph metadata completeness', function run(ctx) {
     const rows = all(ctx.db, `
-      SELECT url, title, canonical, ogJson
+      SELECT url, title, canonical, ogJson, effectiveCanonical, effectiveOgJson,
+        rawDocumentStateJson, metadataProvenanceComplete, renderStatus, settlingStatus
       FROM pages
       WHERE runId = ? AND ${INDEXABLE_CONTENT_HTML_WHERE}
       ORDER BY id ASC
@@ -1045,17 +1177,26 @@ function openGraphMissing() {
       });
     }
     const required = ['og:title', 'og:description', 'og:image', 'og:url', 'og:type'];
-    const affected = rows
+    const currentModel = rows.some((row) => row.rawDocumentStateJson);
+    const incomplete = currentModel ? rows.filter((row) => !row.metadataProvenanceComplete) : [];
+    const evaluatedRows = currentModel ? rows.filter((row) => row.metadataProvenanceComplete) : rows;
+    const affected = evaluatedRows
       .map((row) => {
-        const og = safeJson(row.ogJson, {});
+        const og = safeJson(currentModel ? row.effectiveOgJson : row.ogJson, {});
+        const canonical = currentModel ? row.effectiveCanonical : row.canonical;
         const missingFields = required.filter((field) => !String(og[field] || '').trim());
         const consistencyWarnings = [];
-        if (og['og:url'] && row.canonical && normalizeComparableUrl(og['og:url']) !== normalizeComparableUrl(row.canonical)) {
+        if (og['og:url'] && canonical && normalizeComparableUrl(og['og:url']) !== normalizeComparableUrl(canonical)) {
           consistencyWarnings.push('og:url differs from canonical');
         }
         return { ...row, missingFields, consistencyWarnings };
       })
       .filter((row) => row.missingFields.length || row.consistencyWarnings.length);
+    if (!affected.length && incomplete.length) return availabilityResult(this, 'insufficient_evidence', {
+      finding: `Open Graph completeness cannot be established because ${incomplete.length}/${rows.length} rendered page state(s) did not settle.`,
+      evidence: { eligiblePages: rows.length, incompleteEffectiveStates: incomplete.length },
+      requirements: { requiredFacts: ['effectiveOpenGraphState'], missingFacts: ['stableEffectiveDocumentState'], minimumCoverage: 1, canCollectWithTargetedRun: true }
+    });
     const affectedCount = affected.length;
     const samples = affected.slice(0, 10).map((row) => row.url);
     return makeResult(this, affectedCount ? 'Warning' : 'OK', {
@@ -1065,8 +1206,8 @@ function openGraphMissing() {
         ? `${affectedCount} indexable content page(s) have incomplete Open Graph metadata or a basic consistency warning.`
         : 'Open Graph basics are present on checked indexable content pages.',
       recommendation: 'Treat Open Graph as a social/entity/snippet opportunity, not as a classic indexing blocker. Add og:title, og:description, og:image, og:url and og:type where sharing or reusable snippets matter.',
-      facts: { checkedPages: rows.length, requiredFields: required, affectedCount, affectedPages: affected.slice(0, 10).map((row) => ({ url: row.url, missingFields: row.missingFields, consistencyWarnings: row.consistencyWarnings })) },
-      evidence: { source: 'successfully extracted HTML head', extractor: 'open_graph_meta', runId: ctx.run.id, sampleUrls: samples },
+      facts: { checkedPages: evaluatedRows.length, incompleteEffectiveStates: incomplete.length, requiredFields: required, affectedCount, affectedPages: affected.slice(0, 10).map((row) => ({ url: row.url, missingFields: row.missingFields, consistencyWarnings: row.consistencyWarnings })) },
+      evidence: { source: currentModel ? 'effective document state' : 'legacy raw HTML head', extractor: 'open_graph_meta', runId: ctx.run.id, sampleUrls: samples },
       requirements: { requiredFacts: ['successfullyExtractedHtmlHead', 'relevantPageType', 'openGraphFieldObservations'], optionalFacts: ['sharingUseCase'], missingFacts: [], minimumCoverage: 1, canCollectWithTargetedRun: true },
       findingType: 'opportunity',
       confidence: affectedCount > 20 ? 'medium' : affectedCount ? 'low' : 'high',
@@ -1155,14 +1296,22 @@ function appIconsIncomplete() {
 function hreflangXDefaultMissing() {
   return tech('hreflang_x_default_missing', 'HTML Head & Meta', 'Hreflang x-default missing when hreflang exists', function run(ctx) {
     const rows = all(ctx.db, `
-      SELECT url, featureFlagsJson
+      SELECT url, featureFlagsJson, effectiveHreflangJson, rawDocumentStateJson, metadataProvenanceComplete
       FROM pages
-      WHERE runId = ? AND COALESCE(featureFlagsJson, '') LIKE '%hreflang%'
+      WHERE runId = ? AND ${SUCCESSFUL_HTML_WHERE}
       LIMIT 50
     `, [ctx.run.id]);
+    const currentModel = rows.some((row) => row.rawDocumentStateJson);
+    const incomplete = currentModel ? rows.filter((row) => !row.metadataProvenanceComplete) : [];
     const hreflangRows = rows.filter((row) => {
+      if (currentModel) return row.metadataProvenanceComplete && safeJson(row.effectiveHreflangJson, []).length > 0;
       const flags = safeJson(row.featureFlagsJson, {});
       return Number(flags.hreflangCount || 0) > 0 || (flags.hreflangLanguages || []).length > 0;
+    });
+    if (!hreflangRows.length && incomplete.length) return availabilityResult(this, 'insufficient_evidence', {
+      finding: `Hreflang x-default cannot be evaluated because ${incomplete.length} effective head state(s) are incomplete.`,
+      evidence: { incompleteEffectiveStates: incomplete.length },
+      requirements: { requiredFacts: ['effectiveHreflangState'], missingFacts: ['stableEffectiveDocumentState'], minimumCoverage: 1, canCollectWithTargetedRun: true }
     });
     if (!hreflangRows.length) {
       return availabilityResult(this, 'not_applicable', {
@@ -1179,7 +1328,9 @@ function hreflangXDefaultMissing() {
         limitations: 'International targeting cannot be evaluated without hreflang clusters, return links and market intent.'
       });
     }
-    const missing = hreflangRows.filter((row) => !safeJson(row.featureFlagsJson, {}).hasHreflangXDefault);
+    const missing = hreflangRows.filter((row) => currentModel
+      ? !safeJson(row.effectiveHreflangJson, []).some((item) => String(item.hreflang || '').toLowerCase() === 'x-default')
+      : !safeJson(row.featureFlagsJson, {}).hasHreflangXDefault);
     return makeResult(this, missing.length ? 'Warning' : 'OK', {
       affectedCount: missing.length,
       sampleUrls: missing.slice(0, 10).map((row) => row.url),
@@ -1269,11 +1420,19 @@ function consentTechnicalSignals() {
 function canonicalOtherDomain() {
   return tech('canonical_to_other_domain', 'Crawling & Indexing', 'Canonical to other domain', function run(ctx) {
     const host = new URL(ctx.project.finalDomain).hostname.replace(/^www\./, '');
-    const where = `${HTML_WHERE} AND canonical IS NOT NULL AND canonical <> '' AND
-      canonical NOT LIKE 'https://${host}%' AND canonical NOT LIKE 'http://${host}%' AND
-      canonical NOT LIKE 'https://www.${host}%' AND canonical NOT LIKE 'http://www.${host}%'`;
+    const current = count(ctx.db, `SELECT COUNT(*) AS count FROM pages WHERE runId = ? AND ${HTML_WHERE} AND rawDocumentStateJson IS NOT NULL`, [ctx.run.id]);
+    const canonicalField = current ? 'effectiveCanonical' : 'canonical';
+    const where = `${HTML_WHERE} ${current ? 'AND COALESCE(metadataProvenanceComplete, 0) = 1' : ''} AND ${canonicalField} IS NOT NULL AND ${canonicalField} <> '' AND
+      ${canonicalField} NOT LIKE 'https://${host}%' AND ${canonicalField} NOT LIKE 'http://${host}%' AND
+      ${canonicalField} NOT LIKE 'https://www.${host}%' AND ${canonicalField} NOT LIKE 'http://www.${host}%'`;
     const affectedCount = count(ctx.db, `SELECT COUNT(*) AS count FROM pages WHERE runId = ? AND (${where})`, [ctx.run.id]);
     const samples = affectedCount ? sampleUrls(ctx.db, ctx.run.id, where) : [];
+    const incomplete = current ? count(ctx.db, `SELECT COUNT(*) AS count FROM pages WHERE runId = ? AND ${HTML_WHERE} AND COALESCE(metadataProvenanceComplete, 0) = 0`, [ctx.run.id]) : 0;
+    if (!affectedCount && incomplete) return availabilityResult(this, 'insufficient_evidence', {
+      finding: `Canonical to other domain: ${incomplete} page(s) lack a stable effective canonical state.`,
+      evidence: { incompleteEffectiveStates: incomplete, acceptedHost: host },
+      requirements: { requiredFacts: ['effectiveCanonical'], missingFacts: ['stableEffectiveDocumentState'], minimumCoverage: 1, canCollectWithTargetedRun: true }
+    });
     return makeResult(this, affectedCount ? 'Warning' : 'OK', {
       affectedCount,
       sampleUrls: samples,
@@ -1286,20 +1445,28 @@ function canonicalOtherDomain() {
 
 function canonicalTargetNon200() {
   return tech('canonical_target_non_200', 'Crawling & Indexing', 'Canonical target non-200 if known', function run(ctx) {
+    const current = count(ctx.db, `SELECT COUNT(*) AS count FROM pages WHERE runId = ? AND ${HTML_WHERE} AND rawDocumentStateJson IS NOT NULL`, [ctx.run.id]);
+    const canonicalField = current ? 'effectiveCanonical' : 'canonical';
     const rows = all(ctx.db, `
-      SELECT source.url, source.canonical, target.statusCode
+      SELECT source.url, source.${canonicalField} AS canonical, target.statusCode
       FROM pages source
-      JOIN pages target ON target.runId = source.runId AND target.normalizedUrl = source.canonical
-      WHERE source.runId = ? AND source.canonical IS NOT NULL AND COALESCE(target.statusCode, 0) <> 200
+      JOIN pages target ON target.runId = source.runId AND target.normalizedUrl = source.${canonicalField}
+      WHERE source.runId = ? ${current ? 'AND COALESCE(source.metadataProvenanceComplete, 0) = 1' : ''} AND source.${canonicalField} IS NOT NULL AND COALESCE(target.statusCode, 0) <> 200
       ORDER BY source.id
       LIMIT 10
     `, [ctx.run.id]);
     const affectedCount = count(ctx.db, `
       SELECT COUNT(*) AS count
       FROM pages source
-      JOIN pages target ON target.runId = source.runId AND target.normalizedUrl = source.canonical
-      WHERE source.runId = ? AND source.canonical IS NOT NULL AND COALESCE(target.statusCode, 0) <> 200
+        JOIN pages target ON target.runId = source.runId AND target.normalizedUrl = source.${canonicalField}
+        WHERE source.runId = ? ${current ? 'AND COALESCE(source.metadataProvenanceComplete, 0) = 1' : ''} AND source.${canonicalField} IS NOT NULL AND COALESCE(target.statusCode, 0) <> 200
     `, [ctx.run.id]);
+    const incomplete = current ? count(ctx.db, `SELECT COUNT(*) AS count FROM pages WHERE runId = ? AND ${HTML_WHERE} AND COALESCE(metadataProvenanceComplete, 0) = 0`, [ctx.run.id]) : 0;
+    if (!affectedCount && incomplete) return availabilityResult(this, 'insufficient_evidence', {
+      finding: `Canonical target status: ${incomplete} page(s) lack a stable effective canonical state.`,
+      evidence: { incompleteEffectiveStates: incomplete },
+      requirements: { requiredFacts: ['effectiveCanonical', 'knownCanonicalTargetStatus'], missingFacts: ['stableEffectiveDocumentState'], minimumCoverage: 1, canCollectWithTargetedRun: true }
+    });
     return makeResult(this, affectedCount ? 'Warning' : 'OK', {
       affectedCount,
       sampleUrls: rows.map((row) => row.url),
@@ -1774,7 +1941,9 @@ function criticalContentRawHtmlSignal() {
       evidence: { sampledPages: rows.length, normalizedTextRows, normalization: VISIBLE_TEXT_NORMALIZATION_VERSION },
       requirements: { requiredFacts: ['rawVisibleText', 'visibleTextProvenance'], optionalFacts: ['renderedVisibleText'], missingFacts: ['visibleTextProvenance'], minimumCoverage: 1, canCollectWithTargetedRun: true }
     });
-    const renderedRows = rows.filter((row) => row.wordCountRendered !== null || row.renderedH1Count !== null || row.renderedLinksCount !== null);
+    const stableRows = all(ctx.db, `SELECT url FROM pages WHERE runId = ? AND ${HTML_WHERE} AND renderStatus = 'success' AND settlingStatus IN ('settled','content_remained_empty')`, [ctx.run.id]);
+    const stableUrls = new Set(stableRows.map((row) => row.url));
+    const renderedRows = rows.filter((row) => stableUrls.has(row.url));
     const jsDependentRows = renderedRows.filter((row) =>
       (Number(row.h1Count || 0) === 0 && Number(row.renderedH1Count || 0) > 0) ||
       (Number(row.wordCountRaw || 0) < 100 && Number(row.wordCountRendered || 0) > Number(row.wordCountRaw || 0) * 2 && Number(row.wordCountRendered || 0) > 200) ||
@@ -1825,35 +1994,70 @@ function consoleErrorsPresent() {
       evidence: { usePlaywright: false },
       requirements: { requiredFacts: ['successfulBrowserNavigation', 'consoleErrorEvents'], missingFacts: ['consoleErrorEvents'], minimumCoverage: 1, canCollectWithTargetedRun: true }
     });
-    const successfulNavigation = count(ctx.db, "SELECT COUNT(*) AS count FROM pages WHERE runId = ? AND renderStatus = 'success'", [ctx.run.id]);
+    const currentModel = count(ctx.db, 'SELECT COUNT(*) AS count FROM pages WHERE runId = ? AND renderProvenanceVersion IS NOT NULL', [ctx.run.id]);
+    const successWhere = currentModel
+      ? "renderStatus = 'success' AND settlingStatus IN ('settled','content_remained_empty')"
+      : "renderStatus = 'success'";
+    const successfulNavigation = count(ctx.db, `SELECT COUNT(*) AS count FROM pages WHERE runId = ? AND ${successWhere}`, [ctx.run.id]);
     const navigationErrors = count(ctx.db, 'SELECT COUNT(*) AS count FROM pages WHERE runId = ? AND navigationError IS NOT NULL', [ctx.run.id]);
     if (!successfulNavigation) return availabilityResult(this, navigationErrors ? 'technical_error' : 'insufficient_evidence', {
       finding: 'No successful browser navigation was available for console evaluation.',
       evidence: { successfulNavigation, navigationErrors, technicalErrorSource: navigationErrors ? 'browser_navigation' : null },
       requirements: { requiredFacts: ['successfulBrowserNavigation', 'consoleErrorEvents'], missingFacts: ['successfulBrowserNavigation'], minimumCoverage: 1, canCollectWithTargetedRun: true }
     });
-    const where = `renderStatus = 'success' AND consoleErrorsJson IS NOT NULL AND consoleErrorsJson <> '[]'`;
-    const rows = all(ctx.db, `SELECT url, consoleErrorsJson, pageErrorsJson, requestFailuresJson FROM pages WHERE runId = ? AND (${where}) LIMIT 10`, [ctx.run.id]);
-    return makeResult(this, rows.length ? 'Warning' : 'OK', {
-      affectedCount: count(ctx.db, `SELECT COUNT(*) AS count FROM pages WHERE runId = ? AND (${where})`, [ctx.run.id]),
+    const legacyWhere = `renderStatus = 'success' AND consoleErrorsJson IS NOT NULL AND consoleErrorsJson <> '[]'`;
+    const stableRows = currentModel ? all(ctx.db, `
+      SELECT url, consoleErrorsJson, pageErrorsJson, requestFailuresJson, browserEventsJson
+      FROM pages
+      WHERE runId = ? AND renderStatus = 'success' AND settlingStatus IN ('settled','content_remained_empty')
+      ORDER BY id
+    `, [ctx.run.id]) : all(ctx.db, `SELECT url, consoleErrorsJson, pageErrorsJson, requestFailuresJson, browserEventsJson FROM pages WHERE runId = ? AND (${legacyWhere}) ORDER BY id`, [ctx.run.id]);
+    const eventKey = (event) => `${event.type || ''}\n${event.message || ''}`;
+    const eventUrls = new Map();
+    if (currentModel) {
+      for (const row of stableRows) {
+        for (const event of safeJson(row.browserEventsJson, []).filter((item) => item.type === 'console_error')) {
+          const urls = eventUrls.get(eventKey(event)) || new Set();
+          urls.add(row.url);
+          eventUrls.set(eventKey(event), urls);
+        }
+      }
+    }
+    const isRelevantEvent = (event) => {
+      if (event.impact === 'content_unavailable' && ['pageerror', 'request_failed', 'response_5xx', 'service_worker_error'].includes(event.type)) return true;
+      return event.type === 'console_error' && (Number(event.count || 0) >= 2 || (eventUrls.get(eventKey(event))?.size || 0) >= 2);
+    };
+    const relevantEvents = (row) => currentModel
+      ? safeJson(row.browserEventsJson, []).filter(isRelevantEvent)
+      : safeJson(row.consoleErrorsJson, []);
+    const affectedRows = stableRows.filter((row) => relevantEvents(row).length > 0);
+    const impacted = currentModel ? affectedRows.filter((row) => relevantEvents(row).some((event) => event.impact === 'content_unavailable')) : [];
+    const nonReproducibleConsoleEvents = currentModel ? stableRows.reduce((sum, row) => sum + safeJson(row.browserEventsJson, []).filter((event) => event.type === 'console_error' && !isRelevantEvent(event)).length, 0) : 0;
+    const affectedCount = affectedRows.length;
+    const rows = affectedRows.slice(0, 10);
+    return makeResult(this, affectedCount ? 'Warning' : 'OK', {
+      affectedCount,
       sampleUrls: rows.map((row) => row.url),
-      finding: rows.length ? 'Console errors were captured during Playwright rendering.' : 'No console errors captured during rendering.',
-      recommendation: 'Review rendering errors that may affect indexable content or UX.',
+      priority: impacted.length ? 'Medium' : 'Low',
+      finding: affectedCount ? `${affectedCount} rendered page sample(s) produced reproducible console errors or a browser event with confirmed content impact.` : 'No reproducible or content-impacting browser error was captured during stable rendering.',
+      recommendation: impacted.length ? 'Fix the captured uncaught page error and verify that main content becomes available after rendering.' : 'Treat reproducible console-only messages as diagnostics and prioritize them only after confirming user or rendering impact.',
       evidence: {
         successfulNavigation,
         navigationErrorsExcluded: navigationErrors,
-        channels: ['console.error'],
-        samples: rows.map((row) => ({ url: row.url, consoleErrors: safeJson(row.consoleErrorsJson, []) }))
+        channels: impacted.length ? ['console.error', 'content_impacting_browser_event'] : ['console.error'],
+        sourceModel: currentModel ? 'phase_aware_browser_events' : 'legacy_console_channel',
+        nonReproducibleConsoleEventsExcluded: nonReproducibleConsoleEvents,
+        samples: rows.map((row) => ({ url: row.url, events: relevantEvents(row) }))
       },
-      requirements: { requiredFacts: ['successfulBrowserNavigation', 'consoleErrorEvents'], optionalFacts: ['pageerror', 'requestfailed'], missingFacts: [], minimumCoverage: 1, canCollectWithTargetedRun: true }
+      requirements: { requiredFacts: ['successfulBrowserNavigation', 'consoleErrorEvents'], optionalFacts: ['pageerror', 'request_failed'], missingFacts: [], minimumCoverage: 1, canCollectWithTargetedRun: true }
     });
-  });
+  }, { priority: 'Low' });
 }
 
 function renderedPageSignalCheck(id, name, condition, { minimumMeasurements = 1 } = {}) {
   return tech(id, 'JavaScript & Rendering', name, function run(ctx) {
-    const successful = count(ctx.db, `SELECT COUNT(*) AS count FROM pages WHERE runId = ? AND ${SUCCESSFUL_HTML_WHERE} AND renderStatus = 'success'`, [ctx.run.id]);
-    const normalizedSuccessful = count(ctx.db, `SELECT COUNT(*) AS count FROM pages WHERE runId = ? AND ${SUCCESSFUL_HTML_WHERE} AND renderStatus = 'success' AND ${VISIBLE_TEXT_FACTS_WHERE} AND textFactsJson LIKE '%"rendered_visible_text":{"length"%'`, [ctx.run.id]);
+    const successful = count(ctx.db, `SELECT COUNT(*) AS count FROM pages WHERE runId = ? AND ${SUCCESSFUL_HTML_WHERE} AND renderStatus = 'success' AND settlingStatus IN ('settled','content_remained_empty')`, [ctx.run.id]);
+    const normalizedSuccessful = count(ctx.db, `SELECT COUNT(*) AS count FROM pages WHERE runId = ? AND ${SUCCESSFUL_HTML_WHERE} AND renderStatus = 'success' AND settlingStatus IN ('settled','content_remained_empty') AND renderProvenanceVersion IS NOT NULL AND ${VISIBLE_TEXT_FACTS_WHERE} AND textFactsJson LIKE '%"rendered_visible_text":{"length"%'`, [ctx.run.id]);
     const navigationErrors = count(ctx.db, `SELECT COUNT(*) AS count FROM pages WHERE runId = ? AND navigationError IS NOT NULL`, [ctx.run.id]);
     if (!ctx.run.usePlaywright) {
       return availabilityResult(this, 'not_executed', {
@@ -1874,7 +2078,7 @@ function renderedPageSignalCheck(id, name, condition, { minimumMeasurements = 1 
       evidence: { successfulRenderedMeasurements: successful, normalizedComparableMeasurements: normalizedSuccessful, normalization: VISIBLE_TEXT_NORMALIZATION_VERSION },
       requirements: { requiredFacts: ['rawVisibleText', 'renderedVisibleText', 'sharedTextNormalization'], missingFacts: ['sharedTextNormalization'], minimumCoverage: minimumMeasurements, canCollectWithTargetedRun: true }
     });
-    const where = `${SUCCESSFUL_HTML_WHERE} AND renderStatus = 'success' AND ${condition}`;
+    const where = `${SUCCESSFUL_HTML_WHERE} AND renderStatus = 'success' AND settlingStatus IN ('settled','content_remained_empty') AND ${condition}`;
     const affectedCount = count(ctx.db, `SELECT COUNT(*) AS count FROM pages WHERE runId = ? AND (${where})`, [ctx.run.id]);
     const rows = all(ctx.db, `SELECT url, wordCountRaw, wordCountRendered, h1Count, renderedH1Count, internalLinksCount, renderedLinksCount FROM pages WHERE runId = ? AND (${where}) ORDER BY id ASC LIMIT 10`, [ctx.run.id]);
     return makeResult(this, affectedCount ? 'Warning' : 'OK', {
@@ -1889,12 +2093,75 @@ function renderedPageSignalCheck(id, name, condition, { minimumMeasurements = 1 
 }
 
 function jsDependentContentCheck() {
-  return renderedPageSignalCheck(
-    'js_dependent_content',
-    'Main content likely JS-dependent',
-    'wordCountRaw < 100 AND wordCountRendered > wordCountRaw * 2 AND wordCountRendered > 200',
-    { minimumMeasurements: 2 }
-  );
+  return tech('js_dependent_content', 'JavaScript & Rendering', 'Main content likely JS-dependent', function run(ctx) {
+    if (!ctx.run.usePlaywright) return availabilityResult(this, 'not_executed', {
+      finding: 'Main content JS dependency was not evaluated because browser rendering was disabled.',
+      evidence: { usePlaywright: false },
+      requirements: { requiredFacts: ['rawDocumentState', 'initialRenderedState', 'settledRenderedState'], missingFacts: ['renderedStates'], minimumCoverage: 2, canCollectWithTargetedRun: true }
+    });
+    const rows = all(ctx.db, `SELECT url, rawDocumentStateJson, initialRenderedStateJson, settledRenderedStateJson, renderStatus, settlingStatus, renderProvenanceJson FROM pages WHERE runId = ? AND ${SUCCESSFUL_HTML_WHERE} ORDER BY id`, [ctx.run.id]);
+    const stable = rows.filter((row) => row.renderStatus === 'success' && ['settled', 'content_remained_empty'].includes(row.settlingStatus) && row.rawDocumentStateJson && row.initialRenderedStateJson && row.settledRenderedStateJson);
+    const failed = rows.filter((row) => ['unstable', 'technical_error'].includes(row.renderStatus));
+    if (stable.length < 2) return availabilityResult(this, failed.length && !stable.length ? 'technical_error' : 'insufficient_evidence', {
+      finding: `Main content JS dependency: ${stable.length} stable three-state measurement(s); at least 2 are required.`,
+      evidence: { eligiblePages: rows.length, stableMeasurements: stable.length, unstableOrTechnical: failed.length },
+      requirements: { requiredFacts: ['rawDocumentState', 'initialRenderedState', 'settledRenderedState', 'stableSettling'], missingFacts: ['minimumStableRenderedMeasurements'], minimumCoverage: 2, canCollectWithTargetedRun: true }
+    });
+    const evaluated = stable.map((row) => {
+      const raw = safeJson(row.rawDocumentStateJson, {});
+      const initial = safeJson(row.initialRenderedStateJson, {});
+      const settled = safeJson(row.settledRenderedStateJson, {});
+      const comparableWords = (state) => state.documentReadiness?.mainContentPresent
+        ? Number(state.mainText?.wordCount || 0)
+        : Number(state.visibleText?.wordCount || 0);
+      const rawMain = comparableWords(raw);
+      const initialMain = comparableWords(initial);
+      const settledMain = comparableWords(settled);
+      const grewAfterInitial = settledMain >= Math.max(100, initialMain * 1.8) && settledMain - initialMain >= 50;
+      const contentDependency = rawMain < 50 && settledMain >= 100 && (grewAfterInitial || initialMain >= 100);
+      const headingDependency = !(raw.h1 || []).length && (settled.h1 || []).length > 0;
+      return {
+        url: row.url,
+        raw_visible_word_count: Number(raw.visibleText?.wordCount || 0),
+        initial_rendered_visible_word_count: Number(initial.visibleText?.wordCount || 0),
+        settled_rendered_visible_word_count: Number(settled.visibleText?.wordCount || 0),
+        raw_main_content_present: Number(raw.mainText?.wordCount || 0) > 0,
+        settled_main_content_present: Number(settled.mainText?.wordCount || 0) > 0,
+        content_growth_absolute: settledMain - rawMain,
+        content_growth_ratio: Number((settledMain / Math.max(1, rawMain)).toFixed(3)),
+        growth_after_initial_absolute: settledMain - initialMain,
+        growth_after_initial_ratio: Number((settledMain / Math.max(1, initialMain)).toFixed(3)),
+        settling_status: row.settlingStatus,
+        rawMain,
+        initialMain,
+        settledMain,
+        rawH1Count: raw.h1?.length || 0,
+        initialH1Count: initial.h1?.length || 0,
+        settledH1Count: settled.h1?.length || 0,
+        grewAfterInitial,
+        dependencySignals: [contentDependency && 'critical_content_absent_raw', headingDependency && 'primary_heading_absent_raw'].filter(Boolean),
+        evidenceSufficient: rawMain >= 50 || settledMain >= 100 || headingDependency,
+        affected: contentDependency || headingDependency
+      };
+    });
+    const conclusive = evaluated.filter((row) => row.evidenceSufficient);
+    if (conclusive.length < 2) return availabilityResult(this, 'insufficient_evidence', {
+      finding: `Main content JS dependency: only ${conclusive.length}/${stable.length} stable measurement(s) contain enough raw or rendered content for a conclusion.`,
+      evidence: { stableMeasurements: stable.length, conclusiveMeasurements: conclusive.length, contentRemainedEmptyOrThin: stable.length - conclusive.length, samples: evaluated.slice(0, 10) },
+      requirements: { requiredFacts: ['rawDocumentState', 'initialRenderedState', 'settledRenderedState', 'stableSettling', 'sufficientComparableContent'], missingFacts: ['minimumConclusiveRenderedMeasurements'], minimumCoverage: 2, canCollectWithTargetedRun: true }
+    });
+    const affected = conclusive.filter((row) => row.affected);
+    return makeResult(this, affected.length ? 'Warning' : 'OK', {
+      priority: 'Medium',
+      affectedCount: affected.length,
+      sampleUrls: affected.map((row) => row.url),
+      finding: affected.length ? `${affected.length} stable rendered page(s) contain critical main content absent from raw HTML.` : `No critical JS dependency was confirmed across ${conclusive.length} conclusive stable three-state measurements.`,
+      recommendation: 'Ensure critical main content and primary headings are present in raw HTML or reliably server-rendered; do not infer safety from an early browser snapshot.',
+      evidence: { requiredStates: ['raw', 'initial_rendered', 'settled_rendered'], stableMeasurements: stable.length, conclusiveMeasurements: conclusive.length, excludedUnstableOrTechnical: failed.length, samples: (affected.length ? affected : conclusive).slice(0, 10) },
+      requirements: { requiredFacts: ['rawDocumentState', 'initialRenderedState', 'settledRenderedState', 'stableSettling'], optionalFacts: ['mainRegion'], missingFacts: [], minimumCoverage: 2, canCollectWithTargetedRun: true },
+      limitations: 'The check detects critical main-content dependence from a bounded rendered sample; it does not claim that every JavaScript enhancement is an SEO problem.'
+    });
+  }, { priority: 'Medium', effort: 'M' });
 }
 
 function templateLowLighthousePerformance() {
@@ -2022,7 +2289,7 @@ function templateConsoleErrors() {
     `, [ctx.run.id]);
     if (channelAwareSuccesses < data.playwrightSuccessCount) return availabilityResult(this, 'insufficient_evidence', {
       finding: `${channelAwareSuccesses}/${data.playwrightSuccessCount} successful Playwright sample(s) preserve separated console/page/request channels.`,
-      evidence: { ...data, channelAwareSuccesses, channels: ['console.error', 'pageerror', 'requestfailed', 'csp', 'navigation'] },
+      evidence: { ...data, channelAwareSuccesses, channels: ['console.error', 'pageerror', 'request_failed', 'csp', 'navigation'] },
       requirements: { requiredFacts: ['successfulBrowserNavigation', 'separatedBrowserErrorChannels'], missingFacts: ['separatedBrowserErrorChannels'], minimumCoverage: 1, canCollectWithTargetedRun: true }
     });
     const rows = all(ctx.db, `
@@ -2036,10 +2303,10 @@ function templateConsoleErrors() {
       finding: rows.length ? `${rows.length} template cluster(s) produced console errors during sampled rendering.` : 'No sampled template console errors found.',
       recommendation: 'Review console errors from sampled URLs and fix errors that can affect rendering or user interactions.',
       evidence: { threshold: thresholds.consoleErrorsWarning, templates: mapTemplateRows(rows) },
-      findingType: 'core_issue',
+      findingType: 'best_practice',
       reviewRecommended: true
     });
-  }, { priority: 'Medium', effort: 'M' });
+  }, { priority: 'Low', effort: 'M' });
 }
 
 function templateJsRequiredContent() {

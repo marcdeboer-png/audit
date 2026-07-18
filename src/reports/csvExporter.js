@@ -274,15 +274,34 @@ const EXPORTS = {
   },
   'playwright-results': {
     filename: (runId) => `run-${runId}-playwright-results.csv`,
-    columns: ['templateClusterKey', 'url', 'status', 'finalUrl', 'title', 'h1Count', 'renderedWordCount', 'renderedLinksCount', 'rawRenderedWordDelta', 'consoleErrorsCount', 'networkErrorsCount', 'jsRequiredLikely', 'loadTimeMs', 'screenshotPath'],
+    columns: ['templateClusterKey', 'url', 'status', 'finalUrl', 'title', 'h1Count', 'renderedWordCount', 'renderedLinksCount', 'rawRenderedWordDelta', 'consoleErrorsCount', 'networkErrorsCount', 'jsRequiredLikely', 'loadTimeMs', 'settlingStatus', 'settlingDurationMs', 'renderSnapshotCount', 'renderFingerprint', 'renderProvenanceVersion', 'settlingPolicyVersion', 'initialRenderedStateJson', 'settledRenderedStateJson', 'renderProvenanceJson', 'browserEventsJson', 'screenshotPath'],
     sql: `
       SELECT templateClusterKey, url, status, finalUrl, title, h1Count,
         renderedWordCount, renderedLinksCount, rawRenderedWordDelta,
         consoleErrorsCount, networkErrorsCount, jsRequiredLikely,
-        loadTimeMs, screenshotPath
+        loadTimeMs, settlingStatus, settlingDurationMs, renderSnapshotCount,
+        renderFingerprint, renderProvenanceVersion, settlingPolicyVersion,
+        initialRenderedStateJson, settledRenderedStateJson, renderProvenanceJson,
+        browserEventsJson, screenshotPath
       FROM playwright_results
       WHERE runId = ?
       ORDER BY templateClusterKey ASC, id ASC
+    `
+  },
+  'render-provenance': {
+    filename: (runId) => `run-${runId}-render-provenance.csv`,
+    columns: ['url', 'renderStatus', 'settlingStatus', 'settlingDurationMs', 'renderSnapshotCount', 'renderFingerprint', 'renderProvenanceVersion', 'settlingPolicyVersion', 'metadataProvenanceComplete', 'effectiveTitle', 'effectiveMetaDescription', 'effectiveCanonical', 'effectiveHtmlLang', 'effectiveMetaRobots', 'effectiveH1Count', 'effectiveWordCount', 'effectiveMainWordCount', 'effectiveInternalLinksCount', 'effectiveOgJson', 'effectiveTwitterJson', 'effectiveHreflangJson', 'effectiveSchemaTypesJson', 'rawDocumentStateJson', 'initialRenderedStateJson', 'settledRenderedStateJson', 'effectiveDocumentStateJson', 'renderProvenanceJson', 'browserEventsJson'],
+    sql: `
+      SELECT url, renderStatus, settlingStatus, settlingDurationMs, renderSnapshotCount,
+        renderFingerprint, renderProvenanceVersion, settlingPolicyVersion,
+        metadataProvenanceComplete, effectiveTitle, effectiveMetaDescription,
+        effectiveCanonical, effectiveHtmlLang, effectiveMetaRobots, effectiveH1Count,
+        effectiveWordCount, effectiveMainWordCount, effectiveInternalLinksCount,
+        effectiveOgJson, effectiveTwitterJson, effectiveHreflangJson,
+        effectiveSchemaTypesJson, rawDocumentStateJson, initialRenderedStateJson,
+        settledRenderedStateJson, effectiveDocumentStateJson, renderProvenanceJson,
+        browserEventsJson
+      FROM pages WHERE runId = ? ORDER BY id ASC
     `
   },
   'lighthouse-results': {

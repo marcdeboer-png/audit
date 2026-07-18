@@ -26,6 +26,12 @@ export const crawlerDefaults = Object.freeze({
   lighthouseCategories: ['performance', 'accessibility', 'best-practices', 'seo'],
   lighthouseTimeoutMs: 60000,
   playwrightTimeoutMs: 30000,
+  renderSettlingMaxMs: 6000,
+  renderSettlingIntervalMs: 500,
+  renderSettlingMaxSnapshots: 13,
+  renderSettlingStableSnapshots: 3,
+  renderSettlingMinimumObservationMs: 4000,
+  maxConcurrentRenderedPages: 1,
   collectScreenshots: false,
   sampleOnlyIndexable: true,
   shardCount: 32

@@ -68,7 +68,10 @@ test('disabled Playwright and Lighthouse sampling stores disabled sample statuse
 test('Playwright and Lighthouse unavailable fallbacks return unavailable without throwing', async () => {
   const playwright = await createPlaywrightSampler({ forceUnavailable: true });
   assert.equal(playwright.available, false);
-  assert.equal((await playwright.sample({ url: 'https://example.com/' })).status, 'unavailable');
+  const unavailable = await playwright.sample({ url: 'https://example.com/' });
+  assert.equal(unavailable.status, 'unavailable');
+  assert.deepEqual(JSON.parse(unavailable.consoleErrorsJson), []);
+  assert.equal(JSON.parse(unavailable.browserEventsJson)[0].type, 'runner_error');
 
   const lighthouse = await createLighthouseSampler({ forceUnavailable: true });
   assert.equal(lighthouse.available, false);

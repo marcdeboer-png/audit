@@ -3240,6 +3240,7 @@ function renderCheckDetail(detail) {
   `;
   const columns = detail.columns || [];
   const rows = detail.rows || [];
+  const renderProvenanceRows = detail.renderProvenance?.rows || [];
   if (!rows.length || !columns.length) {
     document.querySelector('#check-detail-table').innerHTML = '<div class="empty">Keine Detailzeilen vorhanden.</div>';
     return;
@@ -3254,6 +3255,20 @@ function renderCheckDetail(detail) {
       </table>
     </div>
     ${detail.truncated ? '<p class="muted">Detailansicht gekürzt. Vollständiger Export per CSV.</p>' : ''}
+    ${renderProvenanceRows.length ? `
+      <h3>Raw / Initial / Settled / Effective</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr>${['URL', 'Status', 'Raw Title', 'Initial Title', 'Settled Title', 'Effective Title', 'Raw Words', 'Initial Words', 'Settled Words', 'Effective Words'].map((label) => `<th>${label}</th>`).join('')}</tr></thead>
+          <tbody>${renderProvenanceRows.map((row) => `<tr>
+            <td>${escapeHtml(row.url || '')}</td><td>${escapeHtml(`${row.renderStatus || ''} / ${row.settlingStatus || ''}`)}</td>
+            <td>${escapeHtml(formatCell(row.rawTitle))}</td><td>${escapeHtml(formatCell(row.initialTitle))}</td>
+            <td>${escapeHtml(formatCell(row.settledTitle))}</td><td>${escapeHtml(formatCell(row.effectiveTitle))}</td>
+            <td>${escapeHtml(formatCell(row.rawWordCount))}</td><td>${escapeHtml(formatCell(row.initialWordCount))}</td>
+            <td>${escapeHtml(formatCell(row.settledWordCount))}</td><td>${escapeHtml(formatCell(row.effectiveWordCount))}</td>
+          </tr>`).join('')}</tbody>
+        </table>
+      </div>` : ''}
   `;
 }
 

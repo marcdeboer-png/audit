@@ -22,6 +22,21 @@ export function generateReport(db, runId) {
     ORDER BY id
     LIMIT 500
   `).all(runId);
+  const renderProvenanceRows = db.prepare(`
+    SELECT url, renderStatus, settlingStatus, settlingDurationMs, renderSnapshotCount,
+      title AS rawTitle,
+      CASE WHEN json_valid(initialRenderedStateJson) THEN json_extract(initialRenderedStateJson, '$.title') END AS initialTitle,
+      CASE WHEN json_valid(settledRenderedStateJson) THEN json_extract(settledRenderedStateJson, '$.title') END AS settledTitle,
+      effectiveTitle, effectiveCanonical, effectiveH1Count, effectiveMainWordCount,
+      wordCountRaw AS rawWordCount,
+      CASE WHEN json_valid(initialRenderedStateJson) THEN json_extract(initialRenderedStateJson, '$.visibleText.wordCount') END AS initialWordCount,
+      CASE WHEN json_valid(settledRenderedStateJson) THEN json_extract(settledRenderedStateJson, '$.visibleText.wordCount') END AS settledWordCount,
+      metadataProvenanceComplete, renderProvenanceVersion, settlingPolicyVersion
+    FROM pages
+    WHERE runId = ? AND (rawDocumentStateJson IS NOT NULL OR renderStatus IS NOT NULL)
+    ORDER BY id
+    LIMIT 200
+  `).all(runId);
   const statusDistribution = db.prepare(`
     SELECT COALESCE(statusCode, 0) AS statusCode, COUNT(*) AS count
     FROM pages
@@ -88,7 +103,9 @@ export function generateReport(db, runId) {
   const playwrightResults = db.prepare(`
     SELECT templateClusterKey, url, status, title, h1Count, renderedWordCount,
       renderedLinksCount, rawRenderedWordDelta, consoleErrorsCount, networkErrorsCount,
-      jsRequiredLikely, loadTimeMs, screenshotPath
+      jsRequiredLikely, loadTimeMs, settlingStatus, settlingDurationMs,
+      renderSnapshotCount, renderFingerprint, renderProvenanceVersion,
+      settlingPolicyVersion, screenshotPath
     FROM playwright_results
     WHERE runId = ?
     ORDER BY templateClusterKey ASC, id ASC
@@ -180,6 +197,7 @@ export function generateReport(db, runId) {
     scores,
     results,
     pages,
+    renderProvenanceRows,
     actionItems,
     reportStats,
     schemaFindings,
@@ -223,6 +241,7 @@ function renderHtml(data) {
     scores,
     results,
     pages,
+    renderProvenanceRows,
     actionItems,
     reportStats,
     schemaFindings,
@@ -438,6 +457,9 @@ function renderHtml(data) {
       <tr><th>crawlMode</th><td>${escapeHtml(run.crawlMode || 'hybrid')}</td><th>crawlDelayMs</th><td>${run.crawlDelayMs ?? 0}</td></tr>
       <tr><th>requestTimeoutMs</th><td>${run.requestTimeoutMs ?? 15000}</td><th>playwrightMode</th><td>${escapeHtml(run.playwrightMode || 'off')}</td></tr>
       <tr><th>playwrightSampleLimit</th><td>${run.playwrightSampleLimit ?? 50}</td><th>usePlaywright</th><td>${run.usePlaywright ? 'true' : 'false'}</td></tr>
+      <tr><th>renderSettlingMaxMs</th><td>${run.renderSettlingMaxMs ?? 6000}</td><th>renderSettlingIntervalMs</th><td>${run.renderSettlingIntervalMs ?? 500}</td></tr>
+      <tr><th>renderSettlingMaxSnapshots</th><td>${run.renderSettlingMaxSnapshots ?? 13}</td><th>stableSnapshots / min observation</th><td>${run.renderSettlingStableSnapshots ?? 3} / ${run.renderSettlingMinimumObservationMs ?? 4000} ms</td></tr>
+      <tr><th>maxConcurrentRenderedPages</th><td>${run.maxConcurrentRenderedPages ?? 1}</td><th>Settling policy</th><td>bounded semantic snapshots, no networkidle</td></tr>
       <tr><th>maxAttempts</th><td>${run.maxAttempts ?? 3}</td><th>maxConcurrentPerHost</th><td>${run.maxConcurrentPerHost ?? 2}</td></tr>
       <tr><th>retryBaseDelayMs</th><td>${run.retryBaseDelayMs ?? 1000}</td><th>retryMaxDelayMs</th><td>${run.retryMaxDelayMs ?? 30000}</td></tr>
       <tr><th>maxSitemapUrls</th><td>${run.maxSitemapUrls ?? ''}</td><th>maxSitemaps</th><td>${run.maxSitemaps ?? 100}</td></tr>
@@ -459,6 +481,9 @@ function renderHtml(data) {
     <p class="muted">Template sampling measures representative sample URLs from URL clusters. It is not a full measurement of every crawled URL, and Lighthouse results are local lab data rather than CrUX/field data.</p>
     ${simpleTable([samplingSummary || {}], ['enableTemplateSampling', 'enablePlaywrightSampling', 'enableLighthouseSampling', 'renderingStatus', 'lighthouseStatus', 'samplesTotal', 'samplesProcessed', 'sampleRows', 'playwrightSuccessCount', 'playwrightIssueCount', 'lighthouseSuccessCount', 'lighthouseIssueCount', 'sampleErrorCount'])}
     ${samplingStatusNotice(samplingSummary)}
+    <h3>Raw / Initial / Settled Document Provenance</h3>
+    <p class="muted">Effective metadata uses a stable settled DOM when available. Unstable or failed rendering remains explicitly incomplete and is excluded from rendered-dependent pass/fail claims.</p>
+    ${simpleTable(renderProvenanceRows, ['url', 'renderStatus', 'settlingStatus', 'settlingDurationMs', 'renderSnapshotCount', 'rawTitle', 'initialTitle', 'settledTitle', 'effectiveTitle', 'rawWordCount', 'initialWordCount', 'settledWordCount', 'effectiveMainWordCount', 'effectiveCanonical', 'effectiveH1Count', 'metadataProvenanceComplete', 'renderProvenanceVersion', 'settlingPolicyVersion'])}
     <h3>Schema Findings</h3>
     ${findingsTable(schemaFindings, { emptyMessage: 'No schema findings.' })}
     <h3>Template / URL Clusters</h3>
@@ -789,6 +814,7 @@ function csvExportLinks(runId) {
     ['Reviews CSV', 'reviews'],
     ['Samples CSV', 'samples'],
     ['Playwright Results CSV', 'playwright-results'],
+    ['Render Provenance CSV', 'render-provenance'],
     ['Lighthouse Results CSV', 'lighthouse-results'],
     ['Template Performance CSV', 'template-performance'],
     ['Templates CSV', 'templates'],

@@ -8,8 +8,10 @@ import { enqueueBatchWithPolicy } from './crawlPolicy.js';
 import { createHttpStatusError } from './retryPolicy.js';
 import { crawlerDefaults } from './defaults.js';
 import { filterArtifactsForStorage, snapshotHtml } from '../storage/retention.js';
+import { buildEffectiveDocumentState, RENDER_PROVENANCE_VERSION, SETTLING_POLICY_VERSION } from '../extractors/documentState.js';
 
 const RETRY_STATUS_CODES = new Set(crawlerDefaults.retryStatusCodes);
+const renderSlots = new Map();
 
 export async function processQueueItem(db, run, project, queueItem, browser, robots) {
   const url = queueItem.url || queueItem.normalizedUrl;
@@ -48,12 +50,29 @@ export async function processQueueItem(db, run, project, queueItem, browser, rob
   const extracted = extractHtml(response.body, normalizedFinalUrl, finalDomain, response.headers);
   const shouldRender = shouldRenderPage(db, run, browser);
   const render = shouldRender
-    ? await renderPage(browser, normalizedFinalUrl, finalDomain, run.requestTimeoutMs || 15000, run.userAgent, {
-        captureHtml: Boolean(run.storeRenderedHtml)
-      })
+    ? await withRenderSlot(run.id, run.maxConcurrentRenderedPages || crawlerDefaults.maxConcurrentRenderedPages, () => renderPage(browser, normalizedFinalUrl, finalDomain, run.requestTimeoutMs || 15000, run.userAgent, {
+        captureHtml: Boolean(run.storeRenderedHtml),
+        settling: {
+          maxDurationMs: run.renderSettlingMaxMs,
+          intervalMs: run.renderSettlingIntervalMs,
+          maxSnapshots: run.renderSettlingMaxSnapshots,
+          stableSnapshots: run.renderSettlingStableSnapshots,
+          minimumObservationMs: run.renderSettlingMinimumObservationMs
+        },
+        shouldAbort: () => {
+          const current = db.prepare('SELECT status FROM runs WHERE id = ?').get(run.id);
+          return !current || !['running', 'pending'].includes(current.status);
+        }
+      }))
     : emptyRenderResult();
   const resources = dedupeResources([...extracted.resources, ...render.resources]);
 
+  const rawDocumentState = safeJson(extracted.page.rawDocumentStateJson);
+  const initialRenderedState = safeJson(render.initialRenderedStateJson);
+  const settledRenderedState = safeJson(render.settledRenderedStateJson);
+  const effectiveDocumentState = buildEffectiveDocumentState(rawDocumentState, initialRenderedState, settledRenderedState, render);
+  const effective = Object.fromEntries(Object.entries(effectiveDocumentState.fields || {}).map(([key, value]) => [key, value.effective]));
+  const renderedMeasurementComplete = metadataProvenanceIsComplete(run, shouldRender, render);
   const pageRecord = {
     runId: run.id,
     url,
@@ -82,7 +101,33 @@ export async function processQueueItem(db, run, project, queueItem, browser, rob
     requestFailuresJson: render.requestFailuresJson,
     cspViolationsJson: render.cspViolationsJson,
     navigationError: render.navigationError,
-    renderStatus: render.renderStatus
+    renderStatus: render.renderStatus,
+    settlingStatus: render.settlingStatus,
+    settlingDurationMs: render.settlingDurationMs,
+    renderSnapshotCount: render.renderSnapshotCount,
+    renderFingerprint: render.renderFingerprint,
+    initialRenderedStateJson: render.initialRenderedStateJson,
+    settledRenderedStateJson: render.settledRenderedStateJson,
+    effectiveDocumentStateJson: JSON.stringify(effectiveDocumentState),
+    renderProvenanceJson: render.renderProvenanceJson,
+    browserEventsJson: render.browserEventsJson,
+    renderProvenanceVersion: RENDER_PROVENANCE_VERSION,
+    settlingPolicyVersion: SETTLING_POLICY_VERSION,
+    metadataProvenanceComplete: renderedMeasurementComplete ? 1 : 0,
+    effectiveTitle: effective.title ?? null,
+    effectiveMetaDescription: effective.metaDescription ?? null,
+    effectiveCanonical: effective.canonical ?? null,
+    effectiveHtmlLang: effective.htmlLang ?? null,
+    effectiveMetaRobots: Array.isArray(effective.robots) ? effective.robots.join(', ') : null,
+    effectiveH1Json: JSON.stringify(effective.h1 || []),
+    effectiveH1Count: Array.isArray(effective.h1) ? effective.h1.length : null,
+    effectiveWordCount: effective.visibleText?.wordCount ?? null,
+    effectiveMainWordCount: effective.mainText?.wordCount ?? null,
+    effectiveInternalLinksCount: Array.isArray(effective.internalLinks) ? effective.internalLinks.filter((link) => isInternalUrl(link, finalDomain)).length : null,
+    effectiveOgJson: JSON.stringify(effective.openGraph || {}),
+    effectiveTwitterJson: JSON.stringify(effective.twitter || {}),
+    effectiveHreflangJson: JSON.stringify(effective.hreflang || []),
+    effectiveSchemaTypesJson: JSON.stringify(effective.structuredData?.types || [])
   };
 
   insertPage(db, pageRecord);
@@ -140,6 +185,13 @@ export async function processQueueItem(db, run, project, queueItem, browser, rob
 
 export function shouldRetry(queueItem) {
   return queueItem.attempts < crawlerDefaults.maxAttempts;
+}
+
+export function metadataProvenanceIsComplete(run, renderingExecuted, render = {}) {
+  const stableRenderedState = Boolean(renderingExecuted) && ['settled', 'content_remained_empty'].includes(render.settlingStatus);
+  if (run?.usePlaywright && run?.playwrightMode === 'all') return stableRenderedState;
+  if (renderingExecuted) return stableRenderedState;
+  return true;
 }
 
 function emptyPageRecord(values) {
@@ -270,9 +322,38 @@ function emptyRenderResult() {
     cspViolationsJson: JSON.stringify([]),
     navigationError: null,
     renderStatus: 'not_executed',
+    settlingStatus: 'not_executed',
+    settlingDurationMs: null,
+    renderSnapshotCount: 0,
+    renderFingerprint: null,
+    initialRenderedStateJson: null,
+    settledRenderedStateJson: null,
+    renderProvenanceJson: null,
+    browserEventsJson: JSON.stringify([]),
     resources: [],
     renderedHtml: null
   };
+}
+
+function safeJson(value) {
+  try { return value ? JSON.parse(value) : null; } catch { return null; }
+}
+
+export async function withRenderSlot(runId, limitInput, task) {
+  const key = Number(runId);
+  const limit = Math.max(1, Math.min(4, Number(limitInput || 1)));
+  const state = renderSlots.get(key) || { active: 0, waiters: [] };
+  renderSlots.set(key, state);
+  if (state.active >= limit) await new Promise((resolve) => state.waiters.push(resolve));
+  state.active += 1;
+  try {
+    return await task();
+  } finally {
+    state.active -= 1;
+    const next = state.waiters.shift();
+    if (next) next();
+    else if (state.active === 0) renderSlots.delete(key);
+  }
 }
 
 function mergeRenderedTextFacts(textFactsJson, render) {

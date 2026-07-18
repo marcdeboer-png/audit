@@ -292,7 +292,9 @@ test('rendering fixture captures Playwright data when available and keeps unavai
   const unavailable = result(results, 'template.playwright_unavailable');
   if (playwrightRows.some((row) => row.status === 'success')) {
     assert.ok(playwrightRows.some((row) => row.url === `${origin}/js-content` && row.consoleErrorsCount > 0));
-    assert.equal(result(results, 'tech.console_errors_present').status, 'Warning');
+    const consoleResult = result(results, 'tech.console_errors_present');
+    assert.equal(consoleResult.status, 'OK');
+    assert.ok(Number(consoleResult.evidence?.nonReproducibleConsoleEventsExcluded || 0) > 0);
     assert.ok(['OK', 'Warning'].includes(result(results, 'template.console_errors').status));
   } else {
     assert.equal(unavailable.status, 'NA');

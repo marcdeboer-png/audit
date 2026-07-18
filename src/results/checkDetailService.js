@@ -66,6 +66,7 @@ export function getCheckDetail(db, runId, checkResultId, options = {}) {
         value: checkResult.effectiveFinding || checkResult.finding || '',
         recommendation: context.recommendation
       }, checkResult)];
+  const renderProvenanceRows = pageRenderProvenanceForRows(db, runId, enrichedRows);
 
   return {
     checkId: checkResult.checkId,
@@ -116,6 +117,18 @@ export function getCheckDetail(db, runId, checkResultId, options = {}) {
     recommendationMeta: checkResult.recommendationMeta,
     requirements: checkResult.requirements,
     provenance: checkResult.provenance,
+    renderProvenance: hasRenderProvenance(db, runId) ? {
+      available: true,
+      model: 'raw/initial/settled/effective',
+      exportType: 'render-provenance',
+      note: 'Page-level field provenance is available here, in the render-provenance CSV and in the full JSON URL inventory.',
+      rows: renderProvenanceRows
+    } : {
+      available: false,
+      model: null,
+      exportType: null,
+      note: 'This historical run has no stored render provenance.'
+    },
     checkVersion: checkResult.checkVersion || checkResult.provenance?.checkVersion || null,
     context: buildNarrative(checkResult, detail),
     columns,
@@ -191,13 +204,14 @@ function handlerFor(checkResult) {
 }
 
 function titleDetails({ db, runId, checkResult, recommendation }) {
+  const current = hasRenderProvenance(db, runId);
   return pageRows({
     db,
     runId,
     where: pageCondition(checkResult.checkId, {
-      'tech.title_missing': `${indexableContentHtmlWhere()} AND (title IS NULL OR title = '')`,
-      'tech.title_too_short': `${indexableContentHtmlWhere()} AND titleLength < ${thresholds.titleTooShort} AND COALESCE(title, '') <> ''`,
-      'tech.title_too_long': `${indexableContentHtmlWhere()} AND titleLength > ${thresholds.titleTooLong}`
+      'tech.title_missing': `${indexableContentHtmlWhere()} AND ${current ? 'COALESCE(metadataProvenanceComplete, 0) = 1 AND (effectiveTitle IS NULL OR effectiveTitle = \'\')' : "(title IS NULL OR title = '')"}`,
+      'tech.title_too_short': `${indexableContentHtmlWhere()} AND ${current ? `COALESCE(metadataProvenanceComplete, 0) = 1 AND LENGTH(effectiveTitle) < ${thresholds.titleTooShort} AND COALESCE(effectiveTitle, '') <> ''` : `titleLength < ${thresholds.titleTooShort} AND COALESCE(title, '') <> ''`}`,
+      'tech.title_too_long': `${indexableContentHtmlWhere()} AND ${current ? `COALESCE(metadataProvenanceComplete, 0) = 1 AND LENGTH(effectiveTitle) > ${thresholds.titleTooLong}` : `titleLength > ${thresholds.titleTooLong}`}`
     }),
     columns: [
       ['url', 'URL'],
@@ -208,20 +222,23 @@ function titleDetails({ db, runId, checkResult, recommendation }) {
       ['indexable', 'Indexable'],
       ['recommendation', 'Recommendation']
     ],
-    select: 'url, title, titleLength, statusCode, pageType, indexable',
+    select: current
+      ? 'url, title AS rawTitle, effectiveTitle AS title, effectiveTitle, LENGTH(effectiveTitle) AS titleLength, statusCode, pageType, indexable, renderStatus, settlingStatus'
+      : 'url, title, title AS rawTitle, title AS effectiveTitle, titleLength, statusCode, pageType, indexable, renderStatus, settlingStatus',
     recommendation,
     dataSource: 'pages'
   });
 }
 
 function metaDescriptionDetails({ db, runId, checkResult, recommendation }) {
+  const current = hasRenderProvenance(db, runId);
   return pageRows({
     db,
     runId,
     where: pageCondition(checkResult.checkId, {
-      'tech.meta_description_missing': `${indexableContentHtmlWhere()} AND (metaDescription IS NULL OR metaDescription = '')`,
-      'tech.meta_description_too_short': `${indexableContentHtmlWhere()} AND metaDescriptionLength < ${thresholds.descriptionTooShort} AND COALESCE(metaDescription, '') <> ''`,
-      'tech.meta_description_too_long': `${indexableContentHtmlWhere()} AND metaDescriptionLength > ${thresholds.descriptionTooLong}`
+      'tech.meta_description_missing': `${indexableContentHtmlWhere()} AND ${current ? 'COALESCE(metadataProvenanceComplete, 0) = 1 AND (effectiveMetaDescription IS NULL OR effectiveMetaDescription = \'\')' : "(metaDescription IS NULL OR metaDescription = '')"}`,
+      'tech.meta_description_too_short': `${indexableContentHtmlWhere()} AND ${current ? `COALESCE(metadataProvenanceComplete, 0) = 1 AND LENGTH(effectiveMetaDescription) < ${thresholds.descriptionTooShort} AND COALESCE(effectiveMetaDescription, '') <> ''` : `metaDescriptionLength < ${thresholds.descriptionTooShort} AND COALESCE(metaDescription, '') <> ''`}`,
+      'tech.meta_description_too_long': `${indexableContentHtmlWhere()} AND ${current ? `COALESCE(metadataProvenanceComplete, 0) = 1 AND LENGTH(effectiveMetaDescription) > ${thresholds.descriptionTooLong}` : `metaDescriptionLength > ${thresholds.descriptionTooLong}`}`
     }),
     columns: [
       ['url', 'URL'],
@@ -232,41 +249,49 @@ function metaDescriptionDetails({ db, runId, checkResult, recommendation }) {
       ['indexable', 'Indexable'],
       ['recommendation', 'Recommendation']
     ],
-    select: 'url, metaDescription, metaDescriptionLength, statusCode, pageType, indexable',
+    select: current
+      ? 'url, metaDescription AS rawMetaDescription, effectiveMetaDescription AS metaDescription, effectiveMetaDescription, LENGTH(effectiveMetaDescription) AS metaDescriptionLength, statusCode, pageType, indexable, renderStatus, settlingStatus'
+      : 'url, metaDescription, metaDescription AS rawMetaDescription, metaDescription AS effectiveMetaDescription, metaDescriptionLength, statusCode, pageType, indexable, renderStatus, settlingStatus',
     recommendation,
     dataSource: 'pages'
   });
 }
 
 function canonicalDetails({ db, runId, checkResult, recommendation }) {
+  const current = hasRenderProvenance(db, runId);
+  const canonical = current ? 'effectiveCanonical' : 'canonical';
   const acceptedHost = checkResult.evidence?.acceptedHost || null;
   const otherDomainCondition = acceptedHost
-    ? `source.canonical IS NOT NULL AND source.canonical <> '' AND
-      source.canonical NOT LIKE 'https://${escapeSqlLike(acceptedHost)}%' AND source.canonical NOT LIKE 'http://${escapeSqlLike(acceptedHost)}%' AND
-      source.canonical NOT LIKE 'https://www.${escapeSqlLike(acceptedHost)}%' AND source.canonical NOT LIKE 'http://www.${escapeSqlLike(acceptedHost)}%'`
-    : 'source.canonical IS NOT NULL AND source.canonical <> source.normalizedUrl';
+    ? `source.${canonical} IS NOT NULL AND source.${canonical} <> '' AND
+      source.${canonical} NOT LIKE 'https://${escapeSqlLike(acceptedHost)}%' AND source.${canonical} NOT LIKE 'http://${escapeSqlLike(acceptedHost)}%' AND
+      source.${canonical} NOT LIKE 'https://www.${escapeSqlLike(acceptedHost)}%' AND source.${canonical} NOT LIKE 'http://www.${escapeSqlLike(acceptedHost)}%'`
+    : `source.${canonical} IS NOT NULL AND source.${canonical} <> source.normalizedUrl`;
   const where = pageCondition(checkResult.checkId, {
-    'tech.canonical_missing': `${htmlWhere('source')} AND (source.canonical IS NULL OR source.canonical = '')`,
-    'tech.canonical_non_self': 'source.canonical IS NOT NULL AND source.canonical <> source.normalizedUrl',
+    'tech.canonical_missing': `${htmlWhere('source')} ${current ? 'AND COALESCE(source.metadataProvenanceComplete, 0) = 1' : ''} AND (source.${canonical} IS NULL OR source.${canonical} = '')`,
+    'tech.canonical_non_self': `source.${canonical} IS NOT NULL AND source.${canonical} <> source.normalizedUrl`,
     'tech.canonical_to_other_domain': otherDomainCondition,
-    'tech.canonical_target_non_200': 'source.canonical IS NOT NULL'
+    'tech.canonical_target_non_200': `source.${canonical} IS NOT NULL`
   });
   const rows = db.prepare(`
     SELECT
       source.url,
-      source.canonical,
+      source.canonical AS rawCanonical,
+      source.${canonical} AS canonical,
+      source.effectiveCanonical,
+      source.renderStatus,
+      source.settlingStatus,
       source.finalUrl,
       source.statusCode,
       target.statusCode AS canonicalTargetStatus,
       CASE
-        WHEN source.canonical IS NULL OR source.canonical = '' THEN 'missing'
-        WHEN source.canonical <> source.normalizedUrl AND target.statusCode IS NOT NULL AND target.statusCode <> 200 THEN 'target_non_200'
-        WHEN source.canonical <> source.normalizedUrl THEN 'non_self_or_external'
+        WHEN source.${canonical} IS NULL OR source.${canonical} = '' THEN 'missing'
+        WHEN source.${canonical} <> source.normalizedUrl AND target.statusCode IS NOT NULL AND target.statusCode <> 200 THEN 'target_non_200'
+        WHEN source.${canonical} <> source.normalizedUrl THEN 'non_self_or_external'
         ELSE 'canonical_present'
       END AS issueType
     FROM pages source
-    LEFT JOIN pages target ON target.runId = source.runId AND target.normalizedUrl = source.canonical
-    WHERE source.runId = ? AND (${where})
+    LEFT JOIN pages target ON target.runId = source.runId AND target.normalizedUrl = source.${canonical}
+    WHERE source.runId = ? ${current ? 'AND COALESCE(source.metadataProvenanceComplete, 0) = 1' : ''} AND (${where})
     ORDER BY source.id ASC
   `).all(runId).filter((row) => {
     if (checkResult.checkId === 'tech.canonical_target_non_200') return row.canonicalTargetStatus !== null && row.canonicalTargetStatus !== 200;
@@ -283,7 +308,7 @@ function canonicalDetails({ db, runId, checkResult, recommendation }) {
       ['recommendation', 'Recommendation']
     ],
     rows,
-    dataSource: 'pages'
+    dataSource: current ? 'pages/effective document state' : 'pages (legacy)'
   };
 }
 
@@ -452,15 +477,21 @@ function internalLinkDetails({ db, runId, checkResult, recommendation }) {
 }
 
 function h1Details({ db, runId, checkResult, recommendation }) {
-  const where = checkResult.checkId === 'tech.h1_missing' ? 'h1Count = 0' : 'h1Count > 1';
+  const current = hasRenderProvenance(db, runId);
+  const where = checkResult.checkId === 'tech.h1_missing'
+    ? current ? 'COALESCE(metadataProvenanceComplete, 0) = 1 AND COALESCE(effectiveH1Count, 0) = 0' : "h1Count = 0 AND NOT (renderStatus = 'success' AND renderedH1Count > 0)"
+    : current ? 'COALESCE(metadataProvenanceComplete, 0) = 1 AND COALESCE(effectiveH1Count, 0) > 1' : 'h1Count > 1';
   const rows = db.prepare(`
-    SELECT url, h1Count, h1Json, pageType, indexable
+    SELECT url,
+      ${current ? 'h1Count AS rawH1Count, h1Json AS rawH1Json, effectiveH1Count AS h1Count, effectiveH1Json AS h1Json' : 'h1Count, h1Json, h1Count AS rawH1Count, h1Json AS rawH1Json'},
+      effectiveH1Count, effectiveH1Json, renderStatus, settlingStatus, pageType, indexable
     FROM pages
     WHERE runId = ? AND (${htmlWhere()}) AND statusCode >= 200 AND statusCode < 300 AND COALESCE(indexable, 1) = 1 AND (${where})
     ORDER BY id ASC
   `).all(runId).map((row) => ({
     ...row,
     h1Texts: safeJson(row.h1Json, []).join(' | '),
+    effectiveH1Texts: safeJson(row.effectiveH1Json, []).join(' | '),
     recommendation
   }));
   return {
@@ -473,16 +504,19 @@ function h1Details({ db, runId, checkResult, recommendation }) {
       ['recommendation', 'Recommendation']
     ],
     rows,
-    dataSource: 'pages'
+    dataSource: current ? 'pages/effective document state' : 'pages (legacy)'
   };
 }
 
 function duplicateMetaDetails({ db, runId, checkResult, recommendation }) {
-  const field = checkResult.checkId === 'tech.duplicate_titles' ? 'title' : 'metaDescription';
+  const current = hasRenderProvenance(db, runId);
+  const field = checkResult.checkId === 'tech.duplicate_titles'
+    ? current ? 'effectiveTitle' : 'title'
+    : current ? 'effectiveMetaDescription' : 'metaDescription';
   const groups = db.prepare(`
     SELECT LOWER(${field}) AS groupKey, ${field} AS duplicateValue, COUNT(*) AS groupSize
     FROM pages
-    WHERE runId = ? AND ${indexableContentHtmlWhere()} AND ${field} IS NOT NULL AND ${field} <> ''
+    WHERE runId = ? AND ${indexableContentHtmlWhere()} ${current ? 'AND COALESCE(metadataProvenanceComplete, 0) = 1' : ''} AND ${field} IS NOT NULL AND ${field} <> ''
     GROUP BY LOWER(${field})
     HAVING COUNT(*) > 1
   `).all(runId);
@@ -491,7 +525,7 @@ function duplicateMetaDetails({ db, runId, checkResult, recommendation }) {
     const pages = db.prepare(`
       SELECT url, pageType, indexable
       FROM pages
-      WHERE runId = ? AND ${indexableContentHtmlWhere()} AND LOWER(${field}) = ?
+      WHERE runId = ? AND ${indexableContentHtmlWhere()} ${current ? 'AND COALESCE(metadataProvenanceComplete, 0) = 1' : ''} AND LOWER(${field}) = ?
       ORDER BY id ASC
     `).all(runId, group.groupKey);
     for (const page of pages) {
@@ -520,21 +554,24 @@ function duplicateMetaDetails({ db, runId, checkResult, recommendation }) {
 }
 
 function openGraphDetails({ db, runId, recommendation }) {
+  const current = hasRenderProvenance(db, runId);
+  const field = current ? 'effectiveOgJson' : 'ogJson';
   const rows = db.prepare(`
-    SELECT url, pageType, ogJson, statusCode, indexable
+    SELECT url, pageType, ogJson, effectiveOgJson, renderStatus, settlingStatus, statusCode, indexable
     FROM pages
     WHERE runId = ?
       AND ${htmlWhere()}
       AND (
-        ogJson IS NULL OR
-        ogJson NOT LIKE '%"og:title":"%' OR
-        ogJson NOT LIKE '%"og:description":"%' OR
-        ogJson NOT LIKE '%"og:image":"%' OR
-        ogJson NOT LIKE '%"og:url":"%'
+        ${field} IS NULL OR
+        ${field} NOT LIKE '%"og:title":"%' OR
+        ${field} NOT LIKE '%"og:description":"%' OR
+        ${field} NOT LIKE '%"og:image":"%' OR
+        ${field} NOT LIKE '%"og:url":"%'
       )
+      ${current ? 'AND COALESCE(metadataProvenanceComplete, 0) = 1' : ''}
     ORDER BY id ASC
   `).all(runId).map((row) => {
-    const og = safeJson(row.ogJson, {});
+    const og = safeJson(current ? row.effectiveOgJson : row.ogJson, {});
     const missingFields = ['og:title', 'og:description', 'og:image', 'og:url']
       .filter((field) => !og[field]);
     return {
@@ -544,6 +581,8 @@ function openGraphDetails({ db, runId, recommendation }) {
       indexable: row.indexable,
       missingOpenGraphFields: missingFields.join(' | '),
       presentOpenGraphFields: Object.keys(og).filter(Boolean).sort().join(' | '),
+      renderStatus: row.renderStatus,
+      settlingStatus: row.settlingStatus,
       recommendation
     };
   });
@@ -558,7 +597,7 @@ function openGraphDetails({ db, runId, recommendation }) {
       ['recommendation', 'Recommendation']
     ],
     rows,
-    dataSource: 'pages.ogJson'
+    dataSource: current ? 'pages.effectiveOgJson/render provenance' : 'pages.ogJson (legacy)'
   };
 }
 
@@ -977,6 +1016,58 @@ function headerKeyForCheck(checkId) {
 
 function escapeSqlLike(value) {
   return String(value || '').replaceAll("'", "''");
+}
+
+function hasRenderProvenance(db, runId) {
+  return Boolean(db.prepare('SELECT 1 FROM pages WHERE runId = ? AND rawDocumentStateJson IS NOT NULL LIMIT 1').get(runId));
+}
+
+function pageRenderProvenanceForRows(db, runId, rows) {
+  const urls = [...new Set((rows || []).flatMap((row) => [row.url, row.pageUrl, row.sourceUrl, row.sampleUrl]).filter(Boolean))].slice(0, 100);
+  if (!urls.length) return [];
+  const placeholders = urls.map(() => '?').join(',');
+  return db.prepare(`
+    SELECT url, renderStatus, settlingStatus, metadataProvenanceComplete,
+      title AS rawTitle, metaDescription AS rawMetaDescription, canonical AS rawCanonical, htmlLang AS rawHtmlLang,
+      initialRenderedStateJson, settledRenderedStateJson,
+      effectiveTitle, effectiveMetaDescription, effectiveCanonical, effectiveHtmlLang,
+      wordCountRaw, effectiveWordCount, h1Count AS rawH1Count, effectiveH1Count,
+      renderProvenanceVersion, settlingPolicyVersion
+    FROM pages
+    WHERE runId = ? AND url IN (${placeholders})
+    ORDER BY id ASC
+  `).all(runId, ...urls).map((row) => {
+    const initial = safeJson(row.initialRenderedStateJson, {});
+    const settled = safeJson(row.settledRenderedStateJson, {});
+    return {
+      url: row.url,
+      renderStatus: row.renderStatus,
+      settlingStatus: row.settlingStatus,
+      complete: Boolean(row.metadataProvenanceComplete),
+      rawTitle: row.rawTitle,
+      initialTitle: initial.title ?? null,
+      settledTitle: settled.title ?? null,
+      effectiveTitle: row.effectiveTitle,
+      rawMetaDescription: row.rawMetaDescription,
+      settledMetaDescription: settled.metaDescription ?? null,
+      effectiveMetaDescription: row.effectiveMetaDescription,
+      rawCanonical: row.rawCanonical,
+      settledCanonical: settled.canonical ?? null,
+      effectiveCanonical: row.effectiveCanonical,
+      rawHtmlLang: row.rawHtmlLang,
+      settledHtmlLang: settled.htmlLang ?? null,
+      effectiveHtmlLang: row.effectiveHtmlLang,
+      rawWordCount: row.wordCountRaw,
+      initialWordCount: initial.visibleText?.wordCount ?? null,
+      settledWordCount: settled.visibleText?.wordCount ?? null,
+      effectiveWordCount: row.effectiveWordCount,
+      rawH1Count: row.rawH1Count,
+      settledH1Count: settled.h1?.length ?? null,
+      effectiveH1Count: row.effectiveH1Count,
+      renderProvenanceVersion: row.renderProvenanceVersion,
+      settlingPolicyVersion: row.settlingPolicyVersion
+    };
+  });
 }
 
 function safeJson(value, fallback) {

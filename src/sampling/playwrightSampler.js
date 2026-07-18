@@ -1,8 +1,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { countWords } from '../extractors/htmlExtractor.js';
-import { browserVisibleTextEvaluator, normalizeVisibleText, VISIBLE_TEXT_NORMALIZATION_VERSION } from '../extractors/visibleText.js';
+import { VISIBLE_TEXT_NORMALIZATION_VERSION } from '../extractors/visibleText.js';
 import { isInternalUrl, normalizeUrl } from '../utils/url.js';
+import { buildRenderProvenance, settleDocumentState } from '../extractors/renderExtractor.js';
+import { normalizeBrowserEvents, RENDER_PROVENANCE_VERSION, SETTLING_POLICY_VERSION } from '../extractors/documentState.js';
 
 export async function createPlaywrightSampler({
   finalDomain,
@@ -11,7 +12,8 @@ export async function createPlaywrightSampler({
   collectScreenshots = false,
   screenshotDir = null,
   log = null,
-  forceUnavailable = false
+  forceUnavailable = false,
+  settling = null
 } = {}) {
   let browser;
   try {
@@ -24,8 +26,8 @@ export async function createPlaywrightSampler({
       available: false,
       unavailableReason: error.message,
       async close() {},
-      async sample() {
-        return unavailableResult(error.message);
+      async sample(sample) {
+        return unavailableResult(error.message, sample?.url || null);
       }
     };
   }
@@ -46,7 +48,8 @@ export async function createPlaywrightSampler({
         timeoutMs,
         userAgent,
         collectScreenshots,
-        screenshotDir
+        screenshotDir,
+        settling
       });
     }
   };
@@ -59,17 +62,35 @@ async function sampleWithBrowser(browser, sample, options) {
   const cspViolations = [];
   const networkErrors = [];
   const startedAt = Date.now();
+  const navigationStartedAt = new Date(startedAt).toISOString();
   let domContentLoadedMs = null;
+  const events = [];
+  let phase = 'pre_navigation';
+  const observe = (type, message, details = {}) => events.push({ type, message: String(message || '').slice(0, 1000), phase, observedAt: new Date().toISOString(), ...details });
 
   page.on('console', (message) => {
+    if (message.type() === 'warning') {
+      observe('console_warning', message.text());
+      return;
+    }
     if (message.type() === 'error') {
       const value = message.text().slice(0, 1000);
+      if (/service[\s-]?worker/i.test(value)) {
+        observe('service_worker_error', value);
+        return;
+      }
       if (/content security policy|refused to (load|execute|apply|connect|frame)/i.test(value)) cspViolations.push(value);
       else consoleErrors.push(value);
+      observe(/content security policy|refused to (load|execute|apply|connect|frame)/i.test(value) ? 'csp_violation' : 'console_error', value);
     }
   });
   page.on('pageerror', (error) => {
+    if (/service[\s-]?worker/i.test(error.message)) {
+      observe('service_worker_error', error.message);
+      return;
+    }
     pageErrors.push(error.message.slice(0, 1000));
+    observe('pageerror', error.message);
   });
   page.on('requestfailed', (request) => {
     networkErrors.push({
@@ -78,28 +99,35 @@ async function sampleWithBrowser(browser, sample, options) {
       resourceType: request.resourceType(),
       failure: request.failure()?.errorText || 'request failed'
     });
+    observe('request_failed', request.failure()?.errorText || 'request failed', { url: request.url(), resourceType: request.resourceType() });
   });
   page.on('domcontentloaded', () => {
     domContentLoadedMs = Date.now() - startedAt;
   });
 
   try {
-    const response = await page.goto(sample.url, { waitUntil: 'load', timeout: options.timeoutMs });
+    phase = 'navigation';
+    const response = await page.goto(sample.url, { waitUntil: 'domcontentloaded', timeout: options.timeoutMs });
     const loadTimeMs = Date.now() - startedAt;
+    const navigationCompletedAt = new Date().toISOString();
     const finalUrl = normalizeUrl(page.url()) || page.url();
-    const title = await page.title().catch(() => null);
-    const renderedText = normalizeVisibleText(await page.evaluate(browserVisibleTextEvaluator).catch(() => ''));
-    const h1 = await page.locator('h1').evaluateAll((nodes) => nodes.map((node) => node.textContent.trim()).filter(Boolean)).catch(() => []);
-    const links = await page.locator('a[href]').evaluateAll((nodes) => nodes.map((node) => node.href).filter(Boolean)).catch(() => []);
-    const normalizedLinks = [...new Set(links.map((link) => normalizeUrl(link)).filter(Boolean))];
+    phase = 'initial_snapshot';
+    const collected = await settleDocumentState(page, sample.url, 1, options.settling || {}, null, () => { phase = 'settling'; }, options.finalDomain);
+    const initialState = collected.snapshots[0];
+    const settledState = collected.snapshots.at(-1);
+    phase = collected.settling.stable ? 'settled' : 'settling_complete';
+    const title = settledState?.title || null;
+    const h1 = settledState?.h1 || [];
+    const normalizedLinks = settledState?.internalLinks || [];
     const renderedLinksCount = normalizedLinks.length;
-    const renderedWordCount = countWords(renderedText);
+    const renderedWordCount = settledState?.visibleText?.wordCount ?? null;
     const rawWordCount = Number(sample.wordCountRaw || 0);
-    const rawRenderedWordDelta = renderedWordCount - rawWordCount;
+    const rawRenderedWordDelta = renderedWordCount === null ? null : renderedWordCount - rawWordCount;
     const rawH1Count = Number(sample.h1Count || 0);
     const rawInternalLinks = Number(sample.internalLinksCount || 0);
     const renderedInternalLinks = normalizedLinks.filter((link) => isInternalUrl(link, options.finalDomain)).length;
-    const jsRequiredLikely = (
+    const stable = collected.settling.stable;
+    const jsRequiredLikely = stable && (
       (rawWordCount < 100 && renderedWordCount > rawWordCount * 2 && renderedWordCount > 200) ||
       (rawH1Count === 0 && h1.length > 0) ||
       (rawInternalLinks === 0 && renderedInternalLinks > 0)
@@ -110,7 +138,7 @@ async function sampleWithBrowser(browser, sample, options) {
 
     await page.close().catch(() => {});
     return {
-      status: response && response.status() >= 400 ? 'error' : 'success',
+      status: response && response.status() >= 400 ? 'error' : stable ? 'success' : 'unstable',
       finalUrl,
       title,
       h1Count: h1.length,
@@ -129,9 +157,28 @@ async function sampleWithBrowser(browser, sample, options) {
       loadTimeMs,
       domContentLoadedMs,
       navigationError: null,
-      textNormalizationVersion: VISIBLE_TEXT_NORMALIZATION_VERSION
+      textNormalizationVersion: VISIBLE_TEXT_NORMALIZATION_VERSION,
+      settlingStatus: collected.settling.status,
+      settlingDurationMs: collected.settlingDurationMs,
+      renderSnapshotCount: collected.snapshots.length,
+      renderFingerprint: settledState?.semanticFingerprint || null,
+      initialRenderedStateJson: JSON.stringify(initialState),
+      settledRenderedStateJson: JSON.stringify(settledState),
+      renderProvenanceJson: JSON.stringify(buildRenderProvenance(collected.config, collected.snapshots, collected.settling.status, collected.settlingDurationMs, 1, response, {
+        requestedUrl: sample.url,
+        finalUrl,
+        navigationStartedAt,
+        navigationCompletedAt,
+        navigationDurationMs: loadTimeMs
+      })),
+      browserEventsJson: JSON.stringify(normalizeBrowserEvents(events, settledState)),
+      renderProvenanceVersion: RENDER_PROVENANCE_VERSION,
+      settlingPolicyVersion: SETTLING_POLICY_VERSION
     };
   } catch (error) {
+    const failurePhase = phase;
+    const settlingStatus = failurePhase === 'navigation' ? 'navigation_failed' : 'technical_error';
+    const eventType = failurePhase === 'navigation' ? 'navigation_error' : 'runner_error';
     await page.close().catch(() => {});
     return {
       status: 'error',
@@ -153,7 +200,23 @@ async function sampleWithBrowser(browser, sample, options) {
       loadTimeMs: Date.now() - startedAt,
       domContentLoadedMs,
       navigationError: error.message.slice(0, 2000),
-      textNormalizationVersion: VISIBLE_TEXT_NORMALIZATION_VERSION
+      textNormalizationVersion: VISIBLE_TEXT_NORMALIZATION_VERSION,
+      settlingStatus,
+      settlingDurationMs: null,
+      renderSnapshotCount: 0,
+      renderFingerprint: null,
+      initialRenderedStateJson: null,
+      settledRenderedStateJson: null,
+      renderProvenanceJson: JSON.stringify(buildRenderProvenance(options.settling || {}, [], settlingStatus, 0, 1, null, {
+        requestedUrl: sample.url,
+        finalUrl: null,
+        navigationStartedAt,
+        navigationCompletedAt: new Date().toISOString(),
+        navigationDurationMs: Date.now() - startedAt
+      })),
+      browserEventsJson: JSON.stringify(normalizeBrowserEvents([...events, { type: eventType, message: error.message, phase: failurePhase }], null)),
+      renderProvenanceVersion: RENDER_PROVENANCE_VERSION,
+      settlingPolicyVersion: SETTLING_POLICY_VERSION
     };
   }
 }
@@ -165,7 +228,7 @@ async function saveScreenshot(page, screenshotDir, sample) {
   return fs.existsSync(absolutePath) ? absolutePath : null;
 }
 
-function unavailableResult(reason) {
+function unavailableResult(reason, requestedUrl = null) {
   return {
     status: 'unavailable',
     finalUrl: null,
@@ -175,7 +238,7 @@ function unavailableResult(reason) {
     renderedLinksCount: null,
     rawRenderedWordDelta: null,
     consoleErrorsCount: 0,
-    consoleErrorsJson: JSON.stringify([`Playwright unavailable: ${reason}`]),
+    consoleErrorsJson: JSON.stringify([]),
     pageErrorsCount: 0,
     pageErrorsJson: JSON.stringify([]),
     cspViolationsJson: JSON.stringify([]),
@@ -186,6 +249,21 @@ function unavailableResult(reason) {
     loadTimeMs: null,
     domContentLoadedMs: null,
     navigationError: `Playwright unavailable: ${reason}`,
-    textNormalizationVersion: VISIBLE_TEXT_NORMALIZATION_VERSION
+    textNormalizationVersion: VISIBLE_TEXT_NORMALIZATION_VERSION,
+    settlingStatus: 'not_executed',
+    settlingDurationMs: null,
+    renderSnapshotCount: 0,
+    renderFingerprint: null,
+    initialRenderedStateJson: null,
+    settledRenderedStateJson: null,
+    renderProvenanceJson: JSON.stringify(buildRenderProvenance({}, [], 'not_executed', 0, 1, null, { requestedUrl, finalUrl: null })),
+    browserEventsJson: JSON.stringify(normalizeBrowserEvents([{
+      type: 'runner_error',
+      phase: 'audit_instrumentation',
+      message: `Playwright unavailable: ${reason}`,
+      observedAt: new Date().toISOString()
+    }], null)),
+    renderProvenanceVersion: RENDER_PROVENANCE_VERSION,
+    settlingPolicyVersion: SETTLING_POLICY_VERSION
   };
 }

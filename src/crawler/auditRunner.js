@@ -43,6 +43,7 @@ import { buildTemplateClusters } from '../analysis/templateClusterer.js';
 import { runTemplateSampling } from '../sampling/templateSamplingRunner.js';
 import { normalizeEnterpriseConfig } from '../storage/storageProfiles.js';
 import { storeBenchmarkSummary } from '../analysis/benchmarkSummary.js';
+import { normalizeSettlingConfig } from '../extractors/documentState.js';
 
 const activeRuns = new Map();
 
@@ -50,6 +51,13 @@ export function normalizeAuditConfig(input) {
   const fullAuditMode = input.auditMode === 'full' || input.mode === 'full';
   const usePlaywright = input.usePlaywright === true || input.usePlaywright === 'true' || (fullAuditMode && input.usePlaywright !== false && input.usePlaywright !== 'false');
   const lighthouseDevice = input.lighthouseDevice === 'desktop' ? 'desktop' : 'mobile';
+  const settling = normalizeSettlingConfig({
+    maxDurationMs: input.renderSettlingMaxMs,
+    intervalMs: input.renderSettlingIntervalMs,
+    maxSnapshots: input.renderSettlingMaxSnapshots,
+    stableSnapshots: input.renderSettlingStableSnapshots,
+    minimumObservationMs: input.renderSettlingMinimumObservationMs
+  });
   const base = {
     domain: String(input.domain || '').trim(),
     brandName: input.brandName ? String(input.brandName).trim() : null,
@@ -87,6 +95,12 @@ export function normalizeAuditConfig(input) {
     lighthouseCategories: normalizeLighthouseCategories(input.lighthouseCategories),
     lighthouseTimeoutMs: Math.max(1000, Number(input.lighthouseTimeoutMs || crawlerDefaults.lighthouseTimeoutMs)),
     playwrightTimeoutMs: Math.max(1000, Number(input.playwrightTimeoutMs || crawlerDefaults.playwrightTimeoutMs)),
+    renderSettlingMaxMs: settling.maxDurationMs,
+    renderSettlingIntervalMs: settling.intervalMs,
+    renderSettlingMaxSnapshots: settling.maxSnapshots,
+    renderSettlingStableSnapshots: settling.stableSnapshots,
+    renderSettlingMinimumObservationMs: settling.minimumObservationMs,
+    maxConcurrentRenderedPages: Math.max(1, Math.min(4, Number(input.maxConcurrentRenderedPages || crawlerDefaults.maxConcurrentRenderedPages))),
     collectScreenshots: input.collectScreenshots === true || input.collectScreenshots === 'true',
     sampleOnlyIndexable: input.sampleOnlyIndexable === false || input.sampleOnlyIndexable === 'false' ? false : crawlerDefaults.sampleOnlyIndexable,
     sourceType: normalizeSourceType(input.sourceType),
