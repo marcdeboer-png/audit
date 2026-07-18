@@ -23,8 +23,10 @@ import {
   listEvidenceJobsForRun
 } from '../evidenceJobs/evidenceJobRunner.js';
 import { buildEvidenceImpactForRun, renderEvidenceImpactMarkdown } from '../evidenceJobs/evidenceImpactService.js';
+import { requireRunId } from '../scope/runScope.js';
 
 export function collectCheckDetailCsv(db, runId, checkResultId) {
+  requireRunId(runId, 'export check detail');
   const detail = getCheckDetail(db, runId, checkResultId);
   if (!detail) return null;
   const metadataColumns = [
@@ -99,6 +101,7 @@ export function collectCheckDetailCsv(db, runId, checkResultId) {
 }
 
 export function collectFullAuditZip(db, runId, exportTypes) {
+  requireRunId(runId, 'export full audit zip');
   const run = getRunWithProject(db, runId);
   if (!run) return null;
   const warnings = [];
@@ -255,6 +258,7 @@ function withDerivedUnresolved(report = {}) {
 }
 
 export function collectFullAuditJson(db, runId, exportTypes) {
+  requireRunId(runId, 'export full audit json');
   const run = getRunWithProject(db, runId);
   if (!run) return null;
   const warnings = [];
@@ -320,6 +324,7 @@ export function collectFullAuditJson(db, runId, exportTypes) {
       links: tableRows(db, 'page_links', runId, manifest.tableLimits.page_links),
       schemas: tableRows(db, 'schemas', runId, manifest.tableLimits.schemas).map(normalizeJsonFields),
       resources: tableRows(db, 'resources', runId, manifest.tableLimits.resources).map(normalizeJsonFields),
+      httpTimingMeasurements: tableRows(db, 'http_timing_measurements', runId, manifest.tableLimits.http_timing_measurements).map(normalizeJsonFields),
       reviews: tableRows(db, 'finding_reviews', runId),
       warnings,
       files,
@@ -391,6 +396,7 @@ function workingDataEntries(db, runId, run, checkDetails) {
     { path: 'data/links.json', data: () => tableRows(db, 'page_links', runId, manifest.tableLimits.page_links) },
     { path: 'data/images.json', data: () => tableRows(db, 'page_images', runId, manifest.tableLimits.page_images) },
     { path: 'data/resources.json', data: () => tableRows(db, 'resources', runId, manifest.tableLimits.resources).map(normalizeJsonFields) },
+    { path: 'data/http-timing-measurements.json', data: () => tableRows(db, 'http_timing_measurements', runId, manifest.tableLimits.http_timing_measurements).map(normalizeJsonFields) },
     { path: 'data/schemas.json', data: () => tableRows(db, 'schemas', runId, manifest.tableLimits.schemas).map(normalizeJsonFields) },
     { path: 'data/geo-signals.json', data: () => tableRows(db, 'domain_assets', runId).map(normalizeJsonFields) },
     { path: 'data/reviews.json', data: () => tableRows(db, 'finding_reviews', runId) },
@@ -420,6 +426,7 @@ function formatFindingForExport(row) {
   const assessment = safeJson(row.assessmentJson, row.assessment || {});
   const recommendationMeta = safeJson(row.recommendationMetaJson, row.recommendationMeta || {});
   const requirements = safeJson(row.requirementsJson, row.requirements || {});
+  const provenance = safeJson(row.provenanceJson, row.provenance || {});
   return {
     ...row,
     title: row.checkName || row.title || '',
@@ -438,6 +445,8 @@ function formatFindingForExport(row) {
     recommendationMetaJson: row.recommendationMetaJson || JSON.stringify(recommendationMeta),
     requirements,
     requirementsJson: row.requirementsJson || JSON.stringify(requirements),
+    provenance,
+    provenanceJson: row.provenanceJson || JSON.stringify(provenance),
     relatedCheckIds: safeJson(row.relatedCheckIdsJson, row.relatedCheckIds || [])
   };
 }
@@ -465,6 +474,13 @@ function buildAuditSummary(db, runId, run) {
   `).all(runId);
   return {
     runId,
+    projectId: run.projectId || null,
+    provenance: {
+      primaryHost: run.primaryHost || null,
+      gitCommit: run.runtimeGitCommit || null,
+      buildVersion: run.runtimeBuildVersion || null,
+      configHash: run.runtimeConfigHash || null
+    },
     domain: run.finalDomain || run.inputDomain,
     auditType: run.auditType,
     status: run.status,
@@ -531,6 +547,13 @@ function buildRunConfig(run) {
     baselineRunId: run.baselineRunId || null,
     comparisonId: run.comparisonId || null
     ,
+    provenance: {
+      primaryHost: run.primaryHost || null,
+      gitCommit: run.runtimeGitCommit || null,
+      buildVersion: run.runtimeBuildVersion || null,
+      configHash: run.runtimeConfigHash || null,
+      runtime: safeJson(run.runtimeProvenanceJson, null)
+    },
     sourceType: run.sourceType || 'crawl',
     crawlScaleMode: run.crawlScaleMode || 'medium',
     storageProfile: run.storageProfile || 'standard',
@@ -578,12 +601,13 @@ function fallbackCsv(type, error) {
 }
 
 function tableRows(db, table, runId, limit = null) {
+  requireRunId(runId, `export table ${table}`);
   if (!limit) return db.prepare(`SELECT * FROM ${table} WHERE runId = ? ORDER BY id ASC`).all(runId);
   return db.prepare(`SELECT * FROM ${table} WHERE runId = ? ORDER BY id ASC LIMIT ?`).all(runId, limit);
 }
 
 function createExportManifest(db, runId, run) {
-  const tables = ['pages', 'page_links', 'page_images', 'resources', 'schemas', 'domain_assets', 'template_clusters', 'check_results'];
+  const tables = ['pages', 'page_links', 'page_images', 'resources', 'http_timing_measurements', 'schemas', 'domain_assets', 'template_clusters', 'check_results'];
   const tableLimits = exportTableLimits(run);
   const tableStats = {};
   for (const table of tables) {
@@ -603,6 +627,13 @@ function createExportManifest(db, runId, run) {
     version: 1,
     generatedAt: new Date().toISOString(),
     runId,
+    projectId: run.projectId || null,
+    provenance: {
+      primaryHost: run.primaryHost || null,
+      gitCommit: run.runtimeGitCommit || null,
+      buildVersion: run.runtimeBuildVersion || null,
+      configHash: run.runtimeConfigHash || null
+    },
     sourceType: run.sourceType || 'crawl',
     storageProfile: run.storageProfile || 'standard',
     crawlScaleMode: run.crawlScaleMode || null,
@@ -635,6 +666,7 @@ function exportTableLimits(run) {
     page_links: profile === 'lean' ? detailCap : base,
     page_images: profile === 'lean' ? detailCap : base,
     resources: profile === 'lean' ? detailCap : base,
+    http_timing_measurements: base,
     schemas: base,
     domain_assets: null,
     template_clusters: null,

@@ -3211,6 +3211,8 @@ function needsReview(row) {
 
 function renderCheckDetail(detail) {
   const narrative = detail.context || {};
+  const provenance = detail.provenance || {};
+  const provenanceAvailable = Object.keys(provenance).length > 0;
   document.querySelector('#check-detail-export').href = `/api/audits/${currentRunId}/check-results/${detail.checkResultId}/export.csv`;
   document.querySelector('#check-detail-narrative').innerHTML = `
     <div class="detail-meta">
@@ -3225,6 +3227,10 @@ function renderCheckDetail(detail) {
       <dt>So wurde geprüft</dt><dd>${escapeHtml(narrative.howChecked || detail.dataSource || 'stored crawl data')}</dd>
       <dt>Das wurde gefunden</dt><dd>${escapeHtml(narrative.found || '')}</dd>
       <dt>Empfehlung</dt><dd>${escapeHtml(narrative.recommendation || '')}</dd>
+      <dt>Availability</dt><dd>${escapeHtml(detail.evaluationState || 'historisch nicht vorhanden')}${detail.scoreEligible ? ' · scorewirksam' : ' · vom Score ausgeschlossen'}</dd>
+      <dt>Runtime-Provenienz</dt><dd>${provenanceAvailable
+        ? escapeHtml(`Run ${provenance.runId ?? 'n/a'} · Projekt ${provenance.projectId ?? 'n/a'} · ${provenance.collector || provenance.dataSource || 'unbekannte Quelle'} · Check ${provenance.checkId || detail.checkId}@${provenance.checkVersion || detail.checkVersion || 'n/a'} · Commit ${provenance.gitCommit || 'nicht verfügbar'} · Config ${provenance.configHash || 'nicht verfügbar'}`)
+        : 'Für diesen historischen Befund sind keine Runtime-Provenienzdaten gespeichert.'}</dd>
     </dl>
   `;
   const columns = detail.columns || [];

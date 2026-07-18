@@ -13,13 +13,13 @@ export const PAGE_TYPES = Object.freeze([
   'other'
 ]);
 
-export function detectPageType({ url, schemaTypes = [], title = '', h1 = [], h2 = [], bodyText = '', rawHtml = '' }) {
+export function detectPageType({ url, schemaTypes = [], title = '', h1 = [], h2 = [], bodyText = '', rawHtml = '', semanticSignals = {} }) {
   const parsed = safeUrl(url);
   const path = parsed ? normalizeText(parsed.pathname) : '';
   const segments = path.split('/').filter(Boolean);
   const text = normalizeText([title, ...h1, ...h2, path].join(' '));
   const body = normalizeText(bodyText);
-  const html = normalizeText(rawHtml);
+  const html = String(rawHtml || '');
   const schemas = schemaTypes.map((type) => String(type).toLowerCase());
 
   if (!segments.length || ['index', 'index.html', 'home', 'startseite'].includes(segments.at(-1))) {
@@ -27,10 +27,13 @@ export function detectPageType({ url, schemaTypes = [], title = '', h1 = [], h2 
   }
 
   if (segments[0] === 'c') return segments.length === 1 ? 'category_index' : 'category';
+  if (['category', 'categories', 'kategorie', 'kategorien', 'themen', 'topics', 'collection', 'collections'].includes(segments[0])) {
+    return segments.length === 1 ? 'category_index' : 'category';
+  }
   if (segments[0] === 'p' && segments.length >= 2) return 'product';
   if (['store', 'stores', 'filiale', 'filialen'].includes(segments[0]) && segments.length >= 2) return 'location';
 
-  if (matches(text, /\b(impressum|datenschutz|privacy|terms|agb|legal|cookie|cookies|disclaimer)\b/)) {
+  if (isLegalPage({ segments, text, title, h1 })) {
     return 'legal';
   }
 
@@ -52,7 +55,7 @@ export function detectPageType({ url, schemaTypes = [], title = '', h1 = [], h2 
     return 'product';
   }
 
-  if (isArticleDetail({ schemas, segments, path, text })) {
+  if (isArticleDetail({ schemas, segments, path, text, html, semanticSignals })) {
     return 'article';
   }
 
@@ -72,22 +75,23 @@ export function isStrongProductPage({ schemas = [], segments = [], path = '', te
   const pathHasProductPattern = matches(path, /\/(product|products|produkt|produkte|shop|p)\//);
   const hasSlugAfterProductRoot = pathHasProductPattern && segments.length >= 2 && !isIndexOnlySegment(segments.at(-1));
   const productSignals = [
-    /\b(sku|gtin|mpn|artikelnummer|product id|itemprop=["']sku|itemprop=["']gtin)\b/.test(`${text} ${body} ${html}`),
-    /\b(in den warenkorb|add to cart|buy now|checkout|warenkorb)\b/.test(`${text} ${body} ${html}`),
-    /€|\$|£|\b(price|preis|angebot|offer)\b/.test(`${text} ${body} ${html}`),
-    /<form[\s\S]{0,800}(cart|basket|checkout|add-to-cart|warenkorb)/i.test(html)
+    /\b(sku|gtin|mpn|artikelnummer|product id)\b/.test(`${text} ${body}`),
+    /\b(in den warenkorb|add to cart|buy now|checkout|warenkorb)\b/.test(`${text} ${body}`),
+    /€|\$|£|\b(price|preis|angebot|offer)\b/.test(`${text} ${body}`)
   ].filter(Boolean).length;
-  return hasSlugAfterProductRoot && productSignals >= 1 || matches(path, /\/p\/\d+/);
+  return (hasSlugAfterProductRoot && productSignals >= 2) || (matches(path, /\/p\/\d+/) && productSignals >= 1);
 }
 
-function isArticleDetail({ schemas = [], segments = [], path = '', text = '' }) {
+function isArticleDetail({ schemas = [], segments = [], path = '', text = '', html = '', semanticSignals = {} }) {
   if (hasAnySchema(schemas, ['article', 'blogposting', 'newsarticle', 'report']) && !isArchiveOrListingPath(segments, path)) return true;
   const roots = ['blog', 'news', 'article', 'articles', 'artikel', 'ratgeber', 'magazin', 'insights', 'wissen'];
   const hasArticleRoot = segments.some((segment) => roots.includes(segment));
   if (!hasArticleRoot || segments.length < 2) return false;
   if (isArchiveOrListingPath(segments, path)) return false;
   if (matches(path, /\/(tag|tags|category|categories|kategorie|author|autor|archive|page)\/?($|\/)/)) return false;
-  return segments.at(-1)?.length > 2 || matches(text, /\b(article|artikel|ratgeber|guide|post)\b/);
+  const explicitDetailRoot = matches(path, /\/(beitrag|post|posts|article|articles|artikel)\//);
+  const articleElementCount = Number(semanticSignals.articleElementCount || (html.match(/<article\b/gi) || []).length);
+  return explicitDetailRoot || articleElementCount > 0;
 }
 
 function isIndexPath(segments, roots) {
@@ -97,9 +101,30 @@ function isIndexPath(segments, roots) {
 
 function isArchiveOrListingPath(segments, path) {
   if (!segments.length) return false;
-  return matches(path, /\/(tag|tags|author|autor|archive|archives|page|seite)\/?(\d+)?\/?$/) ||
+  return matches(path, /\/(tag|tags|category|categories|kategorie|author|autor|archive|archives|page|seite)(?:\/[^/]+)?\/?$/) ||
     segments.some((segment) => /^\d{4}$/.test(segment)) ||
     (segments.length <= 2 && ['tag', 'tags', 'author', 'autor'].includes(segments[0]));
+}
+
+function isLegalPage({ segments, text, title = '', h1 = [] }) {
+  const exactLegalSegments = new Set([
+    'impressum', 'datenschutz', 'datenschutzerklaerung', 'privacy', 'privacy-policy',
+    'terms', 'terms-of-service', 'agb', 'legal', 'legal-notice', 'cookie-policy',
+    'cookie-richtlinie', 'disclaimer'
+  ]);
+  if (segments.some((segment) => exactLegalSegments.has(segment))) return true;
+  const semanticLabels = [title, ...h1].map((value) => normalizeText(value).trim());
+  if (semanticLabels.some((value) => /^(impressum|datenschutz(?:erklaerung)?|privacy policy|terms(?: of service)?|agb|legal notice|cookie policy|cookie richtlinie|disclaimer)$/.test(value))) return true;
+  return /^(impressum|datenschutz(?:erklaerung)?|privacy policy|terms(?: of service)?|agb|legal notice|cookie policy|cookie richtlinie|disclaimer)(?:\s|$)/.test(text.trim());
+}
+
+export function isArticleSchemaType(type) {
+  return ['article', 'blogposting', 'newsarticle', 'report', 'scholarlyarticle', 'socialmediaposting', 'techarticle']
+    .includes(String(type || '').toLowerCase());
+}
+
+export function hasArticleSchema(schemaTypes = []) {
+  return schemaTypes.some(isArticleSchemaType);
 }
 
 function isIndexOnlySegment(segment = '') {

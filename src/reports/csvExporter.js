@@ -1,5 +1,6 @@
 import { once } from 'node:events';
 import { applyDisplaySemantics } from '../reviews/displaySemantics.js';
+import { createRunScope, requireRunId, scopeSafeCheckResult } from '../scope/runScope.js';
 
 const EXPORTS = {
   findings: {
@@ -22,7 +23,8 @@ const EXPORTS = {
       'findingType', 'reportGroupingKey',
       'isActionable', 'normalizedFindingType', 'displayReviewRecommended',
       'maturityImpact', 'dataBasis', 'evidenceLevel', 'reviewReason',
-      'automationCoverage', 'interpretation', 'limitations'
+      'automationCoverage', 'interpretation', 'limitations',
+      'checkVersion', 'provenanceJson'
     ],
     sql: `
       SELECT
@@ -69,9 +71,11 @@ const EXPORTS = {
         cr.reviewReason,
         cr.automationCoverage,
         cr.interpretation,
-        cr.limitations
+        cr.limitations,
+        cr.checkVersion,
+        cr.provenanceJson
       FROM check_results cr
-      LEFT JOIN finding_reviews fr ON fr.checkResultId = cr.id
+      LEFT JOIN finding_reviews fr ON fr.runId = cr.runId AND fr.checkResultId = cr.id
       WHERE cr.runId = ?
       ORDER BY
         CASE cr.priority WHEN 'High' THEN 1 WHEN 'Medium' THEN 2 ELSE 3 END,
@@ -114,7 +118,7 @@ const EXPORTS = {
         cr.affectedCount,
         cr.sampleUrlsJson AS sampleUrls
       FROM check_results cr
-      LEFT JOIN finding_reviews fr ON fr.checkResultId = cr.id
+      LEFT JOIN finding_reviews fr ON fr.runId = cr.runId AND fr.checkResultId = cr.id
       WHERE cr.runId = ?
       ORDER BY
         CASE COALESCE(fr.reviewStatus, 'unreviewed')
@@ -304,6 +308,7 @@ export function listCsvExports() {
 }
 
 export function getCsvExportSpec(type, runId) {
+  requireRunId(runId, 'get CSV export spec');
   const spec = EXPORTS[type];
   if (!spec) return null;
   return {
@@ -330,29 +335,73 @@ export async function streamCsvExport(db, runId, type, writable) {
   if (!spec) throw new Error(`Unknown CSV export: ${type}`);
 
   const context = {
-    totalPages: db.prepare('SELECT COUNT(*) AS count FROM pages WHERE runId = ?').get(runId).count || 0
+    totalPages: db.prepare('SELECT COUNT(*) AS count FROM pages WHERE runId = ?').get(runId).count || 0,
+    scope: exportRunScope(db, runId)
   };
 
   await write(writable, `${spec.columns.map(csvEscape).join(',')}\n`);
   const statement = db.prepare(spec.sql);
   for (const rawRow of statement.iterate(runId)) {
-    const row = spec.transform ? spec.transform(rawRow, context) : rawRow;
+    const scopedRow = scopeSafeExportRow(rawRow, context.scope);
+    const row = spec.transform ? spec.transform(scopedRow, context) : scopedRow;
     await write(writable, csvLine(spec.columns, row));
   }
 }
 
 export function collectCsvExport(db, runId, type) {
+  requireRunId(runId, 'collect CSV export');
   const spec = getCsvExportSpec(type, runId);
   if (!spec) throw new Error(`Unknown CSV export: ${type}`);
   const context = {
-    totalPages: db.prepare('SELECT COUNT(*) AS count FROM pages WHERE runId = ?').get(runId).count || 0
+    totalPages: db.prepare('SELECT COUNT(*) AS count FROM pages WHERE runId = ?').get(runId).count || 0,
+    scope: exportRunScope(db, runId)
   };
   const lines = [`${spec.columns.map(csvEscape).join(',')}\n`];
   for (const rawRow of db.prepare(spec.sql).iterate(runId)) {
-    const row = spec.transform ? spec.transform(rawRow, context) : rawRow;
+    const scopedRow = scopeSafeExportRow(rawRow, context.scope);
+    const row = spec.transform ? spec.transform(scopedRow, context) : scopedRow;
     lines.push(csvLine(spec.columns, row));
   }
   return lines.join('');
+}
+
+function exportRunScope(db, runId) {
+  const run = db.prepare(`
+    SELECT r.*, p.inputDomain, p.finalDomain
+    FROM runs r JOIN projects p ON p.id = r.projectId
+    WHERE r.id = ?
+  `).get(runId);
+  if (!run) throw new Error(`Run ${runId} not found`);
+  return createRunScope(run, { id: run.projectId, inputDomain: run.inputDomain, finalDomain: run.finalDomain });
+}
+
+function scopeSafeExportRow(row, scope) {
+  if (!row?.checkId) return row;
+  const candidate = {
+    ...row,
+    sampleUrls: safeJson(row.sampleUrls, []),
+    evidence: safeJson(row.evidence || row.evidenceJson, {}),
+    provenance: safeJson(row.provenanceJson, {})
+  };
+  const safe = scopeSafeCheckResult(candidate, scope, { id: row.checkId });
+  if (safe === candidate) return row;
+  return {
+    ...row,
+    ...safe,
+    sampleUrls: '[]',
+    evidence: JSON.stringify(safe.evidence),
+    requirementsJson: JSON.stringify(safe.requirements),
+    effectiveStatus: 'NA',
+    effectiveFinding: safe.finding
+  };
+}
+
+function safeJson(value, fallback) {
+  try {
+    return value ? JSON.parse(value) : fallback;
+  } catch {
+    return fallback;
+  }
 }
 
 async function write(writable, chunk) {

@@ -73,13 +73,15 @@ test('clean fixture audit avoids false positives in core SEO families', async ()
     'tech.canonical_non_self',
     'tech.canonical_target_non_200',
     'tech.h1_missing',
-    'tech.multiple_h1',
-    'tech.noindex_pages'
+    'tech.multiple_h1'
   ]) {
     assert.equal(result(results, checkId).status, 'OK', checkId);
     assert.equal(result(results, checkId).affectedCount, 0, checkId);
     assert.equal(result(results, checkId).displayReviewStatus, 'not_required', checkId);
   }
+  assert.equal(result(results, 'tech.noindex_pages').status, 'NA');
+  assert.equal(result(results, 'tech.noindex_pages').evaluationState, 'not_applicable');
+  assert.equal(result(results, 'tech.noindex_pages').scoreEligible, false);
 
   assert.equal(result(results, 'tech.article_coverage_on_article_like_pages').status, 'OK');
   assert.equal(result(results, 'tech.product_coverage_on_product_like_pages').status, 'NA');
@@ -105,7 +107,7 @@ test('SEO issue fixture triggers exact URL counts, details, CSV and full exports
   assertCheck(results, 'tech.multiple_h1', 'Warning', 1, [`${origin}/multi-h1`]);
   assertCheck(results, 'tech.canonical_to_other_domain', 'Warning', 1, [`${origin}/canonical-external`]);
   assertCheck(results, 'tech.canonical_target_non_200', 'Warning', 1, [`${origin}/canonical-404`]);
-  assertCheck(results, 'tech.noindex_pages', 'Warning', 1, [`${origin}/content-noindex`]);
+  assertCheck(results, 'tech.noindex_pages', 'NA', 0, []);
   assertCheck(results, 'tech.4xx_pages', 'Warning', 1, [`${origin}/not-found`]);
   assertCheck(results, 'tech.internal_links_to_4xx_5xx', 'Error', 1, [`${origin}/broken-link-source`]);
   assertCheck(results, 'tech.redirect_pages', 'Warning', 1, [`${origin}/redirect-me`]);
@@ -113,7 +115,9 @@ test('SEO issue fixture triggers exact URL counts, details, CSV and full exports
   const noindexEvidence = result(results, 'tech.noindex_pages').evidence;
   assert.equal(noindexEvidence.contentNoindexCount, 1);
   assert.equal(noindexEvidence.legalNoindexCount, 1);
-  assert.equal(result(results, 'tech.noindex_pages').sampleUrls.includes(`${origin}/legal-noindex`), false);
+  assert.equal(noindexEvidence.sampleUrls.includes(`${origin}/content-noindex`), true);
+  assert.equal(noindexEvidence.sampleUrls.includes(`${origin}/legal-noindex`), false);
+  assert.equal(result(results, 'tech.noindex_pages').scoreEligible, false);
 
   const titleDetail = detail(db, runId, 'tech.title_too_short');
   assert.deepEqual(detailKeys(titleDetail), ['url', 'title', 'titleLength', 'statusCode', 'pageType', 'indexable', 'recommendation', 'displayReviewStatus', 'displayActionStatus']);
@@ -151,16 +155,13 @@ test('media fixture ignores decorative images and exports usable image detail ro
   const results = allResults(db, runId);
   assertExpectationCompliance(results);
 
-  assertCheck(results, 'tech.images_without_alt', 'Warning', 2, [`${origin}/`]);
+  assertCheck(results, 'tech.images_without_alt', 'Warning', 1, [`${origin}/`]);
   assertCheck(results, 'tech.empty_alt_texts', 'Warning', 1, [`${origin}/`]);
   assertCheck(results, 'tech.images_without_width_height', 'Warning', 1, [`${origin}/`]);
   assertCheck(results, 'tech.images_without_lazy_loading', 'Warning', 1, [`${origin}/`]);
 
   const altRows = detail(db, runId, 'tech.images_without_alt').rows;
-  assert.deepEqual(altRows.map((row) => row.imageUrl).sort(), [
-    `${origin}/assets/content-empty-alt.jpg`,
-    `${origin}/assets/content-no-alt.jpg`
-  ]);
+  assert.deepEqual(altRows.map((row) => row.imageUrl), [`${origin}/assets/content-no-alt.jpg`]);
   assert.equal(altRows.some((row) => /decorative-divider|trust-badge|icon-search|pixel/.test(row.imageUrl)), false);
 
   const dimensionRows = detail(db, runId, 'tech.images_without_width_height').rows;
@@ -172,7 +173,7 @@ test('media fixture ignores decorative images and exports usable image detail ro
   assert.equal(lazyRows[0].loading, '');
 
   const csv = collectCheckDetailCsv(db, runId, idFor(results, 'tech.images_without_width_height')).csv;
-  assert.match(csv, /Page URL,Image URL,Alt,Image Role,Width Attribute,Height Attribute,Loading Attribute/);
+  assert.match(csv, /Page URL,Image URL,Alt,Alt Attribute Present,Trimmed Alt Value,Image Role,Width Attribute,Height Attribute,Loading Attribute/);
   assert.match(csv, /no-dimensions\.jpg/);
   assert.doesNotMatch(csv, /trust-badge\.png/);
 });
@@ -316,10 +317,27 @@ test('seeded status, TTFB and security cases provide detail rows for non-crawlab
   });
   insertSeedPage(db, runId, 'https://fixture.local/server-error', { statusCode: 500 });
   insertSeedPage(db, runId, 'https://fixture.local/redirect', {
-    statusCode: 302,
-    finalUrl: 'https://fixture.local/target'
+    statusCode: 200,
+    initialStatusCode: 302,
+    finalUrl: 'https://fixture.local/target',
+    redirectChainJson: JSON.stringify([
+      { url: 'https://fixture.local/redirect', statusCode: 302, location: 'https://fixture.local/target' },
+      { url: 'https://fixture.local/target', statusCode: 200, location: null }
+    ])
   });
   insertSeedPage(db, runId, 'https://fixture.local/target');
+  const insertTiming = db.prepare(`
+    INSERT INTO http_timing_measurements (
+      runId, url, attempt, warmup, ttfbMs, measurementMode, location
+    ) VALUES (?, ?, ?, 0, ?, 'GET', 'local-fixture')
+  `);
+  for (const [attempt, ttfbMs] of [
+    [1, thresholds.highTtfbMs + 180],
+    [2, thresholds.highTtfbMs + 200],
+    [3, thresholds.highTtfbMs + 220]
+  ]) {
+    insertTiming.run(runId, 'https://fixture.local/slow', attempt, ttfbMs);
+  }
   replacePageArtifacts(db, runId, 'https://fixture.local/source', {
     links: [
       link('https://fixture.local/source', 'https://fixture.local/server-error', 'Server error target'),
@@ -339,7 +357,8 @@ test('seeded status, TTFB and security cases provide detail rows for non-crawlab
   assert.equal(detail(db, runId, 'tech.high_ttfb').rows[0].ttfbMs, thresholds.highTtfbMs + 200);
   assert.equal(detail(db, runId, 'tech.content_security_policy').rows[0].missingHeader, 'content-security-policy');
   assert.equal(detail(db, runId, 'tech.5xx_pages').rows[0].statusCode, 500);
-  assert.equal(detail(db, runId, 'tech.internal_links_to_3xx').rows[0].targetStatus, 302);
+  assert.equal(detail(db, runId, 'tech.internal_links_to_3xx').rows[0].initialStatusCode, 302);
+  assert.equal(detail(db, runId, 'tech.internal_links_to_3xx').rows[0].finalStatusCode, 200);
   db.close();
 });
 
@@ -497,6 +516,8 @@ function insertSeedPage(db, runId, url, overrides = {}) {
     depth: overrides.depth ?? 1,
     sourceUrl: overrides.sourceUrl || null,
     statusCode: overrides.statusCode ?? 200,
+    initialStatusCode: overrides.initialStatusCode ?? overrides.statusCode ?? 200,
+    redirectChainJson: overrides.redirectChainJson || null,
     contentType: overrides.contentType || 'text/html; charset=utf-8',
     indexable: overrides.indexable ?? 1,
     title,

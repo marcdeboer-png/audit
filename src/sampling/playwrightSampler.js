@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { cleanText, countWords } from '../extractors/htmlExtractor.js';
+import { countWords } from '../extractors/htmlExtractor.js';
+import { browserVisibleTextEvaluator, normalizeVisibleText, VISIBLE_TEXT_NORMALIZATION_VERSION } from '../extractors/visibleText.js';
 import { isInternalUrl, normalizeUrl } from '../utils/url.js';
 
 export async function createPlaywrightSampler({
@@ -54,17 +55,21 @@ export async function createPlaywrightSampler({
 async function sampleWithBrowser(browser, sample, options) {
   const page = await browser.newPage(options.userAgent ? { userAgent: options.userAgent } : undefined);
   const consoleErrors = [];
+  const pageErrors = [];
+  const cspViolations = [];
   const networkErrors = [];
   const startedAt = Date.now();
   let domContentLoadedMs = null;
 
   page.on('console', (message) => {
     if (message.type() === 'error') {
-      consoleErrors.push(message.text().slice(0, 1000));
+      const value = message.text().slice(0, 1000);
+      if (/content security policy|refused to (load|execute|apply|connect|frame)/i.test(value)) cspViolations.push(value);
+      else consoleErrors.push(value);
     }
   });
   page.on('pageerror', (error) => {
-    consoleErrors.push(error.message.slice(0, 1000));
+    pageErrors.push(error.message.slice(0, 1000));
   });
   page.on('requestfailed', (request) => {
     networkErrors.push({
@@ -83,7 +88,7 @@ async function sampleWithBrowser(browser, sample, options) {
     const loadTimeMs = Date.now() - startedAt;
     const finalUrl = normalizeUrl(page.url()) || page.url();
     const title = await page.title().catch(() => null);
-    const renderedText = cleanText(await page.locator('body').textContent({ timeout: 2000 }).catch(() => ''));
+    const renderedText = normalizeVisibleText(await page.evaluate(browserVisibleTextEvaluator).catch(() => ''));
     const h1 = await page.locator('h1').evaluateAll((nodes) => nodes.map((node) => node.textContent.trim()).filter(Boolean)).catch(() => []);
     const links = await page.locator('a[href]').evaluateAll((nodes) => nodes.map((node) => node.href).filter(Boolean)).catch(() => []);
     const normalizedLinks = [...new Set(links.map((link) => normalizeUrl(link)).filter(Boolean))];
@@ -114,12 +119,17 @@ async function sampleWithBrowser(browser, sample, options) {
       rawRenderedWordDelta,
       consoleErrorsCount: consoleErrors.length,
       consoleErrorsJson: JSON.stringify(consoleErrors.slice(0, 25)),
+      pageErrorsCount: pageErrors.length,
+      pageErrorsJson: JSON.stringify(pageErrors.slice(0, 25)),
+      cspViolationsJson: JSON.stringify(cspViolations.slice(0, 25)),
       networkErrorsCount: networkErrors.length,
       networkErrorsJson: JSON.stringify(networkErrors.slice(0, 25)),
       jsRequiredLikely,
       screenshotPath,
       loadTimeMs,
-      domContentLoadedMs
+      domContentLoadedMs,
+      navigationError: null,
+      textNormalizationVersion: VISIBLE_TEXT_NORMALIZATION_VERSION
     };
   } catch (error) {
     await page.close().catch(() => {});
@@ -132,13 +142,18 @@ async function sampleWithBrowser(browser, sample, options) {
       renderedLinksCount: null,
       rawRenderedWordDelta: null,
       consoleErrorsCount: consoleErrors.length,
-      consoleErrorsJson: JSON.stringify([...consoleErrors, `Navigation error: ${error.message}`].slice(0, 25)),
+      consoleErrorsJson: JSON.stringify(consoleErrors.slice(0, 25)),
+      pageErrorsCount: pageErrors.length,
+      pageErrorsJson: JSON.stringify(pageErrors.slice(0, 25)),
+      cspViolationsJson: JSON.stringify(cspViolations.slice(0, 25)),
       networkErrorsCount: networkErrors.length,
       networkErrorsJson: JSON.stringify(networkErrors.slice(0, 25)),
       jsRequiredLikely: 0,
       screenshotPath: null,
       loadTimeMs: Date.now() - startedAt,
-      domContentLoadedMs
+      domContentLoadedMs,
+      navigationError: error.message.slice(0, 2000),
+      textNormalizationVersion: VISIBLE_TEXT_NORMALIZATION_VERSION
     };
   }
 }
@@ -161,11 +176,16 @@ function unavailableResult(reason) {
     rawRenderedWordDelta: null,
     consoleErrorsCount: 0,
     consoleErrorsJson: JSON.stringify([`Playwright unavailable: ${reason}`]),
+    pageErrorsCount: 0,
+    pageErrorsJson: JSON.stringify([]),
+    cspViolationsJson: JSON.stringify([]),
     networkErrorsCount: 0,
     networkErrorsJson: JSON.stringify([]),
     jsRequiredLikely: 0,
     screenshotPath: null,
     loadTimeMs: null,
-    domContentLoadedMs: null
+    domContentLoadedMs: null,
+    navigationError: `Playwright unavailable: ${reason}`,
+    textNormalizationVersion: VISIBLE_TEXT_NORMALIZATION_VERSION
   };
 }

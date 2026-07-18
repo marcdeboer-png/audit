@@ -229,6 +229,14 @@ function insertFixturePage(db, runId, url, overrides = {}) {
     wordCountRaw: overrides.wordCountRaw ?? 160,
     wordCountRendered: overrides.wordCountRendered ?? null,
     rawTextLength: overrides.rawTextLength ?? 800,
+    textFactsJson: overrides.textFactsJson || JSON.stringify({
+      normalization_version: 'visible_text_v1',
+      raw_text: { length: overrides.rawTextLength ?? 800 },
+      visible_text: { length: overrides.rawTextLength ?? 800, word_count: overrides.wordCountRaw ?? 160 },
+      rendered_visible_text: null,
+      structured_data_text: { length: 0 },
+      metadata_text: { length: 0 }
+    }),
     renderedTextLength: overrides.renderedTextLength ?? null,
     rawHtmlSize: 3000,
     internalLinksCount: 4,

@@ -53,18 +53,35 @@ export async function fetchWithTimeout(url, options = {}) {
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   const started = Date.now();
   let response;
+  let currentUrl = url;
+  const redirectChain = [];
+  let initialStatusCode = null;
 
   try {
-    response = await fetch(url, {
-      method,
-      redirect,
-      signal: controller.signal,
-      headers: {
-        'user-agent': options.userAgent || crawlerDefaults.userAgent,
-        'accept': 'text/html,application/xhtml+xml,application/xml,text/plain;q=0.9,*/*;q=0.8',
-        ...(options.headers || {})
+    const maxRedirects = Math.max(0, Number(options.maxRedirects ?? 8));
+    for (let attempt = 0; attempt <= maxRedirects; attempt += 1) {
+      response = await fetch(currentUrl, {
+        method,
+        redirect: redirect === 'follow' ? 'manual' : redirect,
+        signal: controller.signal,
+        headers: {
+          'user-agent': options.userAgent || crawlerDefaults.userAgent,
+          'accept': 'text/html,application/xhtml+xml,application/xml,text/plain;q=0.9,*/*;q=0.8',
+          ...(options.headers || {})
+        }
+      });
+      if (initialStatusCode === null) initialStatusCode = response.status;
+      const location = response.headers.get('location');
+      const nextUrl = location ? new URL(location, currentUrl).toString() : null;
+      const isRedirect = response.status >= 300 && response.status < 400;
+      if (isRedirect) redirectChain.push({ url: currentUrl, statusCode: response.status, location: nextUrl });
+      if (redirect === 'follow' && isRedirect && nextUrl) {
+        if (attempt === maxRedirects) throw new Error(`Too many redirects for ${url}`);
+        currentUrl = nextUrl;
+        continue;
       }
-    });
+      break;
+    }
 
     const ttfbMs = Date.now() - started;
     const arrayBuffer = await response.arrayBuffer();
@@ -75,8 +92,10 @@ export async function fetchWithTimeout(url, options = {}) {
 
     return {
       ok: response.ok,
-      url: response.url,
+      url: response.url || currentUrl,
       statusCode: response.status,
+      initialStatusCode,
+      redirectChain,
       contentType: response.headers.get('content-type') || '',
       headers: headersToObject(response.headers),
       body,
@@ -85,7 +104,7 @@ export async function fetchWithTimeout(url, options = {}) {
       truncated,
       ttfbMs,
       loadTimeMs,
-      redirected: response.redirected
+      redirected: redirectChain.length > 0
     };
   } finally {
     clearTimeout(timer);

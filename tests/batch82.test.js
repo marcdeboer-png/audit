@@ -135,6 +135,7 @@ test('UI smoke covers compact start, card worklist, ZIP export and review detail
     assert.match(appJs, /Full Audit Export ZIP/);
     assert.match(appJs, />ToDo</);
     assert.match(appJs, /Technische Details/);
+    assert.match(appJs, /Runtime-Provenienz/);
     assert.match(appJs, /Das ist der Prüfpunkt/);
     assert.match(appJs, /<h3>Review<\/h3>/);
     assert.match(appJs, /isActionItemResult/);
@@ -271,8 +272,11 @@ function seedBatch82Fixture(db) {
   });
 
   db.prepare(`
-    INSERT INTO page_images (runId, pageUrl, imageUrl, alt, hasAlt, loading, width, height, extension, sizeBytes, imageRole)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO page_images (
+      runId, pageUrl, imageUrl, alt, hasAlt, loading, width, height, extension, sizeBytes, imageRole,
+      altAttributePresent, altValue, altValueTrimmed, isDecorativeCandidate
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, NULL, 0)
   `).run(runId, 'https://example.com/short', 'https://example.com/missing-alt.jpg', null, 0, 'eager', '', '', 'jpg', 1200, 'content');
 
   const checks = {

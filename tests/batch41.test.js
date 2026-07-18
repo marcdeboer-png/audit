@@ -77,7 +77,8 @@ test('page type detection separates index pages and conservative product/article
   assert.equal(detectPageType({ url: 'https://example.com/magazin' }), 'article_index');
   assert.equal(detectPageType({ url: 'https://example.com/category' }), 'category_index');
   assert.equal(detectPageType({ url: 'https://example.com/shop' }), 'product_index');
-  assert.equal(detectPageType({ url: 'https://example.com/blog/post-one' }), 'article');
+  assert.equal(detectPageType({ url: 'https://example.com/blog/post-one' }), 'other');
+  assert.equal(detectPageType({ url: 'https://example.com/blog/post-one', rawHtml: '<article><h1>Post one</h1></article>' }), 'article');
   assert.notEqual(detectPageType({ url: 'https://example.com/leistungen/produktberatung', title: 'Produkt Beratung' }), 'product');
   assert.notEqual(detectPageType({ url: 'https://example.com/leistungen/seo/local-seo', title: 'Local SEO Agentur' }), 'location');
   assert.equal(detectPageType({
@@ -133,9 +134,10 @@ test('decorative badge images are not counted as normal missing alt issues', asy
   db.prepare(`
     INSERT INTO page_images (
       runId, pageUrl, imageUrl, alt, hasAlt, width, height, extension,
-      likelyDecorativeImage, likelyBadgeImage, likelyTrackingPixel, likelyIcon, imageRole
+      likelyDecorativeImage, likelyBadgeImage, likelyTrackingPixel, likelyIcon, imageRole,
+      altAttributePresent, altValue, altValueTrimmed, isDecorativeCandidate
     )
-    VALUES (?, 'https://example.com/', 'https://badge.example/trust-badge.png', NULL, 0, '16', '16', '.png', 1, 1, 0, 0, 'badge')
+    VALUES (?, 'https://example.com/', 'https://badge.example/trust-badge.png', NULL, 0, '16', '16', '.png', 1, 1, 0, 0, 'badge', 0, NULL, NULL, 1)
   `).run(runId);
 
   await runChecks(db, runId);

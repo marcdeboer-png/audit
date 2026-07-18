@@ -9,12 +9,14 @@ import {
 } from '../utils/url.js';
 import { selectedHeaders } from '../utils/http.js';
 import { detectPageType } from './pageType.js';
+import { countVisibleWords, extractTextKinds, normalizeVisibleText, VISIBLE_TEXT_NORMALIZATION_VERSION } from './visibleText.js';
 
 export function extractHtml(rawHtml, pageUrl, finalDomain, responseHeaders = {}) {
   const $ = cheerio.load(rawHtml || '');
-  const bodyText = cleanText($('body').text());
-  const rawTextLength = bodyText.length;
-  const wordCountRaw = countWords(bodyText);
+  const textKinds = extractTextKinds(rawHtml || '');
+  const bodyText = textKinds.visibleText;
+  const rawTextLength = textKinds.rawTextLength;
+  const wordCountRaw = countVisibleWords(bodyText);
   const title = cleanText($('head > title').first().text()) || null;
   const metaDescription = attrContent($, 'meta[name="description"]') || null;
   const metaRobots = attrContent($, 'meta[name="robots"]') || null;
@@ -40,8 +42,9 @@ export function extractHtml(rawHtml, pageUrl, finalDomain, responseHeaders = {})
   const noindex = allRobots.includes('noindex');
   const nofollow = allRobots.includes('nofollow');
   const indexable = !noindex;
-  const featureFlags = extractFeatureFlags($, bodyText, links, h2.length, pageUrl);
-  const pageType = detectPageType({ url: pageUrl, schemaTypes, title, h1, h2, bodyText, rawHtml });
+  const semanticSignals = extractSemanticSignals($);
+  const pageType = detectPageType({ url: pageUrl, schemaTypes, title, h1, h2, bodyText, rawHtml, semanticSignals });
+  const featureFlags = extractFeatureFlags($, bodyText, links, h2.length, pageUrl, pageType, semanticSignals);
 
   return {
     page: {
@@ -65,11 +68,20 @@ export function extractHtml(rawHtml, pageUrl, finalDomain, responseHeaders = {})
       nofollow: nofollow ? 1 : 0,
       wordCountRaw,
       rawTextLength,
+      visibleTextLength: textKinds.visibleTextLength,
+      textFactsJson: JSON.stringify({
+        normalization_version: VISIBLE_TEXT_NORMALIZATION_VERSION,
+        raw_text: { length: textKinds.rawTextLength, hash: textKinds.rawTextHash },
+        visible_text: { length: textKinds.visibleTextLength, hash: textKinds.visibleTextHash },
+        rendered_visible_text: null,
+        structured_data_text: { length: textKinds.structuredDataTextLength, hash: textKinds.structuredDataTextHash },
+        metadata_text: { length: textKinds.metadataTextLength, hash: textKinds.metadataTextHash }
+      }),
       internalLinksCount: links.filter((link) => link.linkType === 'internal').length,
       externalLinksCount: links.filter((link) => link.linkType === 'external').length,
       schemaTypesJson: JSON.stringify(schemaTypes),
       imagesCount: images.length,
-      imagesWithoutAltCount: images.filter((image) => !image.hasAlt).length,
+      imagesWithoutAltCount: images.filter((image) => !image.altAttributePresent).length,
       responseHeadersJson: JSON.stringify(selectedHeaders(responseHeaders)),
       ogJson: JSON.stringify(og),
       favicon,
@@ -139,12 +151,14 @@ function extractLinks($, pageUrl, finalDomain) {
   const rows = [];
   $('a[href]').each((_, element) => {
     const href = $(element).attr('href');
+    const linkedUrl = resolveAuthoredUrl(href, pageUrl);
     const normalizedTargetUrl = normalizeUrl(href, pageUrl);
     if (!normalizedTargetUrl) return;
     const linkType = isInternalUrl(normalizedTargetUrl, finalDomain) ? 'internal' : 'external';
     rows.push({
       sourceUrl: pageUrl,
-      targetUrl: normalizedTargetUrl,
+      targetUrl: linkedUrl || normalizedTargetUrl,
+      linkedUrl: linkedUrl || normalizedTargetUrl,
       normalizedTargetUrl,
       linkType,
       anchorText: cleanText($(element).text()).slice(0, 500),
@@ -152,6 +166,15 @@ function extractLinks($, pageUrl, finalDomain) {
     });
   });
   return rows;
+}
+
+function resolveAuthoredUrl(value, baseUrl) {
+  try {
+    const url = new URL(String(value || ''), baseUrl);
+    return ['http:', 'https:'].includes(url.protocol) ? url.toString() : null;
+  } catch {
+    return null;
+  }
 }
 
 function extractImages($, pageUrl) {
@@ -168,6 +191,10 @@ function extractImages($, pageUrl) {
       imageUrl,
       alt,
       hasAlt: alt !== null && alt.trim().length > 0 ? 1 : 0,
+      altAttributePresent: hasAltAttribute ? 1 : 0,
+      altValue: alt,
+      altValueTrimmed: alt === null ? null : alt.trim(),
+      isDecorativeCandidate: classification.likelyDecorativeImage ? 1 : 0,
       loading: $(element).attr('loading') || null,
       width: $(element).attr('width') || null,
       height: $(element).attr('height') || null,
@@ -308,7 +335,7 @@ export function collectSchemaTypes(value, output = new Set()) {
   return [...output];
 }
 
-function extractFeatureFlags($, bodyText, links, h2Count, pageUrl) {
+function extractFeatureFlags($, bodyText, links, h2Count, pageUrl, pageType, semanticSignals = extractSemanticSignals($)) {
   const externalLinks = links.filter((link) => link.linkType === 'external');
   const sourceLinks = externalLinks.filter((link) => {
     const haystack = `${link.anchorText || ''} ${link.targetUrl || ''}`.toLowerCase();
@@ -331,17 +358,12 @@ function extractFeatureFlags($, bodyText, links, h2Count, pageUrl) {
   const faqStrongItemCount = Math.max(headingQuestions.length, faqContainerQuestionCount, detailsQuestionCount);
   const hasFaqPattern = faqStrongItemCount >= 2 && (faqKeyword || faqContainers.length > 0 || detailsQuestionCount >= 2);
   const hasWeakFaqPattern = !hasFaqPattern && (faqKeyword || headingQuestions.length === 1 || faqContainers.length > 0 || detailsQuestionCount === 1);
-  const hasVisibleDate = /\b(20\d{2}|19\d{2})[-/.](0?[1-9]|1[0-2])[-/.](0?[1-9]|[12]\d|3[01])\b/.test(bodyText) ||
-    /\b(0?[1-9]|[12]\d|3[01])\.\s?(0?[1-9]|1[0-2])\.\s?(20\d{2}|19\d{2})\b/.test(bodyText) ||
-    /\b(january|february|march|april|may|june|july|august|september|october|november|december|januar|februar|maerz|märz|april|mai|juni|juli|august|september|oktober|november|dezember)\s+\d{1,2},?\s+(20\d{2}|19\d{2})\b/i.test(bodyText);
-  const hasAuthorPattern = $('[rel="author"], .author, .byline, [class*="author"], [class*="byline"]').length > 0 ||
-    /\b(author|autor|autorin|written by|verfasst von)\b/i.test(bodyText);
+  const visibleTimeSamples = visibleSelectorTexts($, 'time, article [class*="date"], article [class*="publish"], main [class*="date"], main [class*="publish"]');
+  const hasVisibleDate = visibleTimeSamples.some((text) => hasDatePattern(text));
+  const visibleAuthorSamples = visibleSelectorTexts($, '[rel="author"], article .author, article .byline, article [class*="author"], article [class*="byline"], main [rel="author"], main .byline');
+  const hasAuthorPattern = visibleAuthorSamples.some((text) => text.length > 0);
   const videosCount = $('video, iframe[src*="youtube"], iframe[src*="youtu.be"], iframe[src*="vimeo"], iframe[src*="wistia"], iframe[src*="loom"]').length;
-  const articleLike = Boolean(
-    $('article').length ||
-    hasAuthorPattern ||
-    /\/(blog|news|article|insights|magazin|ratgeber)\//i.test(new URLSafePath($, pageUrl))
-  );
+  const articleLike = pageType === 'article';
   const hasTables = $('table').length > 0;
   const hasLists = $('ul,ol').length > 0;
   const htmlSample = $.html().slice(0, 500000);
@@ -364,7 +386,6 @@ function extractFeatureFlags($, bodyText, links, h2Count, pageUrl) {
     dnsPrefetch: $('link[rel~="dns-prefetch"]').length,
     prefetch: $('link[rel~="prefetch"]').length
   };
-  const semanticSignals = extractSemanticSignals($);
   const searchSignals = extractSearchSignals($, bodyText, htmlSample);
 
   return {
@@ -380,8 +401,10 @@ function extractFeatureFlags($, bodyText, links, h2Count, pageUrl) {
     externalSourceLinksCount: sourceLinks.length,
     externalLinksCount: externalLinks.length,
     hasVisibleDate,
+    visibleDateSamples: visibleTimeSamples.slice(0, 5),
     hasAuthorHint: hasAuthorPattern,
     hasAuthorPattern,
+    visibleAuthorSamples: visibleAuthorSamples.slice(0, 5),
     hasPreload: resourceHintCounts.preload > 0 || resourceHintCounts.modulepreload > 0,
     hasPreconnect: resourceHintCounts.preconnect > 0 || resourceHintCounts.dnsPrefetch > 0,
     resourceHintCounts,
@@ -399,7 +422,7 @@ function extractFeatureFlags($, bodyText, links, h2Count, pageUrl) {
     h2Count,
     h3Count: $('h3').length,
     articleLike,
-    productLike: /\/(product|produkt|shop|p)\//i.test(new URLSafePath($, pageUrl)) || $('[itemtype*="Product"]').length > 0,
+    productLike: pageType === 'product',
     lowStructuredSections: countWords(bodyText) > 250 && h2Count < 2 && !hasLists && !hasTables
   };
 }
@@ -506,12 +529,33 @@ function URLSafePath($, pageUrl = '') {
 }
 
 export function cleanText(text) {
-  return String(text || '').replace(/\s+/g, ' ').trim();
+  return normalizeVisibleText(text);
 }
 
 export function countWords(text) {
-  const matches = String(text || '').trim().match(/\b[\p{L}\p{N}'-]+\b/gu);
-  return matches ? matches.length : 0;
+  return countVisibleWords(text);
+}
+
+function visibleSelectorTexts($, selector) {
+  return $(selector)
+    .filter((_, element) => isStaticallyVisible($, element))
+    .map((_, element) => cleanText($(element).text()))
+    .get()
+    .filter(Boolean);
+}
+
+function isStaticallyVisible($, element) {
+  const node = $(element);
+  if (node.is('[hidden], [aria-hidden="true"]')) return false;
+  if (node.closest('[hidden], [aria-hidden="true"], script, style, noscript, template, head, svg').length) return false;
+  const style = String(node.attr('style') || '').toLowerCase().replace(/\s+/g, '');
+  return !style.includes('display:none') && !style.includes('visibility:hidden') && !style.includes('content-visibility:hidden');
+}
+
+function hasDatePattern(text) {
+  return /\b(20\d{2}|19\d{2})[-/.](0?[1-9]|1[0-2])[-/.](0?[1-9]|[12]\d|3[01])\b/.test(text) ||
+    /\b(0?[1-9]|[12]\d|3[01])\.\s?(0?[1-9]|1[0-2])\.\s?(20\d{2}|19\d{2})\b/.test(text) ||
+    /\b(january|february|march|april|may|june|july|august|september|october|november|december|januar|februar|maerz|märz|april|mai|juni|juli|august|september|oktober|november|dezember)\s+\d{1,2},?\s+(20\d{2}|19\d{2})\b/i.test(text);
 }
 
 export function domainFromUrl(url) {

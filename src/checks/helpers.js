@@ -100,7 +100,7 @@ export function sampleUrls(db, runId, where, params = [], limit = 10) {
   return dedupeUrlSamples(db.prepare(`
     SELECT url
     FROM pages
-    WHERE runId = ? AND ${where}
+    WHERE runId = ? AND (${where})
     ORDER BY id ASC
     LIMIT ?
   `).all(runId, ...params, limit * 3).map((row) => row.url), limit);
@@ -161,7 +161,7 @@ export function htmlPageCount(db, runId) {
   return count(db, `SELECT COUNT(*) AS count FROM pages WHERE runId = ? AND ${HTML_WHERE}`, [runId]);
 }
 
-export function issueCheck({ id, category, name, auditType = 'tech', priority = 'Medium', effort = 'M', where, status = 'Error', recommendation = '' }) {
+export function issueCheck({ id, category, name, auditType = 'tech', priority = 'Medium', effort = 'M', where, scopeWhere = null, status = 'Error', recommendation = '' }) {
   return {
     id,
     category,
@@ -179,7 +179,19 @@ export function issueCheck({ id, category, name, auditType = 'tech', priority = 
           evidence: { totalPages: 0, condition: where }
         });
       }
-      const affectedCount = count(ctx.db, `SELECT COUNT(*) AS count FROM pages WHERE runId = ? AND ${where}`, [ctx.run.id]);
+      if (scopeWhere) {
+        const eligiblePages = count(ctx.db, `SELECT COUNT(*) AS count FROM pages WHERE runId = ? AND (${scopeWhere})`, [ctx.run.id]);
+        if (!eligiblePages) {
+          return availabilityResult(this, 'not_applicable', {
+            finding: `${name}: no eligible page is in scope.`,
+            details: 'Assets, redirects, errors and ineligible page types are excluded before evaluation.',
+            facts: { totalPages, eligiblePages: 0 },
+            evidence: { runId: ctx.run.id, scopeWhere },
+            requirements: { requiredFacts: ['eligibleSuccessfulHtmlPage'], missingFacts: [], minimumCoverage: 1, canCollectWithTargetedRun: true }
+          });
+        }
+      }
+      const affectedCount = count(ctx.db, `SELECT COUNT(*) AS count FROM pages WHERE runId = ? AND (${where})`, [ctx.run.id]);
       const samples = affectedCount ? sampleUrls(ctx.db, ctx.run.id, where) : [];
       return makeResult(this, affectedCount ? status : 'OK', {
         affectedCount,

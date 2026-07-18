@@ -194,13 +194,15 @@ function insertPlaywrightResult(db, runId, sample, result) {
     INSERT INTO playwright_results (
       runId, templateClusterId, templateClusterKey, url, status, finalUrl, title,
       h1Count, renderedWordCount, renderedLinksCount, rawRenderedWordDelta,
-      consoleErrorsCount, consoleErrorsJson, networkErrorsCount, networkErrorsJson,
+      consoleErrorsCount, consoleErrorsJson, pageErrorsCount, pageErrorsJson, cspViolationsJson,
+      networkErrorsCount, networkErrorsJson, navigationError, textNormalizationVersion,
       jsRequiredLikely, screenshotPath, loadTimeMs, domContentLoadedMs
     )
     VALUES (
       @runId, @templateClusterId, @templateClusterKey, @url, @status, @finalUrl, @title,
       @h1Count, @renderedWordCount, @renderedLinksCount, @rawRenderedWordDelta,
-      @consoleErrorsCount, @consoleErrorsJson, @networkErrorsCount, @networkErrorsJson,
+      @consoleErrorsCount, @consoleErrorsJson, @pageErrorsCount, @pageErrorsJson, @cspViolationsJson,
+      @networkErrorsCount, @networkErrorsJson, @navigationError, @textNormalizationVersion,
       @jsRequiredLikely, @screenshotPath, @loadTimeMs, @domContentLoadedMs
     )
   `).run({
@@ -237,8 +239,7 @@ function insertLighthouseResult(db, runId, sample, result) {
 
 function errorFromPlaywright(result, unavailableReason) {
   if (result.status === 'unavailable') return unavailableReason || 'unavailable';
-  const errors = safeJson(result.consoleErrorsJson, []);
-  return errors[0] || 'rendering failed';
+  return result.navigationError || safeJson(result.pageErrorsJson, [])[0] || 'rendering failed';
 }
 
 function safeJson(value, fallback) {

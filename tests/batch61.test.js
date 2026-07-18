@@ -44,11 +44,14 @@ test('legal noindex is separated from content noindex findings', async () => {
   const evidence = JSON.parse(noindex.evidenceJson);
   const samples = JSON.parse(noindex.sampleUrlsJson);
 
-  assert.equal(noindex.status, 'Warning');
-  assert.equal(noindex.affectedCount, 1);
+  assert.equal(noindex.status, 'NA');
+  assert.equal(noindex.evaluationState, 'not_applicable');
+  assert.equal(noindex.scoreEligible, 0);
+  assert.equal(noindex.affectedCount, 0);
   assert.equal(evidence.legalNoindexCount, 1);
   assert.equal(evidence.contentNoindexCount, 1);
-  assert.deepEqual(samples, ['https://example.com/blog/post']);
+  assert.deepEqual(samples, []);
+  assert.deepEqual(evidence.sampleUrls, ['https://example.com/blog/post']);
 
   db.close();
 });

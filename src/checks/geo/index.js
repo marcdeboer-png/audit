@@ -10,6 +10,8 @@ import {
   sampleUrls
 } from '../helpers.js';
 import { blocksTxtFiles, summarizeAiBotRules } from '../../utils/robots.js';
+import { hasArticleSchema } from '../../extractors/pageType.js';
+import { hasVisibleTextProvenance, VISIBLE_TEXT_NORMALIZATION_VERSION } from '../../extractors/visibleText.js';
 
 const geo = (id, category, name, run, options = {}) => ({
   id: `geo.${id}`,
@@ -34,6 +36,7 @@ const trust = (id, category, name, run, options = {}) => ({
 });
 
 const AI_BOTS = ['GPTBot', 'OAI-SearchBot', 'ChatGPT-User', 'ClaudeBot', 'Claude-Web', 'PerplexityBot', 'Google-Extended', 'CCBot', 'Applebot', 'Bytespider'];
+const VISIBLE_TEXT_FACTS_WHERE = `COALESCE(textFactsJson, '') LIKE '%"normalization_version":"${VISIBLE_TEXT_NORMALIZATION_VERSION}"%'`;
 const ABOUT_TARGET_PATTERNS = [
   { needle: '/about', pattern: /(^|\/)about(\/|$)/i },
   { needle: '/about-us', pattern: /(^|\/)about-us(\/|$)/i },
@@ -202,7 +205,7 @@ function llmsFullTxtPresent() {
     const gate = assetHttpResponseGate(this, asset, 'llmsFullHttpResponse');
     if (gate) return gate;
     const ok = asset && asset.statusCode >= 200 && asset.statusCode < 300;
-    const references = llmsFullReferences(ctx);
+    const references = llmsFullReferences(ctx, asset?.url);
     if (!ok && !references.length) {
       return availabilityResult(this, 'not_applicable', {
         finding: `llms-full.txt returned ${asset?.statusCode ?? 'no stable response'} and is not referenced; the optional file was not scored as a defect.`,
@@ -233,16 +236,17 @@ function llmsFullTxtPresent() {
   }, { priority: 'Low' });
 }
 
-function llmsFullReferences(ctx) {
+function llmsFullReferences(ctx, candidateUrl) {
   const references = [];
+  const candidate = comparableUrl(candidateUrl);
   const assets = all(ctx.db, `
     SELECT type, url, content
     FROM domain_assets
     WHERE runId = ?
   `, [ctx.run.id]);
   for (const asset of assets) {
-    if (/llms-full\.txt/i.test(asset.content || '')) {
-      references.push({ sourceType: asset.type, sourceUrl: asset.url });
+    if (/llms-full\.txt/i.test(asset.content || '') && comparableUrl(asset.url) !== candidate) {
+      references.push({ sourceType: asset.type, sourceUrl: asset.url, targetUrl: candidateUrl || null });
     }
   }
   const linkRows = all(ctx.db, `
@@ -251,15 +255,31 @@ function llmsFullReferences(ctx) {
     WHERE runId = ? AND LOWER(targetUrl) LIKE '%llms-full.txt%'
     LIMIT 10
   `, [ctx.run.id]);
-  for (const row of linkRows) references.push({ sourceType: 'html_link', sourceUrl: row.sourceUrl, targetUrl: row.targetUrl });
+  for (const row of linkRows) {
+    if (comparableUrl(row.sourceUrl) === comparableUrl(row.targetUrl)) continue;
+    references.push({ sourceType: 'html_link', sourceUrl: row.sourceUrl, targetUrl: row.targetUrl });
+  }
   const resourceRows = all(ctx.db, `
     SELECT pageUrl, resourceUrl
     FROM resources
     WHERE runId = ? AND LOWER(resourceUrl) LIKE '%llms-full.txt%'
     LIMIT 10
   `, [ctx.run.id]);
-  for (const row of resourceRows) references.push({ sourceType: 'resource', sourceUrl: row.pageUrl, targetUrl: row.resourceUrl });
+  for (const row of resourceRows) {
+    if (comparableUrl(row.pageUrl) === comparableUrl(row.resourceUrl)) continue;
+    references.push({ sourceType: 'resource', sourceUrl: row.pageUrl, targetUrl: row.resourceUrl });
+  }
   return references.slice(0, 20);
+}
+
+function comparableUrl(value) {
+  try {
+    const url = new URL(value);
+    url.hash = '';
+    return url.toString().replace(/\/$/, '').toLowerCase();
+  } catch {
+    return String(value || '').trim().replace(/\/$/, '').toLowerCase();
+  }
 }
 
 function robotsBlocksTxt() {
@@ -358,7 +378,7 @@ function eeatSignalSummary() {
   return trust('eeat_signal_summary', 'Trust & Review Signals', 'E-E-A-T technical signal summary', function run(ctx) {
     const totalHtmlPages = htmlPageCount(ctx.db, ctx.run.id);
     const rows = all(ctx.db, `
-      SELECT url, pageType, hasAuthorPattern, hasVisibleDate, externalSourceLinksCount, schemaTypesJson
+      SELECT url, pageType, hasAuthorPattern, hasVisibleDate, externalSourceLinksCount, schemaTypesJson, textFactsJson
       FROM pages
       WHERE runId = ? AND ${HTML_WHERE}
       ORDER BY id ASC
@@ -376,6 +396,12 @@ function eeatSignalSummary() {
     }
     const presentTrustLinks = trustLinkSignals(ctx.db, ctx.run.id);
     const articleRows = rows.filter((row) => row.pageType === 'article');
+    const articleRowsMissingVisibleTextProvenance = articleRows.filter((row) => !hasVisibleTextProvenance(row.textFactsJson)).length;
+    if (articleRowsMissingVisibleTextProvenance) return availabilityResult(this, 'insufficient_evidence', {
+      finding: `${articleRowsMissingVisibleTextProvenance}/${articleRows.length} article row(s) lack visible_text provenance; author/date body matches were excluded from trust assessment.`,
+      evidence: { sampledPages: rows.length, articlePages: articleRows.length, articleRowsMissingVisibleTextProvenance, presentTrustLinks },
+      requirements: { requiredFacts: ['articlePageClassification', 'visibleTextProvenance', 'authorAndSourceSignals'], missingFacts: ['visibleTextProvenance'], minimumCoverage: 1, canCollectWithTargetedRun: true }
+    });
     const articleAuthorRows = articleRows.filter((row) => Number(row.hasAuthorPattern || 0) > 0);
     const articleSourceRows = articleRows.filter((row) => Number(row.externalSourceLinksCount || 0) > 0);
     const schemaRows = rows.filter((row) => /Organization|LocalBusiness|Person/i.test(row.schemaTypesJson || ''));
@@ -622,11 +648,17 @@ function articleSignalCoverage(id, category, name, column, label) {
       COALESCE(pageType, 'other') = 'article' OR
       featureFlagsJson LIKE '%"articleLike":true%'
     )`;
-    const total = count(ctx.db, `SELECT COUNT(*) AS count FROM pages WHERE runId = ? AND ${candidateWhere}`, [ctx.run.id]);
+    const total = count(ctx.db, `SELECT COUNT(*) AS count FROM pages WHERE runId = ? AND (${candidateWhere})`, [ctx.run.id]);
+    const missingNormalizedTextFacts = total ? count(ctx.db, `SELECT COUNT(*) AS count FROM pages WHERE runId = ? AND (${candidateWhere}) AND NOT (${VISIBLE_TEXT_FACTS_WHERE})`, [ctx.run.id]) : 0;
+    if (missingNormalizedTextFacts) return availabilityResult(this, 'insufficient_evidence', {
+      finding: `${missingNormalizedTextFacts}/${total} article-like candidate(s) lack visible_text provenance; legacy body/script matches were not treated as ${label} evidence.`,
+      evidence: { candidatePages: total, missingNormalizedTextFacts, signalColumn: column, normalization: VISIBLE_TEXT_NORMALIZATION_VERSION },
+      requirements: { requiredFacts: ['articleLikePageClassification', `${column}Observation`, 'visibleTextProvenance'], optionalFacts: ['editorialPolicy'], missingFacts: ['visibleTextProvenance'], minimumCoverage: 1, canCollectWithTargetedRun: true }
+    });
     const signalWhere = `${candidateWhere} AND ${column} = 1`;
-    const signalCount = total ? count(ctx.db, `SELECT COUNT(*) AS count FROM pages WHERE runId = ? AND ${signalWhere}`, [ctx.run.id]) : 0;
+    const signalCount = total ? count(ctx.db, `SELECT COUNT(*) AS count FROM pages WHERE runId = ? AND (${signalWhere})`, [ctx.run.id]) : 0;
     const missingWhere = `${candidateWhere} AND COALESCE(${column}, 0) = 0`;
-    const missingCount = total ? count(ctx.db, `SELECT COUNT(*) AS count FROM pages WHERE runId = ? AND ${missingWhere}`, [ctx.run.id]) : 0;
+    const missingCount = total ? count(ctx.db, `SELECT COUNT(*) AS count FROM pages WHERE runId = ? AND (${missingWhere})`, [ctx.run.id]) : 0;
     const status = !total ? 'NA' : missingCount ? 'Warning' : 'OK';
     return makeResult(this, status, {
       evaluationState: !total ? 'not_applicable' : missingCount ? 'fail' : 'pass',
@@ -650,10 +682,10 @@ function sourceLinksPresent() {
       COALESCE(pageType, 'other') = 'article' OR
       featureFlagsJson LIKE '%"articleLike":true%'
     )`;
-    const total = count(ctx.db, `SELECT COUNT(*) AS count FROM pages WHERE runId = ? AND ${candidateWhere}`, [ctx.run.id]);
-    const sourcePages = total ? count(ctx.db, `SELECT COUNT(*) AS count FROM pages WHERE runId = ? AND ${candidateWhere} AND externalSourceLinksCount > 0`, [ctx.run.id]) : 0;
+    const total = count(ctx.db, `SELECT COUNT(*) AS count FROM pages WHERE runId = ? AND (${candidateWhere})`, [ctx.run.id]);
+    const sourcePages = total ? count(ctx.db, `SELECT COUNT(*) AS count FROM pages WHERE runId = ? AND (${candidateWhere}) AND externalSourceLinksCount > 0`, [ctx.run.id]) : 0;
     const missingWhere = `${candidateWhere} AND COALESCE(externalSourceLinksCount, 0) = 0`;
-    const missingCount = total ? count(ctx.db, `SELECT COUNT(*) AS count FROM pages WHERE runId = ? AND ${missingWhere}`, [ctx.run.id]) : 0;
+    const missingCount = total ? count(ctx.db, `SELECT COUNT(*) AS count FROM pages WHERE runId = ? AND (${missingWhere})`, [ctx.run.id]) : 0;
     return makeResult(this, !total ? 'NA' : sourcePages ? 'OK' : 'Warning', {
       evaluationState: !total ? 'not_applicable' : sourcePages ? 'pass' : 'fail',
       affectedCount: missingCount,
@@ -836,19 +868,19 @@ function breadcrumbPresence() {
     const candidatePages = count(ctx.db, `
       SELECT COUNT(*) AS count
       FROM pages
-      WHERE runId = ? AND ${candidateWhere}
+      WHERE runId = ? AND (${candidateWhere})
     `, [ctx.run.id]);
     const rows = all(ctx.db, `
       SELECT url
       FROM pages
-      WHERE runId = ? AND ${candidateWhere}
+      WHERE runId = ? AND (${candidateWhere})
         AND COALESCE(schemaTypesJson, '') LIKE '%BreadcrumbList%'
       LIMIT 10
     `, [ctx.run.id]);
     const pagesWithBreadcrumbList = rows.length ? count(ctx.db, `
       SELECT COUNT(*) AS count
       FROM pages
-      WHERE runId = ? AND ${candidateWhere}
+      WHERE runId = ? AND (${candidateWhere})
         AND COALESCE(schemaTypesJson, '') LIKE '%BreadcrumbList%'
     `, [ctx.run.id]) : 0;
     const coverage = candidatePages ? pagesWithBreadcrumbList / candidatePages : null;
@@ -867,21 +899,43 @@ function breadcrumbPresence() {
 
 function articleBlogWithArticleSchema() {
   return geo('article_blog_pages_article_schema', 'Structured Data', 'Article/Blog-Seiten mit Article Schema', function run(ctx) {
-    const candidateCount = count(ctx.db, "SELECT COUNT(*) AS count FROM pages WHERE runId = ? AND pageType = 'article'", [ctx.run.id]);
-    const rows = all(ctx.db, `
-      SELECT url
+    const candidates = all(ctx.db, `
+      SELECT url, schemaTypesJson, textFactsJson, featureFlagsJson
       FROM pages
-      WHERE runId = ? AND pageType = 'article' AND COALESCE(schemaTypesJson, '') NOT LIKE '%Article%'
-      LIMIT 10
+      WHERE runId = ? AND pageType = 'article' AND statusCode >= 200 AND statusCode < 300
+        AND (contentType LIKE '%text/html%' OR contentType LIKE '%application/xhtml%')
+        AND COALESCE(indexable, 1) = 1
+      ORDER BY id ASC
     `, [ctx.run.id]);
+    const classified = candidates.map((row) => {
+      const schemaMatches = hasArticleSchema(safeJson(row.schemaTypesJson, []));
+      const flags = safeJson(row.featureFlagsJson, {});
+      const classificationReliable = schemaMatches || hasVisibleTextProvenance(row.textFactsJson) && (
+        Number(flags.articleElementCount || 0) > 0 ||
+        /\/(beitrag|post|posts|article|articles|artikel)\//i.test(String(row.url || ''))
+      );
+      return { ...row, schemaMatches, classificationReliable };
+    });
+    const uncertain = classified.filter((row) => !row.classificationReliable);
+    const evaluable = classified.filter((row) => row.classificationReliable);
+    const missing = evaluable.filter((row) => !row.schemaMatches);
+    const rows = missing.slice(0, 10);
+    const candidateCount = candidates.length;
+    if (candidateCount && uncertain.length && !missing.length) return availabilityResult(this, 'insufficient_evidence', {
+      finding: `${evaluable.length}/${candidateCount} stored article candidate(s) have reliable classification evidence; ${uncertain.length} ambiguous legacy row(s) were excluded.`,
+      evidence: { candidateCount, evaluableCandidates: evaluable.length, uncertainCandidates: uncertain.length, acceptedTypes: ['Article', 'BlogPosting', 'NewsArticle', 'Report', 'ScholarlyArticle', 'SocialMediaPosting', 'TechArticle'], uncertainSamples: uncertain.slice(0, 10).map((row) => row.url) },
+      requirements: { requiredFacts: ['reliableArticlePageClassification', 'schemaTypeExtraction'], missingFacts: ['reliableArticlePageClassification'], minimumCoverage: 1, canCollectWithTargetedRun: true },
+      reportGroupingKey: 'schema.article',
+      relatedCheckIds: ['tech.article_coverage_on_article_like_pages']
+    });
     const status = candidateCount ? (rows.length ? 'Warning' : 'OK') : 'NA';
     return makeResult(this, status, {
-      affectedCount: rows.length,
+      affectedCount: missing.length,
       sampleUrls: rows.map((row) => row.url),
-      finding: candidateCount ? `${rows.length}/${candidateCount} article page(s) lack Article schema.` : 'No article pages detected by stored heuristics.',
+      finding: candidateCount ? `${missing.length}/${candidateCount} article page(s) lack an Article-compatible schema type.` : 'No unambiguous, successful, indexable article pages were detected.',
       recommendation: 'Use Article schema on qualifying editorial pages.',
       details: "Evaluated only pages classified as pageType='article'.",
-      evidence: { candidateCount, missingArticleSchemaSamples: rows.map((row) => row.url) },
+      evidence: { candidateCount, evaluableCandidates: evaluable.length, uncertainCandidates: uncertain.length, affectedCount: missing.length, displayedSamples: rows.length, acceptedTypes: ['Article', 'BlogPosting', 'NewsArticle', 'Report', 'ScholarlyArticle', 'SocialMediaPosting', 'TechArticle'], missingArticleSchemaSamples: rows.map((row) => row.url) },
       findingType: 'opportunity',
       reportGroupingKey: 'schema.article',
       relatedCheckIds: ['tech.article_coverage_on_article_like_pages']
@@ -891,6 +945,16 @@ function articleBlogWithArticleSchema() {
 
 function lowStructuredSections() {
   return geo('low_structured_sections', 'Content Structure', 'Seiten mit wenig strukturierten Abschnitten markieren', function run(ctx) {
+    const legacySignals = count(ctx.db, `
+      SELECT COUNT(*) AS count
+      FROM pages
+      WHERE runId = ? AND featureFlagsJson LIKE '%"lowStructuredSections":true%' AND NOT (${VISIBLE_TEXT_FACTS_WHERE})
+    `, [ctx.run.id]);
+    if (legacySignals) return availabilityResult(this, 'insufficient_evidence', {
+      finding: `${legacySignals} low-structure signal(s) lack visible_text provenance; script/hydration text was not accepted as visible content evidence.`,
+      evidence: { legacySignals, normalization: VISIBLE_TEXT_NORMALIZATION_VERSION },
+      requirements: { requiredFacts: ['visibleTextProvenance', 'headingAndListStructure'], missingFacts: ['visibleTextProvenance'], minimumCoverage: 1, canCollectWithTargetedRun: true }
+    });
     const rows = all(ctx.db, `
       SELECT url
       FROM pages

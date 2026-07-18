@@ -134,6 +134,11 @@ export function initDatabase(database = getDb()) {
       llmDryRun INTEGER NOT NULL DEFAULT 1,
       llmWarningsJson TEXT,
       benchmarkSummaryJson TEXT,
+      primaryHost TEXT,
+      runtimeGitCommit TEXT,
+      runtimeBuildVersion TEXT,
+      runtimeConfigHash TEXT,
+      runtimeProvenanceJson TEXT,
       FOREIGN KEY (projectId) REFERENCES projects(id)
     );
 
@@ -171,6 +176,8 @@ export function initDatabase(database = getDb()) {
       depth INTEGER NOT NULL,
       sourceUrl TEXT,
       statusCode INTEGER,
+      initialStatusCode INTEGER,
+      redirectChainJson TEXT,
       contentType TEXT,
       indexable INTEGER,
       noindex INTEGER NOT NULL DEFAULT 0,
@@ -195,6 +202,9 @@ export function initDatabase(database = getDb()) {
       wordCountRendered INTEGER,
       rawTextLength INTEGER,
       renderedTextLength INTEGER,
+      visibleTextLength INTEGER,
+      renderedVisibleTextLength INTEGER,
+      textFactsJson TEXT,
       rawHtmlSize INTEGER,
       internalLinksCount INTEGER,
       externalLinksCount INTEGER,
@@ -214,6 +224,11 @@ export function initDatabase(database = getDb()) {
       loadTimeMs INTEGER,
       ttfbMs INTEGER,
       consoleErrorsJson TEXT,
+      pageErrorsJson TEXT,
+      requestFailuresJson TEXT,
+      cspViolationsJson TEXT,
+      navigationError TEXT,
+      renderStatus TEXT,
       renderedH1Json TEXT,
       renderedH1Count INTEGER,
       renderedLinksCount INTEGER,
@@ -296,11 +311,16 @@ export function initDatabase(database = getDb()) {
       runId INTEGER NOT NULL,
       sourceUrl TEXT NOT NULL,
       targetUrl TEXT NOT NULL,
+      linkedUrl TEXT,
       normalizedTargetUrl TEXT,
       linkType TEXT NOT NULL,
       anchorText TEXT,
       rel TEXT,
       statusCode INTEGER,
+      initialStatusCode INTEGER,
+      redirectChainJson TEXT,
+      finalUrl TEXT,
+      finalStatusCode INTEGER,
       createdAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (runId) REFERENCES runs(id)
     );
@@ -317,6 +337,10 @@ export function initDatabase(database = getDb()) {
       height TEXT,
       extension TEXT,
       sizeBytes INTEGER,
+      altAttributePresent INTEGER,
+      altValue TEXT,
+      altValueTrimmed TEXT,
+      isDecorativeCandidate INTEGER,
       createdAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (runId) REFERENCES runs(id)
     );
@@ -329,9 +353,25 @@ export function initDatabase(database = getDb()) {
       resourceType TEXT NOT NULL,
       statusCode INTEGER,
       sizeBytes INTEGER,
+      sizeMeasurementKind TEXT,
+      sizeMeasurementError TEXT,
       contentType TEXT,
       isThirdParty INTEGER NOT NULL DEFAULT 0,
       responseHeadersJson TEXT,
+      createdAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (runId) REFERENCES runs(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS http_timing_measurements (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      runId INTEGER NOT NULL,
+      url TEXT NOT NULL,
+      attempt INTEGER NOT NULL,
+      warmup INTEGER NOT NULL DEFAULT 0,
+      ttfbMs REAL,
+      location TEXT,
+      measurementMode TEXT,
+      error TEXT,
       createdAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (runId) REFERENCES runs(id)
     );
@@ -448,6 +488,8 @@ export function initDatabase(database = getDb()) {
       interpretation TEXT,
       limitations TEXT,
       relatedCheckIdsJson TEXT,
+      checkVersion TEXT,
+      provenanceJson TEXT,
       createdAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (runId) REFERENCES runs(id)
     );
@@ -503,8 +545,13 @@ export function initDatabase(database = getDb()) {
       rawRenderedWordDelta INTEGER,
       consoleErrorsCount INTEGER,
       consoleErrorsJson TEXT,
+      pageErrorsCount INTEGER,
+      pageErrorsJson TEXT,
+      cspViolationsJson TEXT,
       networkErrorsCount INTEGER,
       networkErrorsJson TEXT,
+      navigationError TEXT,
+      textNormalizationVersion TEXT,
       jsRequiredLikely INTEGER NOT NULL DEFAULT 0,
       screenshotPath TEXT,
       loadTimeMs INTEGER,
@@ -685,6 +732,8 @@ export function initDatabase(database = getDb()) {
       ON page_links(runId, normalizedTargetUrl);
     CREATE INDEX IF NOT EXISTS idx_resources_run_page
       ON resources(runId, pageUrl);
+    CREATE INDEX IF NOT EXISTS idx_http_timing_run_url
+      ON http_timing_measurements(runId, url, warmup, attempt);
     CREATE INDEX IF NOT EXISTS idx_schemas_run_type
       ON schemas(runId, schemaType);
     CREATE INDEX IF NOT EXISTS idx_page_snapshots_run_url
@@ -750,7 +799,17 @@ export function initDatabase(database = getDb()) {
     ['lighthouseSeoScore', 'REAL'],
     ['importedSourceTypesJson', 'TEXT'],
     ['templateClusterId', 'INTEGER'],
-    ['templateClusterKey', 'TEXT']
+    ['templateClusterKey', 'TEXT'],
+    ['initialStatusCode', 'INTEGER'],
+    ['redirectChainJson', 'TEXT'],
+    ['visibleTextLength', 'INTEGER'],
+    ['renderedVisibleTextLength', 'INTEGER'],
+    ['textFactsJson', 'TEXT'],
+    ['pageErrorsJson', 'TEXT'],
+    ['requestFailuresJson', 'TEXT'],
+    ['cspViolationsJson', 'TEXT'],
+    ['navigationError', 'TEXT'],
+    ['renderStatus', 'TEXT']
   ]);
 
   ensureColumns(database, 'runs', [
@@ -823,7 +882,12 @@ export function initDatabase(database = getDb()) {
     ['llmMaxTokens', 'INTEGER NOT NULL DEFAULT 8000'],
     ['llmDryRun', 'INTEGER NOT NULL DEFAULT 1'],
     ['llmWarningsJson', 'TEXT'],
-    ['benchmarkSummaryJson', 'TEXT']
+    ['benchmarkSummaryJson', 'TEXT'],
+    ['primaryHost', 'TEXT'],
+    ['runtimeGitCommit', 'TEXT'],
+    ['runtimeBuildVersion', 'TEXT'],
+    ['runtimeConfigHash', 'TEXT'],
+    ['runtimeProvenanceJson', 'TEXT']
   ]);
 
   ensureColumns(database, 'scheduled_runs', [
@@ -857,7 +921,24 @@ export function initDatabase(database = getDb()) {
     ['likelyBadgeImage', 'INTEGER NOT NULL DEFAULT 0'],
     ['likelyTrackingPixel', 'INTEGER NOT NULL DEFAULT 0'],
     ['likelyIcon', 'INTEGER NOT NULL DEFAULT 0'],
-    ['imageRole', 'TEXT']
+    ['imageRole', 'TEXT'],
+    ['altAttributePresent', 'INTEGER'],
+    ['altValue', 'TEXT'],
+    ['altValueTrimmed', 'TEXT'],
+    ['isDecorativeCandidate', 'INTEGER']
+  ]);
+
+  ensureColumns(database, 'page_links', [
+    ['linkedUrl', 'TEXT'],
+    ['initialStatusCode', 'INTEGER'],
+    ['redirectChainJson', 'TEXT'],
+    ['finalUrl', 'TEXT'],
+    ['finalStatusCode', 'INTEGER']
+  ]);
+
+  ensureColumns(database, 'resources', [
+    ['sizeMeasurementKind', 'TEXT'],
+    ['sizeMeasurementError', 'TEXT']
   ]);
 
   ensureColumns(database, 'schemas', [
@@ -885,7 +966,17 @@ export function initDatabase(database = getDb()) {
     ['automationCoverage', 'TEXT'],
     ['interpretation', 'TEXT'],
     ['limitations', 'TEXT'],
-    ['relatedCheckIdsJson', 'TEXT']
+    ['relatedCheckIdsJson', 'TEXT'],
+    ['checkVersion', 'TEXT'],
+    ['provenanceJson', 'TEXT']
+  ]);
+
+  ensureColumns(database, 'playwright_results', [
+    ['pageErrorsCount', 'INTEGER'],
+    ['pageErrorsJson', 'TEXT'],
+    ['cspViolationsJson', 'TEXT'],
+    ['navigationError', 'TEXT'],
+    ['textNormalizationVersion', 'TEXT']
   ]);
 
   ensureColumns(database, 'run_comparisons', [
@@ -912,6 +1003,14 @@ export function initDatabase(database = getDb()) {
       ON crawl_queue(runId, shardId, status);
     CREATE INDEX IF NOT EXISTS idx_pages_run_template
       ON pages(runId, templateClusterId);
+    CREATE INDEX IF NOT EXISTS idx_pages_run_initial_status
+      ON pages(runId, initialStatusCode);
+    CREATE INDEX IF NOT EXISTS idx_page_links_run_initial_status
+      ON page_links(runId, initialStatusCode);
+    CREATE INDEX IF NOT EXISTS idx_page_images_run_page_url
+      ON page_images(runId, pageUrl, imageUrl);
+    CREATE INDEX IF NOT EXISTS idx_resources_run_type_page_url
+      ON resources(runId, resourceType, pageUrl, resourceUrl);
     CREATE INDEX IF NOT EXISTS idx_template_clusters_run_key
       ON template_clusters(runId, clusterKey);
     CREATE INDEX IF NOT EXISTS idx_finding_reviews_run_status

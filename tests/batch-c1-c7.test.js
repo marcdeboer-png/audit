@@ -17,7 +17,7 @@ import { extractHtml } from '../src/extractors/htmlExtractor.js';
 test('availability gates distinguish values from missing measurements', () => {
   const facts = { empty: '', nil: null, zero: 0, disabled: false, missing: undefined };
   assert.equal(isObservedFact(facts, 'empty'), true);
-  assert.equal(isObservedFact(facts, 'nil'), true);
+  assert.equal(isObservedFact(facts, 'nil'), false);
   assert.equal(isObservedFact(facts, 'zero'), true);
   assert.equal(isObservedFact(facts, 'disabled'), true);
   assert.equal(isObservedFact(facts, 'missing'), false);

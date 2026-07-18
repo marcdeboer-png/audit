@@ -34,6 +34,8 @@ export async function processQueueItem(db, run, project, queueItem, browser, rob
       queueItem,
       finalUrl: normalizedFinalUrl,
       statusCode: response.statusCode,
+      initialStatusCode: response.initialStatusCode,
+      redirectChainJson: JSON.stringify(response.redirectChain || []),
       contentType,
       responseHeadersJson,
       rawHtmlSize: response.sizeBytes,
@@ -60,6 +62,8 @@ export async function processQueueItem(db, run, project, queueItem, browser, rob
     depth: queueItem.depth,
     sourceUrl: queueItem.sourceUrl,
     statusCode: response.statusCode,
+    initialStatusCode: response.initialStatusCode,
+    redirectChainJson: JSON.stringify(response.redirectChain || []),
     contentType,
     rawHtmlSize: response.sizeBytes,
     loadTimeMs: response.loadTimeMs,
@@ -68,10 +72,17 @@ export async function processQueueItem(db, run, project, queueItem, browser, rob
     responseHeadersJson,
     wordCountRendered: render.wordCountRendered,
     renderedTextLength: render.renderedTextLength,
+    renderedVisibleTextLength: render.renderedVisibleTextLength,
+    textFactsJson: mergeRenderedTextFacts(extracted.page.textFactsJson, render),
     renderedH1Json: render.renderedH1Json,
     renderedH1Count: render.renderedH1Count,
     renderedLinksCount: render.renderedLinksCount,
-    consoleErrorsJson: render.consoleErrorsJson
+    consoleErrorsJson: render.consoleErrorsJson,
+    pageErrorsJson: render.pageErrorsJson,
+    requestFailuresJson: render.requestFailuresJson,
+    cspViolationsJson: render.cspViolationsJson,
+    navigationError: render.navigationError,
+    renderStatus: render.renderStatus
   };
 
   insertPage(db, pageRecord);
@@ -140,6 +151,8 @@ function emptyPageRecord(values) {
     depth: values.queueItem.depth,
     sourceUrl: values.queueItem.sourceUrl,
     statusCode: values.statusCode,
+    initialStatusCode: values.initialStatusCode ?? values.statusCode,
+    redirectChainJson: values.redirectChainJson || JSON.stringify([]),
     contentType: values.contentType,
     indexable: 0,
     noindex: 0,
@@ -164,6 +177,9 @@ function emptyPageRecord(values) {
     wordCountRendered: null,
     rawTextLength: 0,
     renderedTextLength: null,
+    visibleTextLength: 0,
+    renderedVisibleTextLength: null,
+    textFactsJson: JSON.stringify({ raw_text: null, visible_text: null, rendered_visible_text: null, structured_data_text: null, metadata_text: null }),
     rawHtmlSize: values.rawHtmlSize,
     internalLinksCount: 0,
     externalLinksCount: 0,
@@ -183,6 +199,11 @@ function emptyPageRecord(values) {
     loadTimeMs: values.loadTimeMs,
     ttfbMs: values.ttfbMs,
     consoleErrorsJson: JSON.stringify([]),
+    pageErrorsJson: JSON.stringify([]),
+    requestFailuresJson: JSON.stringify([]),
+    cspViolationsJson: JSON.stringify([]),
+    navigationError: null,
+    renderStatus: 'not_applicable',
     renderedH1Json: JSON.stringify([]),
     renderedH1Count: 0,
     renderedLinksCount: null,
@@ -237,12 +258,32 @@ function shouldRenderPage(db, run, browser) {
 function emptyRenderResult() {
   return {
     renderedTextLength: null,
+    renderedVisibleTextLength: null,
+    renderedVisibleTextHash: null,
     wordCountRendered: null,
     renderedH1Json: JSON.stringify([]),
     renderedH1Count: 0,
     renderedLinksCount: null,
     consoleErrorsJson: JSON.stringify([]),
+    pageErrorsJson: JSON.stringify([]),
+    requestFailuresJson: JSON.stringify([]),
+    cspViolationsJson: JSON.stringify([]),
+    navigationError: null,
+    renderStatus: 'not_executed',
     resources: [],
     renderedHtml: null
   };
+}
+
+function mergeRenderedTextFacts(textFactsJson, render) {
+  let facts = {};
+  try {
+    facts = textFactsJson ? JSON.parse(textFactsJson) : {};
+  } catch {
+    facts = {};
+  }
+  facts.rendered_visible_text = render.renderStatus === 'success'
+    ? { length: render.renderedVisibleTextLength, hash: render.renderedVisibleTextHash }
+    : null;
+  return JSON.stringify(facts);
 }

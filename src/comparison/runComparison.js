@@ -285,7 +285,7 @@ function loadFindings(db, runId) {
       COALESCE(fr.reviewStatus, 'unreviewed') AS reviewStatus,
       COALESCE(fr.actionStatus, 'open') AS actionStatus
     FROM check_results cr
-    LEFT JOIN finding_reviews fr ON fr.checkResultId = cr.id
+    LEFT JOIN finding_reviews fr ON fr.runId = cr.runId AND fr.checkResultId = cr.id
     WHERE cr.runId = ?
     ORDER BY cr.checkId ASC
   `).all(runId).map((row) => ({

@@ -1,12 +1,15 @@
-import { clearRunArtifacts, getRunWithProject, insertCheckResults, logRun } from '../db/repositories.js';
+import { clearRunArtifacts, getRunWithProject, hydrateInternalLinkHttpFacts, insertCheckResults, logRun } from '../db/repositories.js';
 import { computeScores, scoreForStatus } from '../utils/scoring.js';
 import { techChecks } from './tech/index.js';
 import { geoChecks } from './geo/index.js';
 import { applyEffectiveValues } from '../reviews/reviewWorkflow.js';
 import { runLlmChecks } from '../llm/llmCheckRunner.js';
 import { makeResult } from './helpers.js';
+import { assertCheckResultScope, assertRunStorageScope, createRunScope, requireRunId, scopeSafeCheckResult } from '../scope/runScope.js';
+import { buildCheckProvenance } from '../runtime/provenance.js';
 
 export async function runChecks(db, runId) {
+  requireRunId(runId, 'run checks');
   const run = getRunWithProject(db, runId);
   if (!run) throw new Error(`Run ${runId} not found`);
 
@@ -14,8 +17,6 @@ export async function runChecks(db, runId) {
     ...(run.auditType === 'tech' || run.auditType === 'both' ? techChecks() : []),
     ...(run.auditType === 'geo' || run.auditType === 'both' ? geoChecks() : [])
   ];
-
-  clearRunArtifacts(db, runId);
 
   const context = {
     db,
@@ -30,18 +31,28 @@ export async function runChecks(db, runId) {
       redirectChainJson: run.redirectChainJson
     }
   };
+  const scope = createRunScope(run, context.project);
+  hydrateInternalLinkHttpFacts(db, runId);
+  const scopeEvidence = assertRunStorageScope(db, scope);
+  context.scope = scope;
+  context.scopeEvidence = scopeEvidence;
+
+  clearRunArtifacts(db, runId);
 
   const results = [];
   for (const check of checks) {
     try {
       const result = await check.run(context);
-      results.push(importAwareResult(run, {
+      const normalized = importAwareResult(run, {
         ...result,
         score: result.scoreEligible === false ? null : scoreForStatus(result.status)
-      }));
+      });
+      normalized.provenance = buildCheckProvenance({ run, project: context.project, check, result: normalized });
+      assertCheckResultScope(normalized, scope, check);
+      results.push(normalized);
     } catch (error) {
       logRun(db, runId, 'error', 'Check failed', { checkId: check.id, error: error.message });
-      results.push({
+      const technicalResult = {
         ...makeResult(check, 'NA', {
           evaluationState: 'technical_error',
           scoreEligible: false,
@@ -53,7 +64,7 @@ export async function runChecks(db, runId) {
           affectedCount: 0,
           sampleUrls: [],
           facts: {},
-          evidence: { checkId: check.id, technicalError: error.message },
+          evidence: { checkId: check.id, technicalError: error.message, technicalErrorSource: error.code || error.name },
           requirements: {
             requiredFacts: [],
             missingFacts: [],
@@ -62,18 +73,26 @@ export async function runChecks(db, runId) {
           }
         }),
         score: null
-      });
+      };
+      technicalResult.provenance = buildCheckProvenance({ run, project: context.project, check, result: technicalResult });
+      results.push(technicalResult);
     }
   }
 
   try {
     const llmResults = await runLlmChecks(context);
-    results.push(...llmResults.map((result) => ({
-      ...result,
-      evaluationState: result.evaluationState || (result.status === 'OK' ? 'pass' : ['Warning', 'Error'].includes(result.status) ? 'fail' : 'not_executed'),
-      scoreEligible: result.scoreEligible ?? ['OK', 'Warning', 'Error'].includes(result.status),
-      score: result.scoreEligible === false ? null : scoreForStatus(result.status)
-    })));
+    for (const result of llmResults) {
+      const normalized = {
+        ...result,
+        evaluationState: result.evaluationState || (result.status === 'OK' ? 'pass' : ['Warning', 'Error'].includes(result.status) ? 'fail' : 'not_executed'),
+        scoreEligible: result.scoreEligible ?? ['OK', 'Warning', 'Error'].includes(result.status),
+        score: result.scoreEligible === false ? null : scoreForStatus(result.status)
+      };
+      const check = { id: normalized.id, version: normalized.promptVersion || '1' };
+      normalized.provenance = buildCheckProvenance({ run, project: context.project, check, result: normalized });
+      assertCheckResultScope(normalized, scope, check);
+      results.push(normalized);
+    }
   } catch (error) {
     logRun(db, runId, 'error', 'LLM checks failed without aborting audit', { error: error.message });
   }
@@ -130,6 +149,13 @@ function importAwareResult(run, result) {
 }
 
 export function loadResultsWithScores(db, runId) {
+  requireRunId(runId, 'load check results');
+  const run = getRunWithProject(db, runId);
+  const readScope = run ? createRunScope(run, {
+    id: run.projectId,
+    inputDomain: run.inputDomain,
+    finalDomain: run.finalDomain
+  }) : null;
   const rows = db.prepare(`
     SELECT
       cr.*,
@@ -146,7 +172,7 @@ export function loadResultsWithScores(db, runId) {
       fr.createdAt AS reviewCreatedAt,
       fr.updatedAt AS reviewUpdatedAt
     FROM check_results cr
-    LEFT JOIN finding_reviews fr ON fr.checkResultId = cr.id
+    LEFT JOIN finding_reviews fr ON fr.runId = cr.runId AND fr.checkResultId = cr.id
     WHERE cr.runId = ?
     ORDER BY
       CASE cr.priority WHEN 'High' THEN 1 WHEN 'Medium' THEN 2 ELSE 3 END,
@@ -161,9 +187,12 @@ export function loadResultsWithScores(db, runId) {
     assessment: safeParse(row.assessmentJson, {}),
     recommendationMeta: safeParse(row.recommendationMetaJson, {}),
     requirements: safeParse(row.requirementsJson, {}),
+    provenance: safeParse(row.provenanceJson, {}),
     scoreEligible: Boolean(row.scoreEligible),
     relatedCheckIds: safeParse(row.relatedCheckIdsJson, [])
-  })).map(applyEffectiveValues);
+  })).map(applyEffectiveValues).map((row) => readScope
+    ? scopeSafeCheckResult(row, readScope, { id: row.checkId })
+    : row);
 
   return {
     scores: computeScores(rows),

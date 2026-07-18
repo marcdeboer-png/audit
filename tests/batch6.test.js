@@ -159,8 +159,11 @@ test('template checks create evidence-backed findings and disabled sampling is n
     enableLighthouseSampling: 1
   });
   insertSampleResult(db, runId, 'article:/blog/{slug}', 'https://example.com/blog/a');
+  insertSampleResult(db, runId, 'article:/blog/{slug}', 'https://example.com/blog/b');
   insertLighthouseResult(db, runId, 'article:/blog/{slug}', 'https://example.com/blog/a', { performanceScore: 0.4, seoScore: 0.7, largestContentfulPaintMs: 4500, totalBlockingTimeMs: 700 });
+  insertLighthouseResult(db, runId, 'article:/blog/{slug}', 'https://example.com/blog/b', { performanceScore: 0.45, seoScore: 0.72, largestContentfulPaintMs: 4400, totalBlockingTimeMs: 650 });
   insertPlaywrightResult(db, runId, 'article:/blog/{slug}', 'https://example.com/blog/a', { jsRequiredLikely: 1, consoleErrorsCount: 2 });
+  insertPlaywrightResult(db, runId, 'article:/blog/{slug}', 'https://example.com/blog/b', { jsRequiredLikely: 0, consoleErrorsCount: 0 });
   aggregateTemplatePerformance(db, runId);
 
   await runChecks(db, runId);
@@ -242,11 +245,13 @@ function insertPlaywrightResult(db, runId, templateClusterKey, url, overrides = 
       runId, templateClusterKey, url, status, finalUrl, title, h1Count,
       renderedWordCount, renderedLinksCount, rawRenderedWordDelta,
       consoleErrorsCount, consoleErrorsJson, networkErrorsCount, networkErrorsJson,
-      jsRequiredLikely, loadTimeMs
+      pageErrorsCount, pageErrorsJson, cspViolationsJson, navigationError,
+      textNormalizationVersion, jsRequiredLikely, loadTimeMs
     )
     VALUES (
       @runId, @templateClusterKey, @url, 'success', @url, 'Rendered', 1,
-      200, 4, 80, @consoleErrorsCount, '[]', 0, '[]', @jsRequiredLikely, 100
+      200, 4, 80, @consoleErrorsCount, '[]', 0, '[]',
+      0, '[]', '[]', NULL, 'visible_text_v1', @jsRequiredLikely, 100
     )
   `).run({
     runId,

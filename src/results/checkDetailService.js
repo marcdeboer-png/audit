@@ -2,6 +2,7 @@ import { applyEffectiveValues } from '../reviews/reviewWorkflow.js';
 import { applyDisplaySemantics } from '../reviews/displaySemantics.js';
 import { thresholds } from '../checks/config/thresholds.js';
 import { retentionPolicyFromRun } from '../storage/retention.js';
+import { createRunScope, requireRunId, scopeSafeCheckResult } from '../scope/runScope.js';
 
 const DETAIL_LIMIT = 10000;
 const NON_DECORATIVE_IMAGE_DETAIL_WHERE = `
@@ -26,9 +27,18 @@ const NOT_LIKELY_HERO_IMAGE_DETAIL_WHERE = `
 `;
 
 export function getCheckDetail(db, runId, checkResultId, options = {}) {
-  const checkResult = loadCheckResult(db, runId, checkResultId);
+  requireRunId(runId, 'load check detail');
+  let checkResult = loadCheckResult(db, runId, checkResultId);
   if (!checkResult) return null;
-  const run = db.prepare('SELECT * FROM runs WHERE id = ?').get(runId) || {};
+  const run = db.prepare(`
+    SELECT r.*, p.inputDomain, p.finalDomain
+    FROM runs r JOIN projects p ON p.id = r.projectId
+    WHERE r.id = ?
+  `).get(runId) || {};
+  if (run.id) {
+    const scope = createRunScope(run, { id: run.projectId, inputDomain: run.inputDomain, finalDomain: run.finalDomain });
+    checkResult = scopeSafeCheckResult(checkResult, scope, { id: checkResult.checkId });
+  }
   const policy = retentionPolicyFromRun(run);
   const requestedRows = Number(options.maxRows || policy.maxStoredDetailRowsPerCheck || DETAIL_LIMIT);
   const maxRows = Math.max(1, Math.min(DETAIL_LIMIT, policy.maxStoredDetailRowsPerCheck || DETAIL_LIMIT, requestedRows));
@@ -94,6 +104,8 @@ export function getCheckDetail(db, runId, checkResultId, options = {}) {
     assessment: checkResult.assessment,
     recommendationMeta: checkResult.recommendationMeta,
     requirements: checkResult.requirements,
+    provenance: checkResult.provenance,
+    checkVersion: checkResult.checkVersion || checkResult.provenance?.checkVersion || null,
     context: buildNarrative(checkResult, detail),
     columns,
     rows: enrichedRows,
@@ -126,7 +138,7 @@ function loadCheckResult(db, runId, checkResultId) {
       fr.createdAt AS reviewCreatedAt,
       fr.updatedAt AS reviewUpdatedAt
     FROM check_results cr
-    LEFT JOIN finding_reviews fr ON fr.checkResultId = cr.id
+    LEFT JOIN finding_reviews fr ON fr.runId = cr.runId AND fr.checkResultId = cr.id
     WHERE cr.runId = ? AND cr.id = ?
   `).get(runId, checkResultId);
   if (!row) return null;
@@ -139,6 +151,7 @@ function loadCheckResult(db, runId, checkResultId) {
     assessment: safeJson(row.assessmentJson, {}),
     recommendationMeta: safeJson(row.recommendationMetaJson, {}),
     requirements: safeJson(row.requirementsJson, {}),
+    provenance: safeJson(row.provenanceJson, {}),
     relatedCheckIds: safeJson(row.relatedCheckIdsJson, [])
   }));
 }
@@ -170,9 +183,9 @@ function titleDetails({ db, runId, checkResult, recommendation }) {
     db,
     runId,
     where: pageCondition(checkResult.checkId, {
-      'tech.title_missing': `${htmlWhere()} AND (title IS NULL OR title = '')`,
-      'tech.title_too_short': `${htmlWhere()} AND titleLength < ${thresholds.titleTooShort} AND COALESCE(title, '') <> ''`,
-      'tech.title_too_long': `${htmlWhere()} AND titleLength > ${thresholds.titleTooLong}`
+      'tech.title_missing': `${indexableContentHtmlWhere()} AND (title IS NULL OR title = '')`,
+      'tech.title_too_short': `${indexableContentHtmlWhere()} AND titleLength < ${thresholds.titleTooShort} AND COALESCE(title, '') <> ''`,
+      'tech.title_too_long': `${indexableContentHtmlWhere()} AND titleLength > ${thresholds.titleTooLong}`
     }),
     columns: [
       ['url', 'URL'],
@@ -194,9 +207,9 @@ function metaDescriptionDetails({ db, runId, checkResult, recommendation }) {
     db,
     runId,
     where: pageCondition(checkResult.checkId, {
-      'tech.meta_description_missing': `${htmlWhere()} AND (metaDescription IS NULL OR metaDescription = '')`,
-      'tech.meta_description_too_short': `${htmlWhere()} AND metaDescriptionLength < ${thresholds.descriptionTooShort} AND COALESCE(metaDescription, '') <> ''`,
-      'tech.meta_description_too_long': `${htmlWhere()} AND metaDescriptionLength > ${thresholds.descriptionTooLong}`
+      'tech.meta_description_missing': `${indexableContentHtmlWhere()} AND (metaDescription IS NULL OR metaDescription = '')`,
+      'tech.meta_description_too_short': `${indexableContentHtmlWhere()} AND metaDescriptionLength < ${thresholds.descriptionTooShort} AND COALESCE(metaDescription, '') <> ''`,
+      'tech.meta_description_too_long': `${indexableContentHtmlWhere()} AND metaDescriptionLength > ${thresholds.descriptionTooLong}`
     }),
     columns: [
       ['url', 'URL'],
@@ -241,7 +254,7 @@ function canonicalDetails({ db, runId, checkResult, recommendation }) {
       END AS issueType
     FROM pages source
     LEFT JOIN pages target ON target.runId = source.runId AND target.normalizedUrl = source.canonical
-    WHERE source.runId = ? AND ${where}
+    WHERE source.runId = ? AND (${where})
     ORDER BY source.id ASC
   `).all(runId).filter((row) => {
     if (checkResult.checkId === 'tech.canonical_target_non_200') return row.canonicalTargetStatus !== null && row.canonicalTargetStatus !== 200;
@@ -265,11 +278,11 @@ function canonicalDetails({ db, runId, checkResult, recommendation }) {
 function imageMarkupDetails({ db, runId, checkResult, recommendation }) {
   const where = pageCondition(checkResult.checkId, {
     'tech.images_without_alt': `
-      hasAlt = 0
+      altAttributePresent = 0
       AND ${NON_DECORATIVE_IMAGE_DETAIL_WHERE}
     `,
     'tech.empty_alt_texts': `
-      alt = ''
+      altAttributePresent = 1 AND altValueTrimmed = ''
       AND ${NON_DECORATIVE_IMAGE_DETAIL_WHERE}
     `,
     'tech.images_without_width_height': `(width IS NULL OR width = '' OR height IS NULL OR height = '') AND ${NON_DECORATIVE_IMAGE_DETAIL_WHERE}`,
@@ -281,6 +294,9 @@ function imageMarkupDetails({ db, runId, checkResult, recommendation }) {
       pageUrl,
       imageUrl,
       alt,
+      altAttributePresent,
+      altValue,
+      altValueTrimmed,
       imageRole,
       width,
       height,
@@ -291,7 +307,7 @@ function imageMarkupDetails({ db, runId, checkResult, recommendation }) {
       likelyIcon AS isIcon,
       ${sqlString(reason)} AS reason
     FROM page_images
-    WHERE runId = ? AND ${where}
+    WHERE runId = ? AND (${where})
     ORDER BY id ASC
   `).all(runId).map((row) => ({ ...row, recommendation }));
   return {
@@ -299,6 +315,8 @@ function imageMarkupDetails({ db, runId, checkResult, recommendation }) {
       ['pageUrl', 'Page URL'],
       ['imageUrl', 'Image URL'],
       ['alt', 'Alt'],
+      ['altAttributePresent', 'Alt Attribute Present'],
+      ['altValueTrimmed', 'Trimmed Alt Value'],
       ['imageRole', 'Image Role'],
       ['width', 'Width Attribute'],
       ['height', 'Height Attribute'],
@@ -349,13 +367,15 @@ function statusPageDetails({ db, runId, checkResult, recommendation }) {
   const where = pageCondition(checkResult.checkId, {
     'tech.4xx_pages': 'statusCode >= 400 AND statusCode < 500',
     'tech.5xx_pages': 'statusCode >= 500',
-    'tech.redirect_pages': '(statusCode >= 300 AND statusCode < 400) OR finalUrl <> url',
+    'tech.redirect_pages': '(initialStatusCode >= 300 AND initialStatusCode < 400) OR (initialStatusCode IS NULL AND finalUrl <> url)',
     'tech.sitemap_urls_non_200': 'COALESCE(statusCode, 0) <> 200'
   });
   const rows = db.prepare(`
     SELECT
       p.url,
       p.statusCode,
+      p.initialStatusCode,
+      p.redirectChainJson,
       p.finalUrl,
       (SELECT COUNT(*) FROM page_links l WHERE l.runId = p.runId AND l.normalizedTargetUrl = p.normalizedUrl) AS inlinksCount,
       (SELECT GROUP_CONCAT(sourceUrl, ' | ') FROM (
@@ -366,13 +386,15 @@ function statusPageDetails({ db, runId, checkResult, recommendation }) {
         LIMIT 5
       )) AS sampleInlinks
     FROM pages p
-    WHERE p.runId = ? AND ${where}
+    WHERE p.runId = ? AND (${where})
     ORDER BY p.id ASC
   `).all(runId).map((row) => ({ ...row, recommendation }));
   return {
     columns: [
       ['url', 'URL'],
       ['statusCode', 'Status Code'],
+      ['initialStatusCode', 'Initial Status Code'],
+      ['redirectChainJson', 'Redirect Chain'],
       ['finalUrl', 'Final URL'],
       ['inlinksCount', 'Inlinks Count'],
       ['sampleInlinks', 'Sample Inlinks'],
@@ -385,15 +407,17 @@ function statusPageDetails({ db, runId, checkResult, recommendation }) {
 
 function internalLinkDetails({ db, runId, checkResult, recommendation }) {
   const targetWhere = checkResult.checkId === 'tech.internal_links_to_3xx'
-    ? 'p.statusCode >= 300 AND p.statusCode < 400'
-    : 'p.statusCode >= 400';
+    ? 'l.initialStatusCode >= 300 AND l.initialStatusCode < 400'
+    : 'COALESCE(l.finalStatusCode, p.statusCode) >= 400';
   const rows = db.prepare(`
     SELECT
       l.sourceUrl,
-      l.targetUrl,
+      COALESCE(l.linkedUrl, l.targetUrl) AS targetUrl,
       l.anchorText,
-      p.statusCode AS targetStatus,
-      p.finalUrl AS finalTargetUrl
+      l.initialStatusCode,
+      l.redirectChainJson,
+      COALESCE(l.finalStatusCode, p.statusCode) AS finalStatusCode,
+      COALESCE(l.finalUrl, p.finalUrl) AS finalTargetUrl
     FROM page_links l
     JOIN pages p ON p.runId = l.runId AND p.normalizedUrl = l.normalizedTargetUrl
     WHERE l.runId = ? AND l.linkType = 'internal' AND ${targetWhere}
@@ -404,7 +428,9 @@ function internalLinkDetails({ db, runId, checkResult, recommendation }) {
       ['sourceUrl', 'Source URL'],
       ['targetUrl', 'Target URL'],
       ['anchorText', 'Anchor Text'],
-      ['targetStatus', 'Target Status'],
+      ['initialStatusCode', 'Initial Status'],
+      ['redirectChainJson', 'Redirect Chain'],
+      ['finalStatusCode', 'Final Status'],
       ['finalTargetUrl', 'Final Target URL'],
       ['recommendation', 'Recommendation']
     ],
@@ -418,7 +444,7 @@ function h1Details({ db, runId, checkResult, recommendation }) {
   const rows = db.prepare(`
     SELECT url, h1Count, h1Json, pageType, indexable
     FROM pages
-    WHERE runId = ? AND ${htmlWhere()} AND ${where}
+    WHERE runId = ? AND (${htmlWhere()}) AND statusCode >= 200 AND statusCode < 300 AND COALESCE(indexable, 1) = 1 AND (${where})
     ORDER BY id ASC
   `).all(runId).map((row) => ({
     ...row,
@@ -444,7 +470,7 @@ function duplicateMetaDetails({ db, runId, checkResult, recommendation }) {
   const groups = db.prepare(`
     SELECT LOWER(${field}) AS groupKey, ${field} AS duplicateValue, COUNT(*) AS groupSize
     FROM pages
-    WHERE runId = ? AND ${htmlWhere()} AND ${field} IS NOT NULL AND ${field} <> ''
+    WHERE runId = ? AND ${indexableContentHtmlWhere()} AND ${field} IS NOT NULL AND ${field} <> ''
     GROUP BY LOWER(${field})
     HAVING COUNT(*) > 1
   `).all(runId);
@@ -453,7 +479,7 @@ function duplicateMetaDetails({ db, runId, checkResult, recommendation }) {
     const pages = db.prepare(`
       SELECT url, pageType, indexable
       FROM pages
-      WHERE runId = ? AND LOWER(${field}) = ?
+      WHERE runId = ? AND ${indexableContentHtmlWhere()} AND LOWER(${field}) = ?
       ORDER BY id ASC
     `).all(runId, group.groupKey);
     for (const page of pages) {
@@ -672,7 +698,7 @@ function structuredDataDetails({ db, runId, checkResult, recommendation }) {
       s.parseError
     FROM pages p
     LEFT JOIN schemas s ON s.runId = p.runId AND s.pageUrl = p.finalUrl
-    WHERE p.runId = ? AND ${where}
+    WHERE p.runId = ? AND (${where})
     ORDER BY p.id ASC, s.id ASC
   `).all(runId).map((row) => ({
     url: row.url,
@@ -825,7 +851,7 @@ function pageRows({ db, runId, where, select, columns, recommendation, dataSourc
   const rows = db.prepare(`
     SELECT ${select}
     FROM pages
-    WHERE runId = ? AND ${where}
+    WHERE runId = ? AND (${where})
     ORDER BY id ASC
   `).all(runId).map((row) => ({ ...row, recommendation }));
   return { columns, rows, dataSource };
@@ -838,6 +864,11 @@ function pageCondition(checkId, conditions) {
 function htmlWhere(alias = '') {
   const prefix = alias ? `${alias}.` : '';
   return `(${prefix}contentType LIKE '%text/html%' OR ${prefix}contentType LIKE '%application/xhtml%')`;
+}
+
+function indexableContentHtmlWhere(alias = '') {
+  const prefix = alias ? `${alias}.` : '';
+  return `${htmlWhere(alias)} AND ${prefix}statusCode >= 200 AND ${prefix}statusCode < 300 AND COALESCE(${prefix}indexable, 1) = 1 AND COALESCE(${prefix}pageType, 'other') <> 'legal'`;
 }
 
 function withReviewColumns(columns) {

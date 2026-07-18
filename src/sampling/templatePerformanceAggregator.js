@@ -1,3 +1,5 @@
+import { VISIBLE_TEXT_NORMALIZATION_VERSION } from '../extractors/visibleText.js';
+
 export function aggregateTemplatePerformance(db, runId) {
   db.prepare('DELETE FROM template_performance_summary WHERE runId = ?').run(runId);
 
@@ -43,6 +45,11 @@ export function aggregateTemplatePerformance(db, runId) {
         WHERE runId = ? AND COALESCE(templateClusterKey, '') = COALESCE(?, '')
       `).all(runId, cluster.templateClusterKey);
       const lighthouseSuccess = lighthouseRows.filter((row) => !row.errorMessage && hasAnyScore(row));
+      const playwrightSuccess = playwrightRows.filter((row) => row.status === 'success' && !row.navigationError);
+      const normalizedPlaywrightSuccess = playwrightSuccess.filter((row) => row.textNormalizationVersion === VISIBLE_TEXT_NORMALIZATION_VERSION);
+      const channelAwarePlaywrightSuccess = playwrightSuccess.filter((row) =>
+        row.consoleErrorsJson !== null && row.pageErrorsJson !== null && row.networkErrorsJson !== null
+      );
       const performanceScores = lighthouseSuccess.map((row) => row.performanceScore);
       const seoScores = lighthouseSuccess.map((row) => row.seoScore);
 
@@ -51,7 +58,7 @@ export function aggregateTemplatePerformance(db, runId) {
         templateClusterId: cluster.templateClusterId,
         templateClusterKey: cluster.templateClusterKey,
         sampleCount,
-        playwrightSuccessCount: playwrightRows.filter((row) => row.status === 'success').length,
+        playwrightSuccessCount: playwrightSuccess.length,
         lighthouseSuccessCount: lighthouseSuccess.length,
         avgPerformanceScore: average(performanceScores),
         minPerformanceScore: minimum(performanceScores),
@@ -62,9 +69,9 @@ export function aggregateTemplatePerformance(db, runId) {
         avgLcpMs: average(lighthouseSuccess.map((row) => row.largestContentfulPaintMs)),
         avgTbtMs: average(lighthouseSuccess.map((row) => row.totalBlockingTimeMs)),
         avgCls: average(lighthouseSuccess.map((row) => row.cumulativeLayoutShift)),
-        jsRequiredCount: playwrightRows.filter((row) => row.jsRequiredLikely).length,
-        consoleErrorSampleCount: playwrightRows.filter((row) => Number(row.consoleErrorsCount || 0) > 0).length,
-        worstSampleUrlsJson: JSON.stringify(worstSamples(playwrightRows, lighthouseSuccess))
+        jsRequiredCount: normalizedPlaywrightSuccess.filter((row) => row.jsRequiredLikely).length,
+        consoleErrorSampleCount: channelAwarePlaywrightSuccess.filter((row) => Number(row.consoleErrorsCount || 0) > 0).length,
+        worstSampleUrlsJson: JSON.stringify(worstSamples(playwrightSuccess, lighthouseSuccess))
       });
     }
   });

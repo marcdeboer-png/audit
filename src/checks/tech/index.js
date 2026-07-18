@@ -18,6 +18,8 @@ import { classifyInternalSearchPage } from '../searchPageClassifier.js';
 import { stripWww } from '../../utils/url.js';
 import { thresholdBytes, thresholds } from '../config/thresholds.js';
 import { templatePatternChecks } from '../../analysis/templatePatternChecks.js';
+import { hasArticleSchema } from '../../extractors/pageType.js';
+import { hasVisibleTextProvenance, VISIBLE_TEXT_NORMALIZATION_VERSION } from '../../extractors/visibleText.js';
 
 const tech = (id, category, name, run, options = {}) => ({
   id: id.startsWith('template.') ? id : `tech.${id}`,
@@ -32,8 +34,10 @@ const tech = (id, category, name, run, options = {}) => ({
 
 const LEGAL_PAGE_WHERE = "COALESCE(pageType, 'other') = 'legal'";
 const NON_LEGAL_PAGE_WHERE = "COALESCE(pageType, 'other') <> 'legal'";
-const INDEXABLE_CONTENT_HTML_WHERE = `${HTML_WHERE} AND COALESCE(indexable, 1) = 1 AND ${NON_LEGAL_PAGE_WHERE}`;
+const SUCCESSFUL_HTML_WHERE = `${HTML_WHERE} AND statusCode >= 200 AND statusCode < 300`;
+const INDEXABLE_CONTENT_HTML_WHERE = `${SUCCESSFUL_HTML_WHERE} AND COALESCE(indexable, 1) = 1 AND ${NON_LEGAL_PAGE_WHERE}`;
 const ROBOTS_TEXT_EXPR = "LOWER(COALESCE(metaRobots, '') || ' ' || COALESCE(xRobotsTag, ''))";
+const VISIBLE_TEXT_FACTS_WHERE = `COALESCE(textFactsJson, '') LIKE '%"normalization_version":"${VISIBLE_TEXT_NORMALIZATION_VERSION}"%'`;
 const NON_DECORATIVE_IMAGE_WHERE = `
   COALESCE(likelyDecorativeImage, 0) = 0
   AND COALESCE(likelyBadgeImage, 0) = 0
@@ -83,7 +87,7 @@ export function techChecks() {
     statusCodeDistribution(),
     pageStatusCheck('4xx_pages', 'Server & Infrastructure', '4xx pages present', 'statusCode >= 400 AND statusCode < 500', 'Warning'),
     pageStatusCheck('5xx_pages', 'Server & Infrastructure', '5xx pages present', 'statusCode >= 500', 'Error', 'High'),
-    pageStatusCheck('redirect_pages', 'Server & Infrastructure', 'Redirect pages present', '(statusCode >= 300 AND statusCode < 400) OR finalUrl <> url', 'Warning'),
+    pageStatusCheck('redirect_pages', 'Server & Infrastructure', 'Redirect pages present', '(initialStatusCode >= 300 AND initialStatusCode < 400) OR (initialStatusCode IS NULL AND finalUrl <> url)', 'Warning'),
     headerPresence('compression_header', 'Server/Performance Best Practice', 'Compression header present', 'content-encoding', 'Low', {
       findingType: 'best_practice',
       missingFinding: (affected, total) => `${affected}/${total} HTML page(s) have no detected Content-Encoding header.`,
@@ -125,11 +129,11 @@ export function techChecks() {
     noindexPagesCheck(),
     nofollowPagesCheck(),
     canonicalMissing(),
-    pageStatusCheck('canonical_non_self', 'Crawling & Indexing', 'Canonical non-self', 'canonical IS NOT NULL AND canonical <> normalizedUrl', 'Warning'),
+    pageStatusCheck('canonical_non_self', 'Crawling & Indexing', 'Canonical non-self', `${INDEXABLE_CONTENT_HTML_WHERE} AND canonical IS NOT NULL AND canonical <> normalizedUrl`, 'Warning', 'Medium', INDEXABLE_CONTENT_HTML_WHERE),
     canonicalOtherDomain(),
     canonicalTargetNon200(),
-    internalLinksToStatus('internal_links_to_3xx', 'Internal links to 3xx', 'p.statusCode >= 300 AND p.statusCode < 400', 'Warning'),
-    internalLinksToStatus('internal_links_to_4xx_5xx', 'Internal links to 4xx/5xx', 'p.statusCode >= 400', 'Error', 'High'),
+    internalLinksToStatus('internal_links_to_3xx', 'Internal links to 3xx', 'l.initialStatusCode >= 300 AND l.initialStatusCode < 400', 'Warning'),
+    internalLinksToStatus('internal_links_to_4xx_5xx', 'Internal links to 4xx/5xx', 'COALESCE(l.finalStatusCode, p.statusCode) >= 400', 'Error', 'High'),
     orphanLikeSitemapUrls(),
     contentMissingField('title_missing', 'HTML Head & Meta', 'Title missing', 'title', 'Error'),
     contentLengthCheck('title_too_short', 'HTML Head & Meta', `Title too short < ${thresholds.titleTooShort}`, `titleLength < ${thresholds.titleTooShort} AND COALESCE(title, '') <> ''`, 'Warning'),
@@ -139,7 +143,7 @@ export function techChecks() {
     contentLengthCheck('meta_description_too_short', 'HTML Head & Meta', `Meta description too short < ${thresholds.descriptionTooShort}`, `metaDescriptionLength < ${thresholds.descriptionTooShort} AND COALESCE(metaDescription, '') <> ''`, 'Warning', 'Low'),
     contentLengthCheck('meta_description_too_long', 'HTML Head & Meta', `Meta description too long > ${thresholds.descriptionTooLong}`, `metaDescriptionLength > ${thresholds.descriptionTooLong}`, 'Warning', 'Low'),
     duplicateContentField('duplicate_meta_descriptions', 'HTML Head & Meta', 'Duplicate meta descriptions', 'metaDescription', 'Warning', 'Low'),
-    pageStatusCheck('h1_missing', 'HTML Head & Meta', 'H1 missing', `${HTML_WHERE} AND h1Count = 0`, 'Error'),
+    pageStatusCheck('h1_missing', 'HTML Head & Meta', 'H1 missing', `${INDEXABLE_CONTENT_HTML_WHERE} AND h1Count = 0`, 'Error', 'Medium', INDEXABLE_CONTENT_HTML_WHERE),
     pageStatusCheck('multiple_h1', 'HTML Head & Meta', 'Multiple H1', `${HTML_WHERE} AND h1Count > 1`, 'Warning'),
     htmlSemanticsSummary(),
     missingField('html_lang_missing', 'HTML Head & Meta', 'HTML lang missing', 'htmlLang', 'Warning'),
@@ -161,12 +165,12 @@ export function techChecks() {
     resourceHintsSummary(),
     importedResourcePerformanceSignals(),
     highTtfbCheck(),
-    pageStatusCheck('rendered_word_count_delta', 'JavaScript & Rendering', `Rendered word count > raw word count * ${thresholds.renderedRawWordCountRatio}`, `wordCountRendered IS NOT NULL AND wordCountRendered > wordCountRaw * ${thresholds.renderedRawWordCountRatio} AND wordCountRendered - wordCountRaw > 50`, 'Warning'),
+    renderedPageSignalCheck('rendered_word_count_delta', `Rendered word count > raw word count * ${thresholds.renderedRawWordCountRatio}`, `wordCountRendered > wordCountRaw * ${thresholds.renderedRawWordCountRatio} AND wordCountRendered - wordCountRaw > 50`),
     criticalContentRawHtmlSignal(),
-    pageStatusCheck('raw_h1_missing_rendered_present', 'JavaScript & Rendering', 'Raw H1 missing but rendered H1 present', 'h1Count = 0 AND renderedH1Count > 0', 'Warning'),
-    pageStatusCheck('raw_internal_links_fewer_rendered', 'JavaScript & Rendering', 'Raw internal links much fewer than rendered links', 'renderedLinksCount IS NOT NULL AND renderedLinksCount > internalLinksCount * 1.5 AND renderedLinksCount - internalLinksCount > 5', 'Warning'),
+    renderedPageSignalCheck('raw_h1_missing_rendered_present', 'Raw H1 missing but rendered H1 present', 'h1Count = 0 AND renderedH1Count > 0'),
+    renderedPageSignalCheck('raw_internal_links_fewer_rendered', 'Raw internal links much fewer than rendered links', 'renderedLinksCount > internalLinksCount * 1.5 AND renderedLinksCount - internalLinksCount > 5'),
     consoleErrorsPresent(),
-    pageStatusCheck('js_dependent_content', 'JavaScript & Rendering', 'Main content likely JS-dependent', 'wordCountRaw < 100 AND wordCountRendered IS NOT NULL AND wordCountRendered > wordCountRaw * 2 AND wordCountRendered > 200', 'Warning'),
+    jsDependentContentCheck(),
     templateLowLighthousePerformance(),
     templateLowLighthouseSeo(),
     templateHighLcp(),
@@ -229,7 +233,7 @@ function httpToHttpsRedirect() {
     const http = candidates.filter((item) => item.startUrl?.startsWith('http://') && item.statusCode);
     const notRedirecting = http.filter((item) => !item.redirectsToHttps);
     const status = !http.length ? 'NA' : notRedirecting.length ? 'Warning' : 'OK';
-    return makeResult(this, status, {
+    return makeResult(this, 'NA', {
       affectedCount: notRedirecting.length,
       finding: status === 'OK' ? 'Reachable HTTP candidates redirect to HTTPS.' : `${notRedirecting.length} HTTP candidate(s) did not end on HTTPS.`,
       recommendation: 'Redirect all HTTP variants to the canonical HTTPS URL.',
@@ -273,7 +277,7 @@ function statusCodeDistribution() {
   }, { priority: 'Low', effort: 'S' });
 }
 
-function pageStatusCheck(id, category, name, where, status = 'Warning', priority = 'Medium') {
+function pageStatusCheck(id, category, name, where, status = 'Warning', priority = 'Medium', scopeWhere = null) {
   return issueCheck({
     id: `tech.${id}`,
     category,
@@ -282,50 +286,77 @@ function pageStatusCheck(id, category, name, where, status = 'Warning', priority
     priority,
     effort: 'S',
     where,
+    scopeWhere,
     status
   });
 }
 
 function highTtfbCheck() {
   return tech('high_ttfb', 'Performance Light', `High TTFB > ${thresholds.highTtfbMs}ms`, function run(ctx) {
-    const measuredCount = count(ctx.db, 'SELECT COUNT(*) AS count FROM pages WHERE runId = ? AND ttfbMs IS NOT NULL', [ctx.run.id]);
-    if (!measuredCount) {
-      return availabilityResult(this, 'not_executed', {
-        finding: 'No TTFB measurement was collected; no performance defect was inferred.',
-        details: 'A missing timing value differs from an observed zero or a measurement below threshold.',
-        recommendation: 'Collect targeted request timing samples if TTFB is in scope.',
-        facts: { measuredPageCount: 0 },
-        evidence: { runId: ctx.run.id, measurement: 'ttfbMs' },
-        requirements: {
-          requiredFacts: ['ttfbMs'],
-          missingFacts: ['ttfbMs'],
-          canCollectWithTargetedRun: true,
-          reason: 'No page has a stored ttfbMs observation.'
-        }
-      });
+    const stored = all(ctx.db, `
+      SELECT url, attempt, warmup, ttfbMs, location, measurementMode, error
+      FROM http_timing_measurements
+      WHERE runId = ?
+      ORDER BY url, attempt
+    `, [ctx.run.id]);
+    const oneShotCount = count(ctx.db, 'SELECT COUNT(*) AS count FROM pages WHERE runId = ? AND ttfbMs IS NOT NULL', [ctx.run.id]);
+    if (!stored.length) return availabilityResult(this, oneShotCount ? 'insufficient_evidence' : 'not_executed', {
+      finding: oneShotCount
+        ? `${oneShotCount} one-shot crawl timing(s) exist, but repeated TTFB measurements were not collected.`
+        : 'No TTFB measurement was collected; no performance defect was inferred.',
+      details: 'One crawl timing cannot establish a persistent TTFB condition.',
+      recommendation: 'Collect one warm-up and at least three targeted TTFB measurements per representative URL.',
+      facts: { oneShotMeasurements: oneShotCount, repeatedMeasurements: 0 },
+      evidence: { runId: ctx.run.id, measurement: 'http_timing_measurements', aggregation: 'median' },
+      requirements: { requiredFacts: ['threeSuccessfulTtfbMeasurementsPerUrl'], optionalFacts: ['warmupMeasurement'], missingFacts: ['threeSuccessfulTtfbMeasurementsPerUrl'], minimumCoverage: 3, canCollectWithTargetedRun: true }
+    });
+    const byUrl = new Map();
+    const technicalOutliers = [];
+    for (const row of stored) {
+      if (!byUrl.has(row.url)) byUrl.set(row.url, []);
+      if (row.warmup || row.error !== null || row.ttfbMs === null) continue;
+      const value = Number(row.ttfbMs);
+      if (!Number.isFinite(value) || value < 0 || value > 120000) {
+        technicalOutliers.push({ url: row.url, attempt: row.attempt, ttfbMs: row.ttfbMs });
+        continue;
+      }
+      byUrl.get(row.url).push(row);
     }
-    const rows = all(ctx.db, `
-      SELECT url, ttfbMs, loadTimeMs, statusCode, pageType
-      FROM pages
-      WHERE runId = ? AND ttfbMs IS NOT NULL AND ttfbMs > ?
-      ORDER BY ttfbMs DESC
-      LIMIT 10
-    `, [ctx.run.id, thresholds.highTtfbMs]);
-    const affectedCount = count(ctx.db, `
-      SELECT COUNT(*) AS count
-      FROM pages
-      WHERE runId = ? AND ttfbMs IS NOT NULL AND ttfbMs > ?
-    `, [ctx.run.id, thresholds.highTtfbMs]);
+    const eligible = [...byUrl.entries()].filter(([, rows]) => {
+      if (rows.length < 3) return false;
+      const locations = new Set(rows.map((row) => String(row.location || '').trim()).filter(Boolean));
+      const modes = new Set(rows.map((row) => String(row.measurementMode || '').trim()).filter(Boolean));
+      return locations.size === 1 && modes.size === 1 && rows.every((row) => row.location && row.measurementMode);
+    }).map(([url, rows]) => ({
+      url,
+      measurements: rows.map((row) => Number(row.ttfbMs)),
+      medianTtfbMs: median(rows.map((row) => Number(row.ttfbMs))),
+      location: rows[0].location,
+      measurementMode: rows[0].measurementMode
+    }));
+    const technicalErrors = stored.filter((row) => row.error).length;
+    if (!eligible.length) return availabilityResult(this, technicalErrors + technicalOutliers.length === stored.length ? 'technical_error' : 'insufficient_evidence', {
+      finding: 'Repeated TTFB collection did not produce three successful measurements for any URL.',
+      evidence: { storedMeasurements: stored.length, technicalErrors, technicalOutliers: technicalOutliers.slice(0, 10) },
+      requirements: { requiredFacts: ['threeSuccessfulTtfbMeasurementsPerUrl', 'consistentMeasurementMode', 'consistentMeasurementLocation'], missingFacts: ['stableComparableTtfbSeries'], minimumCoverage: 3, canCollectWithTargetedRun: true }
+    });
+    const affected = eligible.filter((row) => row.medianTtfbMs > thresholds.highTtfbMs);
+    const rows = affected.slice(0, 10);
+    const affectedCount = affected.length;
     return makeResult(this, affectedCount ? 'Warning' : 'OK', {
       affectedCount,
       sampleUrls: rows.map((row) => row.url),
-      finding: affectedCount ? `${affectedCount} URL(s) exceeded ${thresholds.highTtfbMs}ms TTFB in the stored crawl measurement.` : `No stored page TTFB exceeded ${thresholds.highTtfbMs}ms.`,
+      finding: affectedCount ? `${affectedCount} URL(s) exceeded ${thresholds.highTtfbMs}ms median TTFB.` : `No eligible URL exceeded ${thresholds.highTtfbMs}ms median TTFB.`,
       recommendation: affectedCount ? 'Treat TTFB as volatile: confirm with repeated measurements or a follow-up run before prioritizing infrastructure work.' : 'No TTFB action from the stored crawl data.',
-      details: 'Based on the stored crawl TTFB value. Network timing is volatile and should be confirmed with repeated measurements for final decisions.',
+      details: 'Based on the median of at least three successful non-warm-up measurements per URL.',
       evidence: {
-        measuredPageCount: measuredCount,
+        eligibleUrls: eligible.length,
+        storedMeasurements: stored.length,
+        technicalErrors,
+        technicalOutliers: technicalOutliers.slice(0, 10),
         thresholdMs: thresholds.highTtfbMs,
-        measurementType: 'single_crawl_ttfb_ms',
+        measurementType: 'repeated_ttfb_ms',
+        aggregation: 'median',
         volatility: 'network_timing',
         suggestedValidation: 'repeat_measurements_or_follow_up_run',
         samples: rows
@@ -333,7 +364,7 @@ function highTtfbCheck() {
       findingType: 'best_practice',
       confidence: affectedCount > 3 ? 'medium' : affectedCount ? 'low' : 'high',
       reviewRecommended: affectedCount > 0,
-      requirements: { requiredFacts: ['ttfbMs'], optionalFacts: ['repeatTtfbMeasurements'], missingFacts: [], minimumCoverage: 1, canCollectWithTargetedRun: true }
+      requirements: { requiredFacts: ['threeSuccessfulTtfbMeasurementsPerUrl', 'measurementMode', 'measurementLocation'], optionalFacts: ['warmupMeasurement'], missingFacts: [], minimumCoverage: 3, canCollectWithTargetedRun: true }
     });
   }, { priority: 'Medium', effort: 'M' });
 }
@@ -344,7 +375,7 @@ function headerPresence(id, category, name, headerKey, priority = 'Medium', opti
     if (gate) return gate;
     const total = htmlPageCount(ctx.db, ctx.run.id);
     const where = `${HTML_WHERE} AND (responseHeadersJson IS NULL OR responseHeadersJson NOT LIKE ?)`;
-    const affectedCount = count(ctx.db, `SELECT COUNT(*) AS count FROM pages WHERE runId = ? AND ${where}`, [ctx.run.id, `%"${headerKey}"%`]);
+    const affectedCount = count(ctx.db, `SELECT COUNT(*) AS count FROM pages WHERE runId = ? AND (${where})`, [ctx.run.id, `%"${headerKey}"%`]);
     const samples = affectedCount ? sampleUrls(ctx.db, ctx.run.id, where, [`%"${headerKey}"%`]) : [];
     return makeResult(this, checkStatusForCoverage(total, affectedCount, 'Warning'), {
       affectedCount,
@@ -567,7 +598,7 @@ function charsetUtf8Check() {
     const where = `${HTML_WHERE}
       AND COALESCE(hasHeaderUtf8, 0) = 0
       AND COALESCE(hasMetaCharsetUtf8, 0) = 0`;
-    const affectedCount = count(ctx.db, `SELECT COUNT(*) AS count FROM pages WHERE runId = ? AND ${where}`, [ctx.run.id]);
+    const affectedCount = count(ctx.db, `SELECT COUNT(*) AS count FROM pages WHERE runId = ? AND (${where})`, [ctx.run.id]);
     const samples = affectedCount ? sampleUrls(ctx.db, ctx.run.id, where) : [];
     return makeResult(this, checkStatusForCoverage(total, affectedCount, 'Warning'), {
       affectedCount,
@@ -754,23 +785,31 @@ function noindexPagesCheck() {
     const directiveWhere = `${HTML_WHERE} AND (COALESCE(noindex, 0) = 1 OR ${ROBOTS_TEXT_EXPR} LIKE '%noindex%')`;
     const contentWhere = `${directiveWhere} AND ${NON_LEGAL_PAGE_WHERE}`;
     const legalWhere = `${directiveWhere} AND ${LEGAL_PAGE_WHERE}`;
-    const contentNoindexCount = count(ctx.db, `SELECT COUNT(*) AS count FROM pages WHERE runId = ? AND ${contentWhere}`, [ctx.run.id]);
-    const legalNoindexCount = count(ctx.db, `SELECT COUNT(*) AS count FROM pages WHERE runId = ? AND ${legalWhere}`, [ctx.run.id]);
+    const contentNoindexCount = count(ctx.db, `SELECT COUNT(*) AS count FROM pages WHERE runId = ? AND (${contentWhere})`, [ctx.run.id]);
+    const legalNoindexCount = count(ctx.db, `SELECT COUNT(*) AS count FROM pages WHERE runId = ? AND (${legalWhere})`, [ctx.run.id]);
     const samples = contentNoindexCount ? sampleUrls(ctx.db, ctx.run.id, contentWhere) : [];
-    const status = !totalHtmlPages ? 'NA' : contentNoindexCount ? 'Warning' : 'OK';
-    return makeResult(this, status, {
-      affectedCount: contentNoindexCount,
-      sampleUrls: samples,
+    if (!totalHtmlPages) return availabilityResult(this, 'not_executed', {
+      finding: 'No successfully extracted HTML pages are available for noindex inventory.',
+      evidence: { totalHtmlPages: 0 },
+      requirements: { requiredFacts: ['htmlRobotsDirectives'], missingFacts: ['htmlRobotsDirectives'], minimumCoverage: 1, canCollectWithTargetedRun: true }
+    });
+    return makeResult(this, 'NA', {
+      affectedCount: 0,
+      sampleUrls: [],
       finding: contentNoindexCount
-        ? `${contentNoindexCount} non-legal HTML page(s) carry noindex.`
+        ? `${contentNoindexCount} non-legal HTML page(s) carry noindex; this is inventory evidence, not a proven contradiction.`
         : legalNoindexCount
           ? `Only legal page noindex directives were detected (${legalNoindexCount} page(s)).`
           : 'No HTML page has a noindex directive.',
-      recommendation: 'Keep noindex on legal/utility pages only when intentional; review noindex on indexable content pages.',
-      details: 'Legal pages are counted separately and are not treated as core crawling warnings.',
+      recommendation: 'Review intent separately; create a finding only when an expected-indexable page is demonstrably excluded.',
+      details: 'A robots directive is an observed fact. No failure is emitted without a separate expected-indexability fact.',
       evidence: { totalHtmlPages, contentNoindexCount, legalNoindexCount, sampleUrls: samples },
-      findingType: contentNoindexCount ? 'core_issue' : 'info',
-      confidence: 'high'
+      findingType: 'info',
+      confidence: 'high',
+      reviewRecommended: contentNoindexCount > 0,
+      scoreEligible: false,
+      evaluationState: 'not_applicable',
+      requirements: { requiredFacts: ['htmlRobotsDirectives', 'expectedIndexabilityIntent'], missingFacts: contentNoindexCount ? ['expectedIndexabilityIntent'] : [], minimumCoverage: 1, canCollectWithTargetedRun: true }
     });
   }, { priority: 'Medium', effort: 'S' });
 }
@@ -781,23 +820,31 @@ function nofollowPagesCheck() {
     const directiveWhere = `${HTML_WHERE} AND (COALESCE(nofollow, 0) = 1 OR ${ROBOTS_TEXT_EXPR} LIKE '%nofollow%')`;
     const contentWhere = `${directiveWhere} AND ${NON_LEGAL_PAGE_WHERE}`;
     const legalWhere = `${directiveWhere} AND ${LEGAL_PAGE_WHERE}`;
-    const contentNofollowCount = count(ctx.db, `SELECT COUNT(*) AS count FROM pages WHERE runId = ? AND ${contentWhere}`, [ctx.run.id]);
-    const legalNofollowCount = count(ctx.db, `SELECT COUNT(*) AS count FROM pages WHERE runId = ? AND ${legalWhere}`, [ctx.run.id]);
+    const contentNofollowCount = count(ctx.db, `SELECT COUNT(*) AS count FROM pages WHERE runId = ? AND (${contentWhere})`, [ctx.run.id]);
+    const legalNofollowCount = count(ctx.db, `SELECT COUNT(*) AS count FROM pages WHERE runId = ? AND (${legalWhere})`, [ctx.run.id]);
     const samples = contentNofollowCount ? sampleUrls(ctx.db, ctx.run.id, contentWhere) : [];
-    const status = !totalHtmlPages ? 'NA' : contentNofollowCount ? 'Warning' : 'OK';
-    return makeResult(this, status, {
-      affectedCount: contentNofollowCount,
-      sampleUrls: samples,
+    if (!totalHtmlPages) return availabilityResult(this, 'not_executed', {
+      finding: 'No successfully extracted HTML pages are available for nofollow inventory.',
+      evidence: { totalHtmlPages: 0 },
+      requirements: { requiredFacts: ['htmlRobotsDirectives'], missingFacts: ['htmlRobotsDirectives'], minimumCoverage: 1, canCollectWithTargetedRun: true }
+    });
+    return makeResult(this, 'NA', {
+      affectedCount: 0,
+      sampleUrls: [],
       finding: contentNofollowCount
-        ? `${contentNofollowCount} non-legal HTML page(s) carry nofollow.`
+        ? `${contentNofollowCount} non-legal HTML page(s) carry nofollow; this is inventory evidence, not a proven contradiction.`
         : legalNofollowCount
           ? `Only legal page nofollow directives were detected (${legalNofollowCount} page(s)).`
           : 'No HTML page has a nofollow directive.',
-      recommendation: 'Use page-level nofollow only where link discovery should intentionally be limited.',
-      details: 'Legal pages are counted separately and are not treated as core crawling warnings.',
+      recommendation: 'Review intent separately; emit a finding only when the directive conflicts with an explicit crawl/discovery requirement.',
+      details: 'A nofollow directive alone is not a website error.',
       evidence: { totalHtmlPages, contentNofollowCount, legalNofollowCount, sampleUrls: samples },
-      findingType: contentNofollowCount ? 'core_issue' : 'info',
-      confidence: 'high'
+      findingType: 'info',
+      confidence: 'high',
+      reviewRecommended: contentNofollowCount > 0,
+      scoreEligible: false,
+      evaluationState: 'not_applicable',
+      requirements: { requiredFacts: ['htmlRobotsDirectives', 'expectedLinkDiscoveryIntent'], missingFacts: contentNofollowCount ? ['expectedLinkDiscoveryIntent'] : [], minimumCoverage: 1, canCollectWithTargetedRun: true }
     });
   }, { priority: 'Low', effort: 'S' });
 }
@@ -870,7 +917,7 @@ function htmlSemanticsSummary() {
 }
 
 function missingField(id, category, name, field, status = 'Warning', priority = 'Medium') {
-  return pageStatusCheck(id, category, name, `${HTML_WHERE} AND (${field} IS NULL OR ${field} = '')`, status, priority);
+  return pageStatusCheck(id, category, name, `${SUCCESSFUL_HTML_WHERE} AND (${field} IS NULL OR ${field} = '')`, status, priority, SUCCESSFUL_HTML_WHERE);
 }
 
 function lengthCheck(id, category, name, where, status = 'Warning', priority = 'Medium') {
@@ -882,7 +929,7 @@ function canonicalMissing() {
 }
 
 function contentMissingField(id, category, name, field, status = 'Warning', priority = 'Medium') {
-  return pageStatusCheck(id, category, name, `${INDEXABLE_CONTENT_HTML_WHERE} AND (${field} IS NULL OR ${field} = '')`, status, priority);
+  return pageStatusCheck(id, category, name, `${INDEXABLE_CONTENT_HTML_WHERE} AND (${field} IS NULL OR ${field} = '')`, status, priority, INDEXABLE_CONTENT_HTML_WHERE);
 }
 
 function contentLengthCheck(id, category, name, where, status = 'Warning', priority = 'Medium') {
@@ -921,13 +968,23 @@ function duplicateContentField(id, category, name, field, status = 'Warning', pr
       ORDER BY count DESC
       LIMIT 10
     `, [ctx.run.id]);
-    const affectedCount = groups.reduce((sum, row) => sum + row.count, 0);
+    const totals = ctx.db.prepare(`
+      SELECT COALESCE(SUM(groupCount), 0) AS affectedCount, COUNT(*) AS totalGroups
+      FROM (
+        SELECT COUNT(*) AS groupCount
+        FROM pages
+        WHERE runId = ? AND ${INDEXABLE_CONTENT_HTML_WHERE} AND ${field} IS NOT NULL AND ${field} <> ''
+        GROUP BY LOWER(${field})
+        HAVING COUNT(*) > 1
+      )
+    `).get(ctx.run.id);
+    const affectedCount = Number(totals.affectedCount || 0);
     return makeResult(this, affectedCount ? status : 'OK', {
       affectedCount,
       finding: affectedCount ? `${affectedCount} indexable content URLs share duplicate ${field} values.` : `No duplicate ${field} values found on indexable content pages.`,
       recommendation: `Make ${field} values unique where indexable content pages target different intents.`,
       details: 'Legal/noindex/non-content pages are excluded from this duplicate check.',
-      evidence: { duplicateGroups: groups, scope: 'indexable_non_legal_html_pages' }
+      evidence: { totalAffected: affectedCount, totalGroups: Number(totals.totalGroups || 0), displayedSamples: groups.length, duplicateGroups: groups, scope: 'indexable_non_legal_html_pages' }
     });
   }, { priority });
 }
@@ -1053,7 +1110,7 @@ function appIconsIncomplete() {
       sampleUrls: rows.map((row) => row.url),
       finding: affectedCount ? `${affectedCount} page(s) have incomplete favicon/app icon signals.` : 'Favicon/app icon signals are present where checked.',
       recommendation: 'Provide favicon and Apple touch/app icon signals for browser UX and brand consistency; keep this as a low-severity best-practice item.',
-      evidence: { samples: rows },
+      evidence: { totalAffected: affectedCount, displayedSamples: rows.length, samples: rows },
       findingType: 'best_practice',
       confidence: affectedCount ? 'medium' : 'high',
       reviewRecommended: affectedCount > 0,
@@ -1188,7 +1245,7 @@ function canonicalOtherDomain() {
     const where = `${HTML_WHERE} AND canonical IS NOT NULL AND canonical <> '' AND
       canonical NOT LIKE 'https://${host}%' AND canonical NOT LIKE 'http://${host}%' AND
       canonical NOT LIKE 'https://www.${host}%' AND canonical NOT LIKE 'http://www.${host}%'`;
-    const affectedCount = count(ctx.db, `SELECT COUNT(*) AS count FROM pages WHERE runId = ? AND ${where}`, [ctx.run.id]);
+    const affectedCount = count(ctx.db, `SELECT COUNT(*) AS count FROM pages WHERE runId = ? AND (${where})`, [ctx.run.id]);
     const samples = affectedCount ? sampleUrls(ctx.db, ctx.run.id, where) : [];
     return makeResult(this, affectedCount ? 'Warning' : 'OK', {
       affectedCount,
@@ -1231,7 +1288,9 @@ function internalLinksToStatus(id, name, targetWhere, status = 'Warning', priori
     const gate = storedFactGate(this, ctx, 'storeAllLinks', 'normalized internal link rows');
     if (gate) return gate;
     const rows = all(ctx.db, `
-      SELECT l.sourceUrl AS url, l.targetUrl, p.statusCode
+      SELECT l.sourceUrl AS url, l.sourceUrl, COALESCE(l.linkedUrl, l.targetUrl) AS linkedUrl,
+        l.initialStatusCode, l.redirectChainJson, l.finalUrl,
+        COALESCE(l.finalStatusCode, p.statusCode) AS finalStatus
       FROM page_links l
       JOIN pages p ON p.runId = l.runId AND p.normalizedUrl = l.normalizedTargetUrl
       WHERE l.runId = ? AND l.linkType = 'internal' AND ${targetWhere}
@@ -1244,13 +1303,28 @@ function internalLinksToStatus(id, name, targetWhere, status = 'Warning', priori
       JOIN pages p ON p.runId = l.runId AND p.normalizedUrl = l.normalizedTargetUrl
       WHERE l.runId = ? AND l.linkType = 'internal' AND ${targetWhere}
     `, [ctx.run.id]);
+    const evidenceRows = rows.map((row) => ({
+      source_url: row.sourceUrl,
+      linked_url: row.linkedUrl,
+      initial_status: row.initialStatusCode,
+      redirect_chain: safeJson(row.redirectChainJson, []),
+      final_url: row.finalUrl,
+      final_status: row.finalStatus
+    }));
+    const uniqueTargets = count(ctx.db, `
+      SELECT COUNT(DISTINCT l.normalizedTargetUrl) AS count
+      FROM page_links l
+      JOIN pages p ON p.runId = l.runId AND p.normalizedUrl = l.normalizedTargetUrl
+      WHERE l.runId = ? AND l.linkType = 'internal' AND ${targetWhere}
+    `, [ctx.run.id]);
     return makeResult(this, affectedCount ? status : 'OK', {
       affectedCount,
       sampleUrls: rows.map((row) => row.url),
-      finding: affectedCount ? `${affectedCount} internal link(s) point to matching target status.` : 'No matching internal link targets found among crawled pages.',
+      finding: affectedCount ? `${affectedCount} internal link occurrence(s) point to ${uniqueTargets} unique matching target(s).` : 'No matching internal link targets found among crawled pages.',
       recommendation: 'Update internal links to point directly to 200 destinations.',
-      evidence: { samples: rows },
-      requirements: { requiredFacts: ['normalizedInternalLinkRows', 'knownTargetStatus'], optionalFacts: [], missingFacts: [], minimumCoverage: 1, canCollectWithTargetedRun: true }
+      evidence: { totalOccurrences: affectedCount, uniqueTargets, displayedSamples: evidenceRows.length, samples: evidenceRows },
+      facts: { totalOccurrences: affectedCount, uniqueTargets },
+      requirements: { requiredFacts: ['normalizedInternalLinkRows', 'initialTargetStatus', 'redirectChain', 'finalTargetStatus'], optionalFacts: [], missingFacts: [], minimumCoverage: 1, canCollectWithTargetedRun: true }
     });
   }, { priority });
 }
@@ -1333,6 +1407,12 @@ function resourceBytesCheck(id, category, name, resourceType, threshold, status 
   return tech(id, category, name, function run(ctx) {
     const gate = storedFactGate(this, ctx, 'storeAllResources', 'resource byte rows');
     if (gate) return gate;
+    const coverage = resourceMeasurementCoverage(ctx.db, ctx.run.id, resourceType);
+    if (!coverage.totalResources) return availabilityResult(this, 'not_applicable', {
+      finding: `No ${resourceType} resources were observed.`,
+      evidence: { resourceType, ...coverage },
+      requirements: { requiredFacts: ['resourceRows'], missingFacts: [], minimumCoverage: 1, canCollectWithTargetedRun: true }
+    });
     const rows = all(ctx.db, `
       SELECT pageUrl AS url, SUM(sizeBytes) AS totalBytes, COUNT(*) AS knownResources
       FROM resources
@@ -1352,12 +1432,17 @@ function resourceBytesCheck(id, category, name, resourceType, threshold, status 
         HAVING SUM(sizeBytes) > ?
       )
     `, [ctx.run.id, resourceType, threshold]);
+    if (!affectedCount && coverage.coverage < 1) return availabilityResult(this, coverage.onlyTechnicalErrors ? 'technical_error' : 'insufficient_evidence', {
+      finding: `${name}: only ${Math.round(coverage.coverage * 100)}% of ${resourceType} resources have a measured size.`,
+      evidence: { thresholdBytes: threshold, resourceType, ...coverage },
+      requirements: { requiredFacts: ['resourceRows', 'resourceBytes'], missingFacts: ['completeResourceByteCoverage'], minimumCoverage: 1, canCollectWithTargetedRun: true }
+    });
     return makeResult(this, affectedCount ? status : 'OK', {
       affectedCount,
       sampleUrls: rows.map((row) => row.url),
       finding: affectedCount ? `${affectedCount} page(s) exceed known ${resourceType} byte totals.` : `No page exceeds known ${resourceType} byte threshold.`,
       recommendation: 'Audit large resources and reduce transfer size.',
-      evidence: { thresholdBytes: threshold, resourceType, samples: rows },
+      evidence: { thresholdBytes: threshold, resourceType, ...coverage, samples: rows },
       findingType: 'best_practice',
       confidence: affectedCount ? 'medium' : 'high',
       dataBasis: 'stored resource byte facts',
@@ -1366,6 +1451,43 @@ function resourceBytesCheck(id, category, name, resourceType, threshold, status 
       requirements: { requiredFacts: ['resourceRows', 'resourceBytes'], optionalFacts: [], missingFacts: [], minimumCoverage: 1, canCollectWithTargetedRun: true }
     });
   });
+}
+
+function resourceMeasurementCoverage(db, runId, resourceType) {
+  const row = db.prepare(`
+    SELECT COUNT(*) AS totalResources,
+      SUM(CASE WHEN sizeBytes IS NOT NULL THEN 1 ELSE 0 END) AS measuredResources,
+      SUM(CASE WHEN sizeMeasurementError IS NOT NULL THEN 1 ELSE 0 END) AS measurementErrors
+    FROM resources
+    WHERE runId = ? AND resourceType = ?
+  `).get(runId, resourceType) || {};
+  const totalResources = Number(row.totalResources || 0);
+  const measuredResources = Number(row.measuredResources || 0);
+  const measurementErrors = Number(row.measurementErrors || 0);
+  const measurementKinds = all(db, `
+    SELECT COALESCE(sizeMeasurementKind, 'unknown') AS kind, COUNT(*) AS count
+    FROM resources
+    WHERE runId = ? AND resourceType = ? AND sizeBytes IS NOT NULL
+    GROUP BY COALESCE(sizeMeasurementKind, 'unknown')
+    ORDER BY kind
+  `, [runId, resourceType]);
+  return {
+    totalResources,
+    measuredResources,
+    missingMeasurements: Math.max(0, totalResources - measuredResources),
+    measurementErrors,
+    measurementKinds,
+    byteSemantics: 'Measurement kind distinguishes Content-Length, observed bytes and imported size facts; values are not assumed to be interchangeable with decoded resource size.',
+    coverage: totalResources ? measuredResources / totalResources : 0,
+    onlyTechnicalErrors: totalResources > 0 && measuredResources === 0 && measurementErrors === totalResources
+  };
+}
+
+function median(values) {
+  const sorted = values.map(Number).filter(Number.isFinite).sort((a, b) => a - b);
+  if (!sorted.length) return null;
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
 }
 
 function thirdPartyScripts() {
@@ -1394,7 +1516,7 @@ function thirdPartyScripts() {
       sampleUrls: rows.map((row) => row.url),
       finding: rows.length ? `${affectedCount} page(s) load third-party scripts in stored resource facts.` : 'No third-party scripts detected in stored resources.',
       recommendation: 'Review third-party scripts for performance, privacy and necessity. Treat this as an opportunity/review signal unless size, blocking or consent evidence shows a concrete issue.',
-      evidence: { samples: rows },
+      evidence: { totalAffected: affectedCount, displayedSamples: rows.length, samples: rows },
       findingType: 'opportunity',
       confidence: rows.length >= 5 ? 'medium' : rows.length ? 'low' : 'high',
       reviewRecommended: rows.length > 0,
@@ -1489,7 +1611,7 @@ function preconnectMissing() {
       sampleUrls: rows.map((row) => row.url),
       finding: rows.length ? `${affectedCount} page(s) use multiple external script/style/font resources without stored preconnect/dns-prefetch hints.` : 'No strong preconnect-missing signal detected.',
       recommendation: 'Consider preconnect or dns-prefetch only for validated critical third-party origins. Missing hints alone are an optimisation opportunity, not a defect.',
-      evidence: { samples: rows, minimumThirdPartyResources: 3 },
+      evidence: { totalAffected: affectedCount, displayedSamples: rows.length, samples: rows, minimumThirdPartyResources: 3 },
       findingType: 'opportunity',
       confidence: rows.length ? 'low' : 'high',
       reviewRecommended: rows.length > 0,
@@ -1617,6 +1739,12 @@ function criticalContentRawHtmlSignal() {
         automationCoverage: 'requires_external_data'
       });
     }
+    const normalizedTextRows = count(ctx.db, `SELECT COUNT(*) AS count FROM pages WHERE runId = ? AND ${HTML_WHERE} AND ${VISIBLE_TEXT_FACTS_WHERE}`, [ctx.run.id]);
+    if (normalizedTextRows < rows.length) return availabilityResult(this, 'insufficient_evidence', {
+      finding: `${normalizedTextRows}/${rows.length} sampled HTML page(s) have visible_text provenance; legacy body/script word counts were not evaluated as critical content.`,
+      evidence: { sampledPages: rows.length, normalizedTextRows, normalization: VISIBLE_TEXT_NORMALIZATION_VERSION },
+      requirements: { requiredFacts: ['rawVisibleText', 'visibleTextProvenance'], optionalFacts: ['renderedVisibleText'], missingFacts: ['visibleTextProvenance'], minimumCoverage: 1, canCollectWithTargetedRun: true }
+    });
     const renderedRows = rows.filter((row) => row.wordCountRendered !== null || row.renderedH1Count !== null || row.renderedLinksCount !== null);
     const jsDependentRows = renderedRows.filter((row) =>
       (Number(row.h1Count || 0) === 0 && Number(row.renderedH1Count || 0) > 0) ||
@@ -1663,16 +1791,81 @@ function criticalContentRawHtmlSignal() {
 
 function consoleErrorsPresent() {
   return tech('console_errors_present', 'JavaScript & Rendering', 'Console errors present', function run(ctx) {
-    const where = `consoleErrorsJson IS NOT NULL AND consoleErrorsJson <> '[]'`;
-    const rows = all(ctx.db, `SELECT url, consoleErrorsJson FROM pages WHERE runId = ? AND ${where} LIMIT 10`, [ctx.run.id]);
+    if (!ctx.run.usePlaywright) return availabilityResult(this, 'not_executed', {
+      finding: 'Console collection was not executed in this run.',
+      evidence: { usePlaywright: false },
+      requirements: { requiredFacts: ['successfulBrowserNavigation', 'consoleErrorEvents'], missingFacts: ['consoleErrorEvents'], minimumCoverage: 1, canCollectWithTargetedRun: true }
+    });
+    const successfulNavigation = count(ctx.db, "SELECT COUNT(*) AS count FROM pages WHERE runId = ? AND renderStatus = 'success'", [ctx.run.id]);
+    const navigationErrors = count(ctx.db, 'SELECT COUNT(*) AS count FROM pages WHERE runId = ? AND navigationError IS NOT NULL', [ctx.run.id]);
+    if (!successfulNavigation) return availabilityResult(this, navigationErrors ? 'technical_error' : 'insufficient_evidence', {
+      finding: 'No successful browser navigation was available for console evaluation.',
+      evidence: { successfulNavigation, navigationErrors, technicalErrorSource: navigationErrors ? 'browser_navigation' : null },
+      requirements: { requiredFacts: ['successfulBrowserNavigation', 'consoleErrorEvents'], missingFacts: ['successfulBrowserNavigation'], minimumCoverage: 1, canCollectWithTargetedRun: true }
+    });
+    const where = `renderStatus = 'success' AND consoleErrorsJson IS NOT NULL AND consoleErrorsJson <> '[]'`;
+    const rows = all(ctx.db, `SELECT url, consoleErrorsJson, pageErrorsJson, requestFailuresJson FROM pages WHERE runId = ? AND (${where}) LIMIT 10`, [ctx.run.id]);
     return makeResult(this, rows.length ? 'Warning' : 'OK', {
-      affectedCount: count(ctx.db, `SELECT COUNT(*) AS count FROM pages WHERE runId = ? AND ${where}`, [ctx.run.id]),
+      affectedCount: count(ctx.db, `SELECT COUNT(*) AS count FROM pages WHERE runId = ? AND (${where})`, [ctx.run.id]),
       sampleUrls: rows.map((row) => row.url),
       finding: rows.length ? 'Console errors were captured during Playwright rendering.' : 'No console errors captured during rendering.',
       recommendation: 'Review rendering errors that may affect indexable content or UX.',
-      evidence: { samples: rows.map((row) => ({ url: row.url, errors: safeJson(row.consoleErrorsJson, []) })) }
+      evidence: {
+        successfulNavigation,
+        navigationErrorsExcluded: navigationErrors,
+        channels: ['console.error'],
+        samples: rows.map((row) => ({ url: row.url, consoleErrors: safeJson(row.consoleErrorsJson, []) }))
+      },
+      requirements: { requiredFacts: ['successfulBrowserNavigation', 'consoleErrorEvents'], optionalFacts: ['pageerror', 'requestfailed'], missingFacts: [], minimumCoverage: 1, canCollectWithTargetedRun: true }
     });
   });
+}
+
+function renderedPageSignalCheck(id, name, condition, { minimumMeasurements = 1 } = {}) {
+  return tech(id, 'JavaScript & Rendering', name, function run(ctx) {
+    const successful = count(ctx.db, `SELECT COUNT(*) AS count FROM pages WHERE runId = ? AND ${SUCCESSFUL_HTML_WHERE} AND renderStatus = 'success'`, [ctx.run.id]);
+    const normalizedSuccessful = count(ctx.db, `SELECT COUNT(*) AS count FROM pages WHERE runId = ? AND ${SUCCESSFUL_HTML_WHERE} AND renderStatus = 'success' AND ${VISIBLE_TEXT_FACTS_WHERE} AND textFactsJson LIKE '%"rendered_visible_text":{"length"%'`, [ctx.run.id]);
+    const navigationErrors = count(ctx.db, `SELECT COUNT(*) AS count FROM pages WHERE runId = ? AND navigationError IS NOT NULL`, [ctx.run.id]);
+    if (!ctx.run.usePlaywright) {
+      return availabilityResult(this, 'not_executed', {
+        finding: `${name}: rendered extraction was not executed.`,
+        evidence: { runId: ctx.run.id, usePlaywright: false },
+        requirements: { requiredFacts: ['rawVisibleText', 'renderedVisibleText'], missingFacts: ['renderedVisibleText'], minimumCoverage: 1, canCollectWithTargetedRun: true }
+      });
+    }
+    if (successful < minimumMeasurements) {
+      return availabilityResult(this, navigationErrors && !successful ? 'technical_error' : 'insufficient_evidence', {
+        finding: `${name}: too few successful rendered measurements.`,
+        evidence: { successfulRenderedMeasurements: successful, navigationErrors },
+        requirements: { requiredFacts: ['rawVisibleText', 'renderedVisibleText'], missingFacts: ['stableRenderedVisibleText'], minimumCoverage: minimumMeasurements, canCollectWithTargetedRun: true }
+      });
+    }
+    if (normalizedSuccessful < minimumMeasurements) return availabilityResult(this, 'insufficient_evidence', {
+      finding: `${name}: rendered samples do not contain comparable visible_text provenance on both sides.`,
+      evidence: { successfulRenderedMeasurements: successful, normalizedComparableMeasurements: normalizedSuccessful, normalization: VISIBLE_TEXT_NORMALIZATION_VERSION },
+      requirements: { requiredFacts: ['rawVisibleText', 'renderedVisibleText', 'sharedTextNormalization'], missingFacts: ['sharedTextNormalization'], minimumCoverage: minimumMeasurements, canCollectWithTargetedRun: true }
+    });
+    const where = `${SUCCESSFUL_HTML_WHERE} AND renderStatus = 'success' AND ${condition}`;
+    const affectedCount = count(ctx.db, `SELECT COUNT(*) AS count FROM pages WHERE runId = ? AND (${where})`, [ctx.run.id]);
+    const rows = all(ctx.db, `SELECT url, wordCountRaw, wordCountRendered, h1Count, renderedH1Count, internalLinksCount, renderedLinksCount FROM pages WHERE runId = ? AND (${where}) ORDER BY id ASC LIMIT 10`, [ctx.run.id]);
+    return makeResult(this, affectedCount ? 'Warning' : 'OK', {
+      affectedCount,
+      sampleUrls: rows.map((row) => row.url),
+      finding: affectedCount ? `${affectedCount} rendered page(s) match this signal.` : `No issue observed in ${successful} successfully rendered page(s).`,
+      recommendation: 'Review server-rendered and browser-rendered output on affected templates.',
+      evidence: { normalization: VISIBLE_TEXT_NORMALIZATION_VERSION, successfulRenderedMeasurements: successful, navigationErrors, samples: rows },
+      requirements: { requiredFacts: ['rawVisibleText', 'renderedVisibleText', 'successfulNavigation'], optionalFacts: [], missingFacts: [], minimumCoverage: minimumMeasurements, canCollectWithTargetedRun: true }
+    });
+  });
+}
+
+function jsDependentContentCheck() {
+  return renderedPageSignalCheck(
+    'js_dependent_content',
+    'Main content likely JS-dependent',
+    'wordCountRaw < 100 AND wordCountRendered > wordCountRaw * 2 AND wordCountRendered > 200',
+    { minimumMeasurements: 2 }
+  );
 }
 
 function templateLowLighthousePerformance() {
@@ -1682,7 +1875,7 @@ function templateLowLighthousePerformance() {
     const rows = all(ctx.db, `
       SELECT templateClusterKey, sampleCount, lighthouseSuccessCount, avgPerformanceScore, minPerformanceScore, worstSampleUrlsJson
       FROM template_performance_summary
-      WHERE runId = ?
+      WHERE runId = ? AND lighthouseSuccessCount >= 2
         AND (
           (avgPerformanceScore IS NOT NULL AND avgPerformanceScore < ?)
           OR (minPerformanceScore IS NOT NULL AND minPerformanceScore < ?)
@@ -1690,6 +1883,8 @@ function templateLowLighthousePerformance() {
       ORDER BY minPerformanceScore ASC, avgPerformanceScore ASC
       LIMIT 10
     `, [ctx.run.id, thresholds.lighthousePerformanceWarning, thresholds.lighthousePerformanceWarning]);
+    const coverage = lighthouseMeasurementCoverage(ctx.db, ctx.run.id, 'performanceScore');
+    if (!coverage.complete) return unavailableLighthouseCoverage(this, coverage, 'performanceScore');
     const errorCount = rows.filter((row) =>
       Number(row.avgPerformanceScore) < thresholds.lighthousePerformanceError ||
       Number(row.minPerformanceScore) < thresholds.lighthousePerformanceError
@@ -1703,7 +1898,8 @@ function templateLowLighthousePerformance() {
           error: thresholds.lighthousePerformanceError,
           scoreScale: '0-1'
         },
-        templates: mapTemplateRows(rows)
+        templates: mapTemplateRows(rows),
+        coverage
       },
       findingType: 'core_issue'
     });
@@ -1741,10 +1937,12 @@ function templateHighLcp() {
     const rows = all(ctx.db, `
       SELECT templateClusterKey, sampleCount, lighthouseSuccessCount, avgLcpMs, worstSampleUrlsJson
       FROM template_performance_summary
-      WHERE runId = ? AND avgLcpMs IS NOT NULL AND avgLcpMs > ?
+      WHERE runId = ? AND lighthouseSuccessCount >= 2 AND avgLcpMs IS NOT NULL AND avgLcpMs > ?
       ORDER BY avgLcpMs DESC
       LIMIT 10
     `, [ctx.run.id, thresholds.lcpWarningMs]);
+    const coverage = lighthouseMeasurementCoverage(ctx.db, ctx.run.id, 'largestContentfulPaintMs');
+    if (!coverage.complete) return unavailableLighthouseCoverage(this, coverage, 'largestContentfulPaintMs');
     const status = rows.some((row) => Number(row.avgLcpMs) > thresholds.lcpErrorMs) ? 'Error' : rows.length ? 'Warning' : 'OK';
     return templateFinding(this, rows, status, {
       finding: rows.length ? `${rows.length} template cluster(s) have high sampled Lighthouse LCP.` : 'No high sampled Lighthouse LCP template signal found.',
@@ -1755,7 +1953,8 @@ function templateHighLcp() {
         thresholds: { warningMs: thresholds.lcpWarningMs, errorMs: thresholds.lcpErrorMs },
         measurementType: 'lighthouse_lab_sample',
         volatility: 'lab_performance_measurement',
-        templates: mapTemplateRows(rows)
+        templates: mapTemplateRows(rows),
+        coverage
       },
       findingType: 'core_issue'
     });
@@ -1787,6 +1986,16 @@ function templateConsoleErrors() {
   return tech('template.console_errors', 'Template Performance & Rendering', 'Template sample console errors', function run(ctx) {
     const data = samplingState(ctx.db, ctx.run.id);
     if (!data.sampleCount || !data.playwrightEnabled || !data.playwrightSuccessCount) return unavailableSamplingResult(this, data, 'playwright');
+    const channelAwareSuccesses = count(ctx.db, `
+      SELECT COUNT(*) AS count FROM playwright_results
+      WHERE runId = ? AND status = 'success' AND navigationError IS NULL
+        AND consoleErrorsJson IS NOT NULL AND pageErrorsJson IS NOT NULL AND networkErrorsJson IS NOT NULL
+    `, [ctx.run.id]);
+    if (channelAwareSuccesses < data.playwrightSuccessCount) return availabilityResult(this, 'insufficient_evidence', {
+      finding: `${channelAwareSuccesses}/${data.playwrightSuccessCount} successful Playwright sample(s) preserve separated console/page/request channels.`,
+      evidence: { ...data, channelAwareSuccesses, channels: ['console.error', 'pageerror', 'requestfailed', 'csp', 'navigation'] },
+      requirements: { requiredFacts: ['successfulBrowserNavigation', 'separatedBrowserErrorChannels'], missingFacts: ['separatedBrowserErrorChannels'], minimumCoverage: 1, canCollectWithTargetedRun: true }
+    });
     const rows = all(ctx.db, `
       SELECT templateClusterKey, sampleCount, playwrightSuccessCount, consoleErrorSampleCount, worstSampleUrlsJson
       FROM template_performance_summary
@@ -1808,6 +2017,12 @@ function templateJsRequiredContent() {
   return tech('template.js_required_content', 'Template Performance & Rendering', 'Template content likely JS-dependent', function run(ctx) {
     const data = samplingState(ctx.db, ctx.run.id);
     if (!data.sampleCount || !data.playwrightEnabled || !data.playwrightSuccessCount) return unavailableSamplingResult(this, data, 'playwright');
+    const normalizedSuccesses = count(ctx.db, `SELECT COUNT(*) AS count FROM playwright_results WHERE runId = ? AND status = 'success' AND textNormalizationVersion = '${VISIBLE_TEXT_NORMALIZATION_VERSION}'`, [ctx.run.id]);
+    if (normalizedSuccesses < data.playwrightSuccessCount) return availabilityResult(this, 'insufficient_evidence', {
+      finding: `${normalizedSuccesses}/${data.playwrightSuccessCount} successful Playwright sample(s) use the shared visible_text normalization.`,
+      evidence: { ...data, normalizedSuccesses, normalization: VISIBLE_TEXT_NORMALIZATION_VERSION },
+      requirements: { requiredFacts: ['rawVisibleText', 'renderedVisibleText', 'sharedTextNormalization'], missingFacts: ['sharedTextNormalization'], minimumCoverage: 1, canCollectWithTargetedRun: true }
+    });
     const rows = all(ctx.db, `
       SELECT templateClusterKey, sampleCount, playwrightSuccessCount, jsRequiredCount, worstSampleUrlsJson
       FROM template_performance_summary
@@ -1940,6 +2155,85 @@ function samplingState(db, runId) {
   };
 }
 
+function lighthouseMeasurementCoverage(db, runId, metric) {
+  const allowedMetrics = new Set(['performanceScore', 'largestContentfulPaintMs']);
+  if (!allowedMetrics.has(metric)) throw new Error(`Unsupported Lighthouse coverage metric: ${metric}`);
+  const clusters = all(db, `
+    SELECT
+      ts.templateClusterKey,
+      COUNT(DISTINCT ts.url) AS expectedUrls,
+      COUNT(DISTINCT CASE
+        WHEN lr.errorMessage IS NULL
+          AND lr.url IS NOT NULL AND lr.url <> ''
+          AND lr.device IS NOT NULL AND lr.device <> ''
+          AND lr.${metric} IS NOT NULL
+        THEN lr.url
+      END) AS successfulMeasurements
+    FROM template_sample_results ts
+    LEFT JOIN lighthouse_results lr
+      ON lr.runId = ts.runId
+      AND COALESCE(lr.templateClusterKey, '') = COALESCE(ts.templateClusterKey, '')
+      AND lr.url = ts.url
+    WHERE ts.runId = ?
+    GROUP BY ts.templateClusterKey
+  `, [runId]);
+  const technicalErrors = count(db, `
+    SELECT COUNT(*) AS count
+    FROM lighthouse_results lr
+    WHERE lr.runId = ? AND (
+      lr.errorMessage IS NOT NULL OR lr.url IS NULL OR lr.url = '' OR
+      lr.device IS NULL OR lr.device = '' OR
+      NOT EXISTS (
+        SELECT 1 FROM template_sample_results ts
+        WHERE ts.runId = lr.runId
+          AND COALESCE(ts.templateClusterKey, '') = COALESCE(lr.templateClusterKey, '')
+          AND ts.url = lr.url
+      )
+    )
+  `, [runId]);
+  const missingMetricMeasurements = count(db, `
+    SELECT COUNT(*) AS count
+    FROM lighthouse_results lr
+    WHERE lr.runId = ? AND lr.errorMessage IS NULL
+      AND lr.url IS NOT NULL AND lr.url <> ''
+      AND lr.device IS NOT NULL AND lr.device <> ''
+      AND lr.${metric} IS NULL
+      AND EXISTS (
+        SELECT 1 FROM template_sample_results ts
+        WHERE ts.runId = lr.runId
+          AND COALESCE(ts.templateClusterKey, '') = COALESCE(lr.templateClusterKey, '')
+          AND ts.url = lr.url
+      )
+  `, [runId]);
+  const incompleteClusters = clusters.filter((row) => Number(row.successfulMeasurements || 0) < 2).length;
+  const deviceModes = all(db, `
+    SELECT DISTINCT device
+    FROM lighthouse_results
+    WHERE runId = ? AND device IS NOT NULL AND device <> ''
+    ORDER BY device
+  `, [runId]).map((row) => row.device);
+  return {
+    metric,
+    minimumSuccessfulMeasurementsPerCluster: 2,
+    totalClusters: clusters.length,
+    incompleteClusters,
+    invalidMeasurements: technicalErrors + missingMetricMeasurements,
+    technicalErrors,
+    missingMetricMeasurements,
+    deviceModes,
+    clusters,
+    complete: clusters.length > 0 && incompleteClusters === 0 && technicalErrors === 0 && missingMetricMeasurements === 0
+  };
+}
+
+function unavailableLighthouseCoverage(check, coverage, metric) {
+  return availabilityResult(check, coverage.technicalErrors ? 'technical_error' : 'insufficient_evidence', {
+    finding: `${check.name}: Lighthouse coverage is insufficient for a pass.`,
+    evidence: { metric, ...coverage, technicalErrorSource: coverage.technicalErrors ? 'lighthouse_navigation_tool_or_scope' : null },
+    requirements: { requiredFacts: ['successfulLighthouseRun', 'expectedUrl', 'deviceMode', metric], missingFacts: ['twoSuccessfulMeasurementsPerTemplate'], minimumCoverage: 2, canCollectWithTargetedRun: true }
+  });
+}
+
 function mapTemplateRows(rows) {
   return rows.map((row) => ({
     ...row,
@@ -2018,28 +2312,34 @@ function schemaPresentMissing(id, category, name, schemaType, priority = 'Medium
 function personSchemaCoverage() {
   return tech('person_present_missing', 'Structured Data', 'Person present/missing', function run(ctx) {
     const candidateWhere = `${HTML_WHERE} AND (
-      COALESCE(pageType, 'other') = 'article'
-      OR COALESCE(hasAuthorPattern, 0) = 1
+      (COALESCE(pageType, 'other') = 'article' AND ${VISIBLE_TEXT_FACTS_WHERE})
+      OR (COALESCE(hasAuthorPattern, 0) = 1 AND ${VISIBLE_TEXT_FACTS_WHERE})
       OR LOWER(url) LIKE '%/team%'
       OR LOWER(url) LIKE '%/autor%'
       OR LOWER(url) LIKE '%/author%'
       OR LOWER(COALESCE(title, '')) LIKE '%autor%'
       OR LOWER(COALESCE(title, '')) LIKE '%team%'
     )`;
-    const candidatePages = count(ctx.db, `SELECT COUNT(*) AS count FROM pages WHERE runId = ? AND ${candidateWhere}`, [ctx.run.id]);
+    const candidatePages = count(ctx.db, `SELECT COUNT(*) AS count FROM pages WHERE runId = ? AND (${candidateWhere})`, [ctx.run.id]);
+    const legacyArticleCandidates = count(ctx.db, `SELECT COUNT(*) AS count FROM pages WHERE runId = ? AND ${HTML_WHERE} AND COALESCE(pageType, 'other') = 'article' AND NOT (${VISIBLE_TEXT_FACTS_WHERE})`, [ctx.run.id]);
     const present = count(ctx.db, "SELECT COUNT(DISTINCT pageUrl) AS count FROM schemas WHERE runId = ? AND schemaType = 'Person' AND parseStatus = 'ok'", [ctx.run.id]);
     const rows = all(ctx.db, `
       SELECT url, pageType, hasAuthorPattern
       FROM pages
-      WHERE runId = ? AND ${candidateWhere} AND COALESCE(schemaTypesJson, '') NOT LIKE '%Person%'
+      WHERE runId = ? AND (${candidateWhere}) AND COALESCE(schemaTypesJson, '') NOT LIKE '%Person%'
       ORDER BY id ASC
       LIMIT 10
     `, [ctx.run.id]);
     const affectedCount = count(ctx.db, `
       SELECT COUNT(*) AS count
       FROM pages
-      WHERE runId = ? AND ${candidateWhere} AND COALESCE(schemaTypesJson, '') NOT LIKE '%Person%'
+      WHERE runId = ? AND (${candidateWhere}) AND COALESCE(schemaTypesJson, '') NOT LIKE '%Person%'
     `, [ctx.run.id]);
+    if (!present && !candidatePages && legacyArticleCandidates) return availabilityResult(this, 'insufficient_evidence', {
+      finding: `${legacyArticleCandidates} legacy article candidate(s) lack visible_text provenance; script/body author matches were not used for Person-schema eligibility.`,
+      evidence: { legacyArticleCandidates, personSchemaPages: 0 },
+      requirements: { requiredFacts: ['reliablePersonPageClassification', 'schemaTypeExtraction', 'visibleTextProvenance'], missingFacts: ['visibleTextProvenance'], minimumCoverage: 1, canCollectWithTargetedRun: true }
+    });
     const status = present ? 'OK' : candidatePages ? 'Warning' : 'NA';
     return makeResult(this, status, {
       priority: 'Low',
@@ -2120,18 +2420,29 @@ function productCoverage() {
 }
 
 function pageTypeSchemaCoverage(check, ctx, pageType, schemaType) {
-  const rows = all(ctx.db, `
-    SELECT url
+  const candidates = all(ctx.db, `
+    SELECT url, schemaTypesJson, statusCode, contentType, indexable, pageType, textFactsJson, featureFlagsJson
     FROM pages
-    WHERE runId = ? AND pageType = ? AND COALESCE(schemaTypesJson, '') NOT LIKE ?
-    LIMIT 10
-  `, [ctx.run.id, pageType, `%${schemaType}%`]);
-  const total = count(ctx.db, 'SELECT COUNT(*) AS count FROM pages WHERE runId = ? AND pageType = ?', [ctx.run.id, pageType]);
-  const affectedCount = count(ctx.db, `
-    SELECT COUNT(*) AS count
-    FROM pages
-    WHERE runId = ? AND pageType = ? AND COALESCE(schemaTypesJson, '') NOT LIKE ?
-  `, [ctx.run.id, pageType, `%${schemaType}%`]);
+    WHERE runId = ? AND pageType = ? AND ${SUCCESSFUL_HTML_WHERE} AND COALESCE(indexable, 1) = 1
+    ORDER BY id ASC
+  `, [ctx.run.id, pageType]);
+  const classified = candidates.map((row) => {
+    const schemaMatches = schemaCoverageMatches(safeJson(row.schemaTypesJson, []), schemaType);
+    return { ...row, schemaMatches, classificationReliable: schemaMatches || reliableStoredPageType(row, pageType) };
+  });
+  const uncertain = classified.filter((row) => !row.classificationReliable);
+  const evaluable = classified.filter((row) => row.classificationReliable);
+  const missing = evaluable.filter((row) => !row.schemaMatches);
+  const rows = missing.slice(0, 10);
+  const total = candidates.length;
+  const affectedCount = missing.length;
+  if (total && uncertain.length && !affectedCount) return availabilityResult(check, 'insufficient_evidence', {
+    finding: `${evaluable.length}/${total} stored ${pageType} candidate(s) have reliable classification evidence; schema absence was not inferred for ${uncertain.length} legacy/ambiguous row(s).`,
+    evidence: { pageType, schemaType, totalCandidatePages: total, evaluableCandidates: evaluable.length, uncertainCandidates: uncertain.length, uncertainSamples: uncertain.slice(0, 10).map((row) => row.url) },
+    requirements: { requiredFacts: [`${pageType}PageClassification`, 'schemaTypeExtraction'], optionalFacts: [], missingFacts: ['reliablePageTypeEvidence'], minimumCoverage: 1, canCollectWithTargetedRun: true },
+    reportGroupingKey: `schema.${schemaType.toLowerCase()}`,
+    relatedCheckIds: schemaType === 'Article' ? ['geo.article_blog_pages_article_schema'] : []
+  });
   return makeResult(check, total ? (affectedCount ? 'Warning' : 'OK') : 'NA', {
     evaluationState: !total ? 'not_applicable' : affectedCount ? 'fail' : 'pass',
     affectedCount,
@@ -2139,7 +2450,7 @@ function pageTypeSchemaCoverage(check, ctx, pageType, schemaType) {
     finding: total ? `${affectedCount}/${total} ${pageType} page(s) lack ${schemaType} schema.` : `No ${pageType} pages detected by stored heuristics.`,
     recommendation: `Add ${schemaType} schema only to pages that visibly match the ${pageType} intent; review heuristic page-type samples before treating this as a template defect.`,
     details: `Evaluated only pages classified as pageType=${pageType}.`,
-    evidence: { pageType, schemaType, totalCandidatePages: total, affectedCount, sampleUrls: rows.map((row) => row.url) },
+    evidence: { pageType, schemaType, validArticleSubtypes: schemaType === 'Article' ? ['Article', 'BlogPosting', 'NewsArticle', 'Report', 'ScholarlyArticle', 'SocialMediaPosting', 'TechArticle'] : undefined, totalCandidatePages: total, evaluableCandidates: evaluable.length, uncertainCandidates: uncertain.length, affectedCount, displayedSamples: rows.length, sampleUrls: rows.map((row) => row.url) },
     reportGroupingKey: `schema.${schemaType.toLowerCase()}`,
     relatedCheckIds: schemaType === 'Article' ? ['geo.article_blog_pages_article_schema'] : [],
     requirements: { requiredFacts: [`${pageType}PageClassification`, 'schemaTypeExtraction'], optionalFacts: [], missingFacts: [], minimumCoverage: 1, canCollectWithTargetedRun: true },
@@ -2155,6 +2466,21 @@ function pageTypeSchemaCoverage(check, ctx, pageType, schemaType) {
   });
 }
 
+function reliableStoredPageType(row, pageType) {
+  if (!hasVisibleTextProvenance(row.textFactsJson)) return false;
+  const flags = safeJson(row.featureFlagsJson, {});
+  if (pageType === 'article') {
+    return Number(flags.articleElementCount || 0) > 0 || /\/(beitrag|post|posts|article|articles|artikel)\//i.test(String(row.url || ''));
+  }
+  if (pageType === 'product') return flags.productLike === true;
+  return true;
+}
+
+function schemaCoverageMatches(schemaTypes, schemaType) {
+  if (schemaType === 'Article') return hasArticleSchema(schemaTypes);
+  return schemaTypes.some((type) => String(type || '').toLowerCase() === String(schemaType || '').toLowerCase());
+}
+
 function breadcrumbCoverage() {
   return tech('breadcrumb_missing_low_coverage', 'Structured Data', 'BreadcrumbList missing or low coverage', function run(ctx) {
     const candidateWhere = `${HTML_WHERE}
@@ -2166,25 +2492,25 @@ function breadcrumbCoverage() {
         OR LOWER(url) LIKE '%/facts/%'
         OR depth > 1
       )`;
-    const total = count(ctx.db, `SELECT COUNT(*) AS count FROM pages WHERE runId = ? AND ${candidateWhere}`, [ctx.run.id]);
+    const total = count(ctx.db, `SELECT COUNT(*) AS count FROM pages WHERE runId = ? AND (${candidateWhere})`, [ctx.run.id]);
     const missingRows = all(ctx.db, `
       SELECT url, pageType, depth
       FROM pages
-      WHERE runId = ? AND ${candidateWhere} AND COALESCE(schemaTypesJson, '') NOT LIKE '%BreadcrumbList%'
+      WHERE runId = ? AND (${candidateWhere}) AND COALESCE(schemaTypesJson, '') NOT LIKE '%BreadcrumbList%'
       ORDER BY depth DESC, id ASC
       LIMIT 10
     `, [ctx.run.id]);
     const presentRows = all(ctx.db, `
       SELECT url, pageType, depth
       FROM pages
-      WHERE runId = ? AND ${candidateWhere} AND COALESCE(schemaTypesJson, '') LIKE '%BreadcrumbList%'
+      WHERE runId = ? AND (${candidateWhere}) AND COALESCE(schemaTypesJson, '') LIKE '%BreadcrumbList%'
       ORDER BY depth DESC, id ASC
       LIMIT 10
     `, [ctx.run.id]);
     const affectedCount = count(ctx.db, `
       SELECT COUNT(*) AS count
       FROM pages
-      WHERE runId = ? AND ${candidateWhere} AND COALESCE(schemaTypesJson, '') NOT LIKE '%BreadcrumbList%'
+      WHERE runId = ? AND (${candidateWhere}) AND COALESCE(schemaTypesJson, '') NOT LIKE '%BreadcrumbList%'
     `, [ctx.run.id]);
     const pagesWithBreadcrumbList = Math.max(0, total - affectedCount);
     const coverage = total ? pagesWithBreadcrumbList / total : null;
@@ -2281,11 +2607,11 @@ function localBusinessDomainHint() {
     const rows = all(ctx.db, `
       SELECT url, pageType
       FROM pages
-      WHERE runId = ? AND ${locationCandidateWhere} AND COALESCE(schemaTypesJson, '') NOT LIKE '%LocalBusiness%'
+      WHERE runId = ? AND (${locationCandidateWhere}) AND COALESCE(schemaTypesJson, '') NOT LIKE '%LocalBusiness%'
       ORDER BY id ASC
       LIMIT 10
     `, [ctx.run.id]);
-    const locationPages = count(ctx.db, `SELECT COUNT(*) AS count FROM pages WHERE runId = ? AND ${locationCandidateWhere}`, [ctx.run.id]);
+    const locationPages = count(ctx.db, `SELECT COUNT(*) AS count FROM pages WHERE runId = ? AND (${locationCandidateWhere})`, [ctx.run.id]);
     const present = count(ctx.db, "SELECT COUNT(DISTINCT pageUrl) AS count FROM schemas WHERE runId = ? AND schemaType = 'LocalBusiness' AND parseStatus = 'ok'", [ctx.run.id]);
     const status = present ? 'OK' : locationPages ? 'Warning' : 'NA';
     return makeResult(this, status, {
@@ -2345,18 +2671,24 @@ function imagesWithoutAlt() {
   return tech('images_without_alt', 'Media SEO', 'Content images without alt', function run(ctx) {
     const gate = storedFactGate(this, ctx, 'storeAllImages', 'normalized image rows');
     if (gate) return gate;
-    const contentWhere = `hasAlt = 0 AND ${NON_DECORATIVE_IMAGE_WHERE}`;
+    const unknownAltObservations = count(ctx.db, 'SELECT COUNT(*) AS count FROM page_images WHERE runId = ? AND altAttributePresent IS NULL', [ctx.run.id]);
+    if (unknownAltObservations) return availabilityResult(this, 'insufficient_evidence', {
+      finding: `${unknownAltObservations} stored image row(s) do not distinguish a missing alt attribute from an empty value.`,
+      evidence: { unknownAltObservations },
+      requirements: { requiredFacts: ['altAttributePresent', 'altValue', 'imageRoleClassification'], missingFacts: ['altAttributePresent'], minimumCoverage: 1, canCollectWithTargetedRun: true }
+    });
+    const contentWhere = `altAttributePresent = 0 AND ${NON_DECORATIVE_IMAGE_WHERE}`;
     const rows = dedupeImageSamples(all(ctx.db, `
       SELECT pageUrl AS url, imageUrl, imageRole
       FROM page_images
-      WHERE runId = ? AND ${contentWhere}
+      WHERE runId = ? AND (${contentWhere})
       LIMIT 30
     `, [ctx.run.id]));
-    const affectedCount = count(ctx.db, `SELECT COUNT(*) AS count FROM page_images WHERE runId = ? AND ${contentWhere}`, [ctx.run.id]);
+    const affectedCount = count(ctx.db, `SELECT COUNT(*) AS count FROM page_images WHERE runId = ? AND (${contentWhere})`, [ctx.run.id]);
     const ignoredDecorative = count(ctx.db, `
       SELECT COUNT(*) AS count
       FROM page_images
-      WHERE runId = ? AND hasAlt = 0 AND (
+      WHERE runId = ? AND altAttributePresent = 0 AND (
         COALESCE(likelyDecorativeImage, 0) = 1 OR
         COALESCE(likelyBadgeImage, 0) = 1 OR
         COALESCE(likelyTrackingPixel, 0) = 1 OR
@@ -2367,12 +2699,12 @@ function imagesWithoutAlt() {
       affectedCount,
       sampleUrls: rows.map((row) => row.url),
       finding: affectedCount
-        ? `${affectedCount} likely content image(s) are missing alt text.`
+        ? `${affectedCount} likely content image(s) have no alt attribute.`
         : ignoredDecorative
           ? `No likely content images are missing alt text; ${ignoredDecorative} decorative/badge/icon/pixel image(s) were ignored.`
           : 'All detected likely content images have alt text.',
       recommendation: 'Add descriptive alt text for meaningful content images; empty alt is acceptable for decorative images.',
-      evidence: { contentImagesMissingAlt: affectedCount, ignoredDecorativeImages: ignoredDecorative, samples: rows },
+      evidence: { contentImagesMissingAltAttribute: affectedCount, ignoredDecorativeImages: ignoredDecorative, samples: rows },
       requirements: { requiredFacts: ['normalizedImageRows', 'altAttributeObservation', 'imageRoleClassification'], optionalFacts: [], missingFacts: [], minimumCoverage: 1, canCollectWithTargetedRun: true },
       findingType: 'core_issue',
       confidence: 'medium',
@@ -2385,10 +2717,16 @@ function emptyAltTexts() {
   return tech('empty_alt_texts', 'Media SEO', 'Empty alt texts', function run(ctx) {
     const gate = storedFactGate(this, ctx, 'storeAllImages', 'normalized image rows');
     if (gate) return gate;
+    const unknownAltObservations = count(ctx.db, 'SELECT COUNT(*) AS count FROM page_images WHERE runId = ? AND altAttributePresent IS NULL', [ctx.run.id]);
+    if (unknownAltObservations) return availabilityResult(this, 'insufficient_evidence', {
+      finding: `${unknownAltObservations} stored image row(s) lack explicit alt-presence evidence.`,
+      evidence: { unknownAltObservations },
+      requirements: { requiredFacts: ['altAttributePresent', 'altValueTrimmed', 'imageRoleClassification'], missingFacts: ['altAttributePresent'], minimumCoverage: 1, canCollectWithTargetedRun: true }
+    });
     const rows = dedupeImageSamples(all(ctx.db, `
       SELECT pageUrl AS url, imageUrl, imageRole
       FROM page_images
-      WHERE runId = ? AND alt = ''
+      WHERE runId = ? AND altAttributePresent = 1 AND altValueTrimmed = ''
         AND COALESCE(likelyDecorativeImage, 0) = 0
         AND COALESCE(likelyBadgeImage, 0) = 0
         AND COALESCE(likelyTrackingPixel, 0) = 0
@@ -2398,7 +2736,7 @@ function emptyAltTexts() {
     const affectedCount = count(ctx.db, `
       SELECT COUNT(*) AS count
       FROM page_images
-      WHERE runId = ? AND alt = ''
+      WHERE runId = ? AND altAttributePresent = 1 AND altValueTrimmed = ''
         AND COALESCE(likelyDecorativeImage, 0) = 0
         AND COALESCE(likelyBadgeImage, 0) = 0
         AND COALESCE(likelyTrackingPixel, 0) = 0
@@ -2407,7 +2745,7 @@ function emptyAltTexts() {
     const decorativeEmpty = count(ctx.db, `
       SELECT COUNT(*) AS count
       FROM page_images
-      WHERE runId = ? AND alt = '' AND (
+      WHERE runId = ? AND altAttributePresent = 1 AND altValueTrimmed = '' AND (
         COALESCE(likelyDecorativeImage, 0) = 1 OR
         COALESCE(likelyBadgeImage, 0) = 1 OR
         COALESCE(likelyTrackingPixel, 0) = 1 OR
@@ -2417,7 +2755,7 @@ function emptyAltTexts() {
     return makeResult(this, affectedCount ? 'Warning' : 'OK', {
       affectedCount,
       sampleUrls: rows.map((row) => row.url),
-      finding: affectedCount ? `${affectedCount} likely content image(s) have empty alt attributes.` : 'No likely content images with empty alt attributes found.',
+      finding: affectedCount ? `${affectedCount} likely content image(s) have empty or whitespace-only alt values.` : 'No likely content images with empty alt values found.',
       recommendation: 'Use empty alt only for decorative images; otherwise provide descriptive alt text.',
       evidence: { contentImagesWithEmptyAlt: affectedCount, decorativeEmptyAltImages: decorativeEmpty, samples: rows },
       requirements: { requiredFacts: ['normalizedImageRows', 'altAttributeObservation', 'imageRoleClassification'], optionalFacts: [], missingFacts: [], minimumCoverage: 1, canCollectWithTargetedRun: true },
@@ -2432,14 +2770,28 @@ function imageAttributeCheck(id, category, name, where, status = 'Warning', prio
   return tech(id, category, name, function run(ctx) {
     const gate = storedFactGate(this, ctx, 'storeAllImages', 'normalized image rows');
     if (gate) return gate;
+    const totalImageRows = count(ctx.db, 'SELECT COUNT(*) AS count FROM page_images WHERE runId = ?', [ctx.run.id]);
+    if (!totalImageRows) return availabilityResult(this, 'not_applicable', {
+      finding: `${name}: no HTML image occurrences are in scope.`,
+      evidence: { totalImageRows: 0 },
+      requirements: { requiredFacts: ['normalizedImageRows'], missingFacts: [], minimumCoverage: 1, canCollectWithTargetedRun: true }
+    });
+    if (id === 'images_without_lazy_loading') {
+      const unknownRoles = count(ctx.db, 'SELECT COUNT(*) AS count FROM page_images WHERE runId = ? AND imageRole IS NULL', [ctx.run.id]);
+      if (unknownRoles) return availabilityResult(this, 'insufficient_evidence', {
+        finding: `${name}: ${unknownRoles} image occurrence(s) have no role classification.`,
+        evidence: { totalImageRows, unknownRoles },
+        requirements: { requiredFacts: ['normalizedImageRows', 'loadingAttributeObservation', 'imageRoleClassification'], missingFacts: ['imageRoleClassification'], minimumCoverage: 1, canCollectWithTargetedRun: true }
+      });
+    }
     const contentWhere = `(${where}) AND ${NON_DECORATIVE_IMAGE_WHERE}${options.extraContentWhere ? ` AND ${options.extraContentWhere}` : ''}`;
     const rows = dedupeImageSamples(all(ctx.db, `
       SELECT pageUrl AS url, imageUrl, imageRole, ${sqlString(options.issueReason || 'image markup issue')} AS reason
       FROM page_images
-      WHERE runId = ? AND ${contentWhere}
+      WHERE runId = ? AND (${contentWhere})
       LIMIT 30
     `, [ctx.run.id]));
-    const affectedCount = count(ctx.db, `SELECT COUNT(*) AS count FROM page_images WHERE runId = ? AND ${contentWhere}`, [ctx.run.id]);
+    const affectedCount = count(ctx.db, `SELECT COUNT(*) AS count FROM page_images WHERE runId = ? AND (${contentWhere})`, [ctx.run.id]);
     const ignoredDecorative = count(ctx.db, `
       SELECT COUNT(*) AS count
       FROM page_images
@@ -2521,6 +2873,15 @@ function normalizeComparableUrl(value) {
 
 function largeImages() {
   return tech('large_image_resources', 'Media SEO', `Large image resources > ${Math.round(thresholds.largeImageBytes / 1024)} KB`, function run(ctx) {
+    const gate = storedFactGate(this, ctx, 'storeAllResources', 'image resource byte rows');
+    if (gate) return gate;
+    const coverage = resourceMeasurementCoverage(ctx.db, ctx.run.id, 'image');
+    const scopeFacts = imageResourceScopeFacts(ctx.db, ctx.run.id);
+    if (!coverage.totalResources) return availabilityResult(this, 'not_applicable', {
+      finding: 'No image resource rows were observed.',
+      evidence: coverage,
+      requirements: { requiredFacts: ['imageResourceRows'], missingFacts: [], minimumCoverage: 1, canCollectWithTargetedRun: true }
+    });
     const rows = dedupeImageSamples(all(ctx.db, `
       SELECT pageUrl AS url, resourceUrl, sizeBytes
       FROM resources
@@ -2529,70 +2890,129 @@ function largeImages() {
       LIMIT 30
     `, [ctx.run.id, thresholds.largeImageBytes]));
     const affectedCount = count(ctx.db, "SELECT COUNT(*) AS count FROM resources WHERE runId = ? AND resourceType = 'image' AND sizeBytes > ?", [ctx.run.id, thresholds.largeImageBytes]);
+    if (!affectedCount && coverage.coverage < 1) return availabilityResult(this, coverage.onlyTechnicalErrors ? 'technical_error' : 'insufficient_evidence', {
+      finding: `Large-image evaluation has only ${Math.round(coverage.coverage * 100)}% byte coverage.`,
+      evidence: { thresholdBytes: thresholds.largeImageBytes, ...coverage, scopeFacts },
+      requirements: { requiredFacts: ['imageResourceRows', 'imageResourceBytes'], missingFacts: ['completeImageByteCoverage'], minimumCoverage: 1, canCollectWithTargetedRun: true }
+    });
     return makeResult(this, affectedCount ? 'Warning' : 'OK', {
       affectedCount,
       sampleUrls: rows.map((row) => row.url),
       finding: affectedCount ? `${affectedCount} known image resource(s) exceed ${Math.round(thresholds.largeImageBytes / 1024)} KB.` : `No known image resources exceed ${Math.round(thresholds.largeImageBytes / 1024)} KB.`,
       recommendation: 'Compress large images and use responsive sizing.',
-      evidence: { thresholdBytes: thresholds.largeImageBytes, affectedCount, samples: rows }
+      evidence: { thresholdBytes: thresholds.largeImageBytes, affectedCount, ...coverage, scopeFacts, samples: rows },
+      requirements: { requiredFacts: ['imageResourceRows', 'imageResourceBytes'], optionalFacts: ['transferEncoding'], missingFacts: [], minimumCoverage: 1, canCollectWithTargetedRun: true }
     });
   }, { priority: 'Low' });
 }
 
 function modernImageCoverageLow() {
   return tech('modern_image_format_coverage_low', 'Media SEO', 'Modern formats WebP/AVIF coverage low', function run(ctx) {
+    const gate = storedFactGate(this, ctx, 'storeAllImages', 'normalized image rows');
+    if (gate) return gate;
+    const imageRows = all(ctx.db, `
+      SELECT pageUrl AS url, imageUrl AS resourceUrl, extension,
+        likelyDecorativeImage, likelyBadgeImage, likelyTrackingPixel, likelyIcon
+      FROM page_images
+      WHERE runId = ?
+    `, [ctx.run.id]);
     const resourceRows = all(ctx.db, `
-      SELECT pageUrl AS url, resourceUrl, contentType
+      SELECT pageUrl AS url, resourceUrl, contentType, isThirdParty, sizeMeasurementError
       FROM resources
       WHERE runId = ?
         AND resourceType = 'image'
-        AND LOWER(COALESCE(contentType, '')) LIKE 'image/%'
-        AND LOWER(COALESCE(contentType, '')) NOT LIKE '%svg%'
     `, [ctx.run.id]);
-    const knownImageUrls = new Set();
-    const modernImageUrls = new Set();
-    for (const row of resourceRows) {
-      const key = String(row.resourceUrl || '').trim() || `${row.url}:${knownImageUrls.size}`;
+    const contentTypeByUrl = new Map(resourceRows.map((row) => [String(row.resourceUrl || ''), String(row.contentType || '').toLowerCase()]));
+    const scopeFacts = imageResourceScopeFacts(ctx.db, ctx.run.id);
+    const formats = new Map();
+    const pageByUrl = new Map();
+    const formatBasisByUrl = new Map();
+    for (const row of imageRows) {
+      const key = String(row.resourceUrl || '').trim();
       if (!key) continue;
-      knownImageUrls.add(key);
-      if (/image\/(webp|avif)/i.test(row.contentType || '')) modernImageUrls.add(key);
+      pageByUrl.set(key, row.url);
+      const type = contentTypeByUrl.get(key) || '';
+      if (/image\/svg/.test(type) || String(row.extension || '').toLowerCase() === '.svg') continue;
+      if (/image\/(webp|avif)/.test(type)) {
+        formats.set(key, 'modern');
+        formatBasisByUrl.set(key, 'resource_content_type');
+      } else if (/image\/(jpeg|jpg|png|gif)/.test(type)) {
+        formats.set(key, 'legacy');
+        formatBasisByUrl.set(key, 'resource_content_type');
+      } else if (/\.(webp|avif)$/i.test(String(row.extension || ''))) {
+        formats.set(key, 'modern');
+        formatBasisByUrl.set(key, 'url_extension');
+      } else if (/\.(jpe?g|png|gif)$/i.test(String(row.extension || ''))) {
+        formats.set(key, 'legacy');
+        formatBasisByUrl.set(key, 'url_extension');
+      } else {
+        formats.set(key, 'unknown');
+        formatBasisByUrl.set(key, 'unknown');
+      }
     }
-    const hasContentTypeBasis = knownImageUrls.size > 0;
-    const total = hasContentTypeBasis
-      ? knownImageUrls.size
-      : count(ctx.db, `
-        SELECT COUNT(*) AS count
-        FROM page_images
-        WHERE runId = ?
-          AND LOWER(COALESCE(extension, '')) IN ('.jpg', '.jpeg', '.png', '.gif', '.webp', '.avif')
-      `, [ctx.run.id]);
-    const modern = hasContentTypeBasis
-      ? modernImageUrls.size
-      : count(ctx.db, "SELECT COUNT(*) AS count FROM page_images WHERE runId = ? AND LOWER(COALESCE(extension, '')) IN ('.webp', '.avif')", [ctx.run.id]);
+    for (const row of resourceRows) {
+      const key = String(row.resourceUrl || '').trim();
+      if (!key || formats.has(key) || /image\/svg/i.test(row.contentType || '')) continue;
+      pageByUrl.set(key, row.url);
+      if (/image\/(webp|avif)/i.test(row.contentType || '')) formats.set(key, 'modern');
+      else if (/image\/(jpeg|jpg|png|gif)/i.test(row.contentType || '')) formats.set(key, 'legacy');
+      else formats.set(key, 'unknown');
+      formatBasisByUrl.set(key, formats.get(key) === 'unknown' ? 'unknown' : 'resource_content_type');
+    }
+    const total = formats.size;
+    const modern = [...formats.values()].filter((value) => value === 'modern').length;
+    const unknown = [...formats.values()].filter((value) => value === 'unknown').length;
+    const known = total - unknown;
     const coverage = total ? modern / total : 0;
-    const status = !total ? 'NA' : coverage < 0.3 ? 'Warning' : 'OK';
-    const nonModernSamples = hasContentTypeBasis
-      ? resourceRows
-        .filter((row) => !/image\/(webp|avif)/i.test(row.contentType || ''))
-        .slice(0, 10)
-      : all(ctx.db, `
-        SELECT pageUrl AS url, imageUrl AS resourceUrl, extension AS contentType
-        FROM page_images
-        WHERE runId = ?
-          AND LOWER(COALESCE(extension, '')) IN ('.jpg', '.jpeg', '.png', '.gif')
-        LIMIT 10
-      `, [ctx.run.id]);
+    const nonModernSamples = [...formats.entries()]
+      .filter(([, format]) => format === 'legacy')
+      .slice(0, 10)
+      .map(([resourceUrl, format]) => ({ url: pageByUrl.get(resourceUrl), resourceUrl, format }));
+    if (!total) return availabilityResult(this, 'not_applicable', {
+      finding: 'No raster images were identified.',
+      evidence: { totalImages: 0, scopeFacts },
+      requirements: { requiredFacts: ['rasterImageOccurrences'], missingFacts: [], minimumCoverage: 1, canCollectWithTargetedRun: true }
+    });
+    if (unknown) return availabilityResult(this, 'insufficient_evidence', {
+      finding: `Image format is known for ${known}/${total} unique raster candidates; unknown formats were not treated as pass.`,
+      evidence: { totalImages: total, knownFormats: known, unknownFormats: unknown, modernImages: modern, scopeFacts, samples: nonModernSamples },
+      requirements: { requiredFacts: ['rasterImageOccurrences', 'imageFormat'], missingFacts: ['completeImageFormatCoverage'], minimumCoverage: 1, canCollectWithTargetedRun: true }
+    });
+    const status = coverage < 0.3 ? 'Warning' : 'OK';
+    const basis = [...formats.keys()].every((key) => formatBasisByUrl.get(key) === 'resource_content_type')
+      ? 'resource_content_type'
+      : 'content_type_then_extension';
     return makeResult(this, status, {
       affectedCount: status === 'Warning' ? total - modern : 0,
       sampleUrls: nonModernSamples.map((row) => row.url),
-      finding: total ? `${Math.round(coverage * 100)}% of detected raster images use WebP/AVIF (${hasContentTypeBasis ? 'Content-Type basis' : 'URL-extension fallback'}).` : 'No images detected.',
+      finding: `${Math.round(coverage * 100)}% of detected raster images use WebP/AVIF.`,
       recommendation: 'Use modern formats for suitable raster images. Server-side content negotiation counts when the stored Content-Type is WebP or AVIF.',
-      details: hasContentTypeBasis
-        ? 'Evaluated response Content-Type from captured image resources; URL extensions are ignored when reliable Content-Type data exists.'
-        : 'No image Content-Type inventory was available, so URL extensions were used as fallback.',
-      evidence: { totalImages: total, modernImages: modern, coverage, basis: hasContentTypeBasis ? 'resource_content_type' : 'image_extension', samples: nonModernSamples }
+      details: 'Response Content-Type is preferred; a recognized URL extension is used only when response type is unavailable.',
+      evidence: { totalImages: total, knownFormats: known, unknownFormats: 0, modernImages: modern, coverage, basis, scopeFacts, samples: nonModernSamples },
+      requirements: { requiredFacts: ['rasterImageOccurrences', 'imageFormat'], optionalFacts: ['responseContentType'], missingFacts: [], minimumCoverage: 1, canCollectWithTargetedRun: true }
     });
   }, { priority: 'Low' });
+}
+
+function imageResourceScopeFacts(db, runId) {
+  return db.prepare(`
+    SELECT
+      (SELECT COUNT(*) FROM page_images i WHERE i.runId = @runId) AS htmlImageOccurrences,
+      (SELECT COUNT(*) FROM page_images i WHERE i.runId = @runId AND (
+        COALESCE(i.likelyDecorativeImage, 0) = 1 OR COALESCE(i.likelyBadgeImage, 0) = 1 OR
+        COALESCE(i.likelyTrackingPixel, 0) = 1 OR COALESCE(i.likelyIcon, 0) = 1
+      )) AS decorativeOrIconOccurrences,
+      (SELECT COUNT(*) FROM page_images i WHERE i.runId = @runId AND LOWER(COALESCE(i.extension, '')) = '.svg') AS svgOccurrences,
+      (SELECT COUNT(*) FROM resources r WHERE r.runId = @runId AND r.resourceType = 'image') AS measuredResourceCandidates,
+      (SELECT COUNT(*) FROM resources r WHERE r.runId = @runId AND r.resourceType = 'image' AND r.isThirdParty = 1) AS externalResourceCandidates,
+      (SELECT COUNT(*) FROM resources r WHERE r.runId = @runId AND r.resourceType = 'image' AND r.sizeMeasurementError IS NOT NULL) AS failedSizeMeasurements,
+      (SELECT COUNT(*) FROM resources r
+        WHERE r.runId = @runId AND r.resourceType = 'image' AND NOT EXISTS (
+          SELECT 1 FROM page_images i
+          WHERE i.runId = r.runId AND i.pageUrl = r.pageUrl AND i.imageUrl = r.resourceUrl
+        )
+      ) AS nonHtmlImageResources
+  `).get({ runId });
 }
 
 function videoObjectCheck() {

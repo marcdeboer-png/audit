@@ -14,7 +14,8 @@ export function isObservedFact(facts, key) {
     facts &&
     typeof facts === 'object' &&
     Object.prototype.hasOwnProperty.call(facts, key) &&
-    facts[key] !== undefined
+    facts[key] !== undefined &&
+    facts[key] !== null
   );
 }
 
@@ -26,7 +27,13 @@ export function evaluateDataAvailability({
   applicable = true,
   executed = true,
   technicalError = null,
-  canCollectWithTargetedRun = false
+  canCollectWithTargetedRun = false,
+  measurements = null,
+  minimumMeasurements = 0,
+  measuredAt = null,
+  maxAgeMs = null,
+  retries = null,
+  minimumSuccessfulRetries = 0
 } = {}) {
   const required = [...new Set(requiredFacts.map(String))];
   const optional = [...new Set(optionalFacts.map(String))];
@@ -34,6 +41,16 @@ export function evaluateDataAvailability({
   const missingFacts = required.filter((key) => !isObservedFact(facts, key));
   const coverage = required.length ? observedRequired.length / required.length : 1;
   const normalizedMinimum = Math.max(0, Math.min(1, Number(minimumCoverage ?? 1)));
+  const measurementCount = Array.isArray(measurements)
+    ? measurements.filter((value) => value !== undefined && value !== null).length
+    : Number.isFinite(Number(measurements)) ? Number(measurements) : null;
+  const requiredMeasurementCount = Math.max(0, Number(minimumMeasurements || 0));
+  const successfulRetries = Array.isArray(retries)
+    ? retries.filter((retry) => retry?.success === true).length
+    : Number.isFinite(Number(retries)) ? Number(retries) : null;
+  const stale = maxAgeMs !== null && measuredAt
+    ? Date.now() - new Date(measuredAt).getTime() > Number(maxAgeMs)
+    : false;
 
   let evaluationState = 'pass';
   let reason = 'Required facts are available.';
@@ -46,9 +63,14 @@ export function evaluateDataAvailability({
   } else if (!applicable) {
     evaluationState = 'not_applicable';
     reason = 'The check is not applicable to the classified page or run scope.';
-  } else if (missingFacts.length || coverage < normalizedMinimum) {
+  } else if (missingFacts.length || coverage < normalizedMinimum ||
+    (requiredMeasurementCount > 0 && (measurementCount === null || measurementCount < requiredMeasurementCount)) ||
+    (minimumSuccessfulRetries > 0 && (successfulRetries === null || successfulRetries < minimumSuccessfulRetries)) ||
+    stale) {
     evaluationState = 'insufficient_evidence';
-    reason = `Required fact coverage is ${formatCoverage(coverage)}; missing: ${missingFacts.join(', ') || 'coverage threshold'}.`;
+    reason = stale
+      ? 'The available measurement is older than the allowed age.'
+      : `Required fact coverage is ${formatCoverage(coverage)}; missing: ${missingFacts.join(', ') || 'coverage or measurement threshold'}.`;
   }
 
   return {
@@ -60,6 +82,13 @@ export function evaluateDataAvailability({
     missingFacts,
     minimumCoverage: normalizedMinimum,
     coverage,
+    measurementCount,
+    minimumMeasurements: requiredMeasurementCount,
+    measuredAt,
+    maxAgeMs,
+    stale,
+    successfulRetries,
+    minimumSuccessfulRetries,
     canCollectWithTargetedRun: Boolean(canCollectWithTargetedRun),
     reason
   };

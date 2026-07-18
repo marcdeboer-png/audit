@@ -13,6 +13,8 @@ import { applyEffectiveValues, normalizeReviewPayload } from '../reviews/reviewW
 import { buildDisplaySummary } from '../reviews/displaySemantics.js';
 import { computeNextRunAt, normalizeScheduleTiming } from '../scheduler/scheduleTime.js';
 import { boundedJson, normalizeDomainAssetForStorage, retentionPolicyFromRun, sanitizeCheckResultForStorage, truncateText } from '../storage/retention.js';
+import { buildRuntimeProvenance } from '../runtime/provenance.js';
+import { requireRunId } from '../scope/runScope.js';
 
 export function createProject(db, { inputDomain, brandName = null }) {
   const result = db.prepare(`
@@ -23,6 +25,7 @@ export function createProject(db, { inputDomain, brandName = null }) {
 }
 
 export function createRun(db, projectId, config) {
+  const runtime = buildRuntimeProvenance(config);
   const result = db.prepare(`
     INSERT INTO runs (
       projectId, status, auditType, maxUrls, maxDepth, concurrency,
@@ -43,7 +46,8 @@ export function createRun(db, projectId, config) {
       maxEvidenceSamplesPerCheck, maxStoredDetailRowsPerCheck, maxRawHtmlBytesPerUrl,
       storageEstimateJson,
       enableLlmChecks, llmProvider, llmModel, llmMaxSampleUrls, llmMaxChecks,
-      llmMaxTokens, llmDryRun, llmWarningsJson
+      llmMaxTokens, llmDryRun, llmWarningsJson,
+      primaryHost, runtimeGitCommit, runtimeBuildVersion, runtimeConfigHash, runtimeProvenanceJson
     )
     VALUES (
       @projectId, 'pending', @auditType, @maxUrls, @maxDepth, @concurrency,
@@ -64,7 +68,8 @@ export function createRun(db, projectId, config) {
       @maxEvidenceSamplesPerCheck, @maxStoredDetailRowsPerCheck, @maxRawHtmlBytesPerUrl,
       @storageEstimateJson,
       @enableLlmChecks, @llmProvider, @llmModel, @llmMaxSampleUrls, @llmMaxChecks,
-      @llmMaxTokens, @llmDryRun, @llmWarningsJson
+      @llmMaxTokens, @llmDryRun, @llmWarningsJson,
+      @primaryHost, @runtimeGitCommit, @runtimeBuildVersion, @runtimeConfigHash, @runtimeProvenanceJson
     )
   `).run({
     projectId,
@@ -126,12 +131,18 @@ export function createRun(db, projectId, config) {
     llmMaxChecks: config.llmMaxChecks,
     llmMaxTokens: config.llmMaxTokens,
     llmDryRun: config.llmDryRun ? 1 : 0,
-    llmWarningsJson: JSON.stringify(config.llmWarnings || [])
+    llmWarningsJson: JSON.stringify(config.llmWarnings || []),
+    primaryHost: hostOf(config.domain),
+    runtimeGitCommit: runtime.gitCommit,
+    runtimeBuildVersion: runtime.buildVersion,
+    runtimeConfigHash: runtime.configHash,
+    runtimeProvenanceJson: JSON.stringify(runtime)
   });
   return result.lastInsertRowid;
 }
 
 export function getRunWithProject(db, runId) {
+  requireRunId(runId, 'get run');
   return db.prepare(`
     SELECT
       r.*,
@@ -342,17 +353,18 @@ export function syncRunCounters(db, runId) {
 }
 
 export function insertPage(db, page) {
+  requireRunId(page?.runId, 'insert page');
   db.prepare(`
     INSERT INTO pages (
-      runId, url, normalizedUrl, finalUrl, depth, sourceUrl, statusCode, contentType,
+      runId, url, normalizedUrl, finalUrl, depth, sourceUrl, statusCode, initialStatusCode, redirectChainJson, contentType,
       indexable, noindex, nofollow, title, titleLength, metaDescription, metaDescriptionLength,
       h1Json, h1Count, h2Json, canonical, canonicalStatus, htmlLang, viewport, metaRobots,
       metaCharset, hasHeaderUtf8, hasMetaCharsetUtf8, xRobotsTag, wordCountRaw, wordCountRendered, rawTextLength,
-      renderedTextLength, rawHtmlSize, internalLinksCount, externalLinksCount,
+      renderedTextLength, visibleTextLength, renderedVisibleTextLength, textFactsJson, rawHtmlSize, internalLinksCount, externalLinksCount,
       uniqueInternalTargetsCount, uniqueExternalTargetsCount, nofollowLinksCount,
       imageLinksCount, storedLinkRowsCount, linkRowsTruncated, linkSamplesJson,
       inlinkCount, outlinkCount, schemaTypesJson, imagesCount, imagesWithoutAltCount, responseHeadersJson,
-      loadTimeMs, ttfbMs, consoleErrorsJson, renderedH1Json, renderedH1Count,
+      loadTimeMs, ttfbMs, consoleErrorsJson, pageErrorsJson, requestFailuresJson, cspViolationsJson, navigationError, renderStatus, renderedH1Json, renderedH1Count,
       renderedLinksCount, ogJson, favicon, manifest, featureFlagsJson,
       pageType, hasTables, hasLists, hasFaqPattern, hasVisibleDate,
       hasAuthorPattern, externalSourceLinksCount, hasVideoEmbed,
@@ -361,15 +373,15 @@ export function insertPage(db, page) {
       templateClusterId, templateClusterKey
     )
     VALUES (
-      @runId, @url, @normalizedUrl, @finalUrl, @depth, @sourceUrl, @statusCode, @contentType,
+      @runId, @url, @normalizedUrl, @finalUrl, @depth, @sourceUrl, @statusCode, @initialStatusCode, @redirectChainJson, @contentType,
       @indexable, @noindex, @nofollow, @title, @titleLength, @metaDescription, @metaDescriptionLength,
       @h1Json, @h1Count, @h2Json, @canonical, @canonicalStatus, @htmlLang, @viewport, @metaRobots,
       @metaCharset, @hasHeaderUtf8, @hasMetaCharsetUtf8, @xRobotsTag, @wordCountRaw, @wordCountRendered, @rawTextLength,
-      @renderedTextLength, @rawHtmlSize, @internalLinksCount, @externalLinksCount,
+      @renderedTextLength, @visibleTextLength, @renderedVisibleTextLength, @textFactsJson, @rawHtmlSize, @internalLinksCount, @externalLinksCount,
       @uniqueInternalTargetsCount, @uniqueExternalTargetsCount, @nofollowLinksCount,
       @imageLinksCount, @storedLinkRowsCount, @linkRowsTruncated, @linkSamplesJson,
       @inlinkCount, @outlinkCount, @schemaTypesJson, @imagesCount, @imagesWithoutAltCount, @responseHeadersJson,
-      @loadTimeMs, @ttfbMs, @consoleErrorsJson, @renderedH1Json, @renderedH1Count,
+      @loadTimeMs, @ttfbMs, @consoleErrorsJson, @pageErrorsJson, @requestFailuresJson, @cspViolationsJson, @navigationError, @renderStatus, @renderedH1Json, @renderedH1Count,
       @renderedLinksCount, @ogJson, @favicon, @manifest, @featureFlagsJson,
       @pageType, @hasTables, @hasLists, @hasFaqPattern, @hasVisibleDate,
       @hasAuthorPattern, @externalSourceLinksCount, @hasVideoEmbed,
@@ -382,6 +394,8 @@ export function insertPage(db, page) {
       depth = excluded.depth,
       sourceUrl = excluded.sourceUrl,
       statusCode = excluded.statusCode,
+      initialStatusCode = excluded.initialStatusCode,
+      redirectChainJson = excluded.redirectChainJson,
       contentType = excluded.contentType,
       indexable = excluded.indexable,
       noindex = excluded.noindex,
@@ -406,6 +420,9 @@ export function insertPage(db, page) {
       wordCountRendered = excluded.wordCountRendered,
       rawTextLength = excluded.rawTextLength,
       renderedTextLength = excluded.renderedTextLength,
+      visibleTextLength = excluded.visibleTextLength,
+      renderedVisibleTextLength = excluded.renderedVisibleTextLength,
+      textFactsJson = excluded.textFactsJson,
       rawHtmlSize = excluded.rawHtmlSize,
       internalLinksCount = excluded.internalLinksCount,
       externalLinksCount = excluded.externalLinksCount,
@@ -425,6 +442,11 @@ export function insertPage(db, page) {
       loadTimeMs = excluded.loadTimeMs,
       ttfbMs = excluded.ttfbMs,
       consoleErrorsJson = excluded.consoleErrorsJson,
+      pageErrorsJson = excluded.pageErrorsJson,
+      requestFailuresJson = excluded.requestFailuresJson,
+      cspViolationsJson = excluded.cspViolationsJson,
+      navigationError = excluded.navigationError,
+      renderStatus = excluded.renderStatus,
       renderedH1Json = excluded.renderedH1Json,
       renderedH1Count = excluded.renderedH1Count,
       renderedLinksCount = excluded.renderedLinksCount,
@@ -476,11 +498,22 @@ export function insertPage(db, page) {
     importedSourceTypesJson: JSON.stringify([]),
     templateClusterId: null,
     templateClusterKey: null,
+    initialStatusCode: page?.statusCode ?? null,
+    redirectChainJson: JSON.stringify([]),
+    visibleTextLength: page?.rawTextLength ?? null,
+    renderedVisibleTextLength: page?.renderedTextLength ?? null,
+    textFactsJson: null,
+    pageErrorsJson: JSON.stringify([]),
+    requestFailuresJson: JSON.stringify([]),
+    cspViolationsJson: JSON.stringify([]),
+    navigationError: null,
+    renderStatus: null,
     ...page
   });
 }
 
 export function replacePageArtifacts(db, runId, pageUrl, { links = [], images = [], resources = [], schemas = [], linkAggregates = null }) {
+  requireRunId(runId, 'replace page artifacts');
   const tx = db.transaction(() => {
     db.prepare('DELETE FROM page_links WHERE runId = ? AND sourceUrl = ?').run(runId, pageUrl);
     db.prepare('DELETE FROM page_images WHERE runId = ? AND pageUrl = ?').run(runId, pageUrl);
@@ -489,20 +522,26 @@ export function replacePageArtifacts(db, runId, pageUrl, { links = [], images = 
 
     const insertLink = db.prepare(`
       INSERT INTO page_links (
-        runId, sourceUrl, targetUrl, normalizedTargetUrl, linkType, anchorText, rel, statusCode
+        runId, sourceUrl, targetUrl, linkedUrl, normalizedTargetUrl, linkType, anchorText, rel, statusCode,
+        initialStatusCode, redirectChainJson, finalUrl, finalStatusCode
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     for (const link of links) {
       insertLink.run(
         runId,
         link.sourceUrl,
         link.targetUrl,
+        link.linkedUrl || link.targetUrl,
         link.normalizedTargetUrl,
         link.linkType,
         link.anchorText || null,
         link.rel || null,
-        link.statusCode || null
+        link.statusCode ?? null,
+        link.initialStatusCode ?? null,
+        link.redirectChainJson || null,
+        link.finalUrl || null,
+        link.finalStatusCode ?? null
       );
     }
     const aggregates = linkAggregates || buildLinkAggregates(links, links.length, false);
@@ -537,9 +576,10 @@ export function replacePageArtifacts(db, runId, pageUrl, { links = [], images = 
     const insertImage = db.prepare(`
       INSERT INTO page_images (
         runId, pageUrl, imageUrl, alt, hasAlt, loading, width, height, extension, sizeBytes,
-        likelyDecorativeImage, likelyBadgeImage, likelyTrackingPixel, likelyIcon, imageRole
+        likelyDecorativeImage, likelyBadgeImage, likelyTrackingPixel, likelyIcon, imageRole,
+        altAttributePresent, altValue, altValueTrimmed, isDecorativeCandidate
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     for (const image of images) {
       insertImage.run(
@@ -552,21 +592,25 @@ export function replacePageArtifacts(db, runId, pageUrl, { links = [], images = 
         image.width || null,
         image.height || null,
         image.extension || null,
-        image.sizeBytes || null,
+        image.sizeBytes ?? null,
         image.likelyDecorativeImage ? 1 : 0,
         image.likelyBadgeImage ? 1 : 0,
         image.likelyTrackingPixel ? 1 : 0,
         image.likelyIcon ? 1 : 0,
-        image.imageRole || null
+        image.imageRole || null,
+        image.altAttributePresent ?? (image.alt === null || image.alt === undefined ? 0 : 1),
+        image.altValue ?? image.alt ?? null,
+        image.altValueTrimmed ?? (image.alt === null || image.alt === undefined ? null : String(image.alt).trim()),
+        image.isDecorativeCandidate ?? (image.likelyDecorativeImage ? 1 : 0)
       );
     }
 
     const insertResource = db.prepare(`
       INSERT INTO resources (
         runId, pageUrl, resourceUrl, resourceType, statusCode, sizeBytes,
-        contentType, isThirdParty, responseHeadersJson
+        contentType, isThirdParty, responseHeadersJson, sizeMeasurementKind, sizeMeasurementError
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     for (const resource of resources) {
       insertResource.run(
@@ -574,11 +618,13 @@ export function replacePageArtifacts(db, runId, pageUrl, { links = [], images = 
         resource.pageUrl,
         resource.resourceUrl,
         resource.resourceType,
-        resource.statusCode || null,
-        resource.sizeBytes || null,
+        resource.statusCode ?? null,
+        resource.sizeBytes ?? null,
         resource.contentType || null,
         resource.isThirdParty ? 1 : 0,
-        resource.responseHeadersJson ? String(resource.responseHeadersJson).slice(0, 20000) : null
+        resource.responseHeadersJson ? String(resource.responseHeadersJson).slice(0, 20000) : null,
+        resource.sizeMeasurementKind || (resource.sizeBytes !== null && resource.sizeBytes !== undefined ? 'observed_bytes' : null),
+        resource.sizeMeasurementError ? truncateText(resource.sizeMeasurementError, 1000) : null
       );
     }
 
@@ -603,6 +649,39 @@ export function replacePageArtifacts(db, runId, pageUrl, { links = [], images = 
   });
 
   tx();
+}
+
+export function hydrateInternalLinkHttpFacts(db, runId) {
+  requireRunId(runId, 'hydrate internal link HTTP facts');
+  return db.prepare(`
+    UPDATE page_links
+    SET initialStatusCode = (
+          SELECT p.initialStatusCode FROM pages p
+          WHERE p.runId = page_links.runId AND p.normalizedUrl = page_links.normalizedTargetUrl
+        ),
+        statusCode = (
+          SELECT p.initialStatusCode FROM pages p
+          WHERE p.runId = page_links.runId AND p.normalizedUrl = page_links.normalizedTargetUrl
+        ),
+        redirectChainJson = (
+          SELECT p.redirectChainJson FROM pages p
+          WHERE p.runId = page_links.runId AND p.normalizedUrl = page_links.normalizedTargetUrl
+        ),
+        finalUrl = (
+          SELECT p.finalUrl FROM pages p
+          WHERE p.runId = page_links.runId AND p.normalizedUrl = page_links.normalizedTargetUrl
+        ),
+        finalStatusCode = (
+          SELECT p.statusCode FROM pages p
+          WHERE p.runId = page_links.runId AND p.normalizedUrl = page_links.normalizedTargetUrl
+        )
+    WHERE runId = ?
+      AND linkType = 'internal'
+      AND EXISTS (
+        SELECT 1 FROM pages p
+        WHERE p.runId = page_links.runId AND p.normalizedUrl = page_links.normalizedTargetUrl
+      )
+  `).run(runId).changes;
 }
 
 function buildLinkAggregates(links = [], totalLinks = links.length, truncated = false) {
@@ -779,6 +858,7 @@ export function insertLlmResult(db, result) {
 }
 
 export function clearRunArtifacts(db, runId) {
+  requireRunId(runId, 'clear run artifacts');
   db.prepare('DELETE FROM finding_reviews WHERE runId = ?').run(runId);
   db.prepare('DELETE FROM check_results WHERE runId = ?').run(runId);
   db.prepare('DELETE FROM llm_results WHERE runId = ?').run(runId);
@@ -797,6 +877,7 @@ export function clearSamplingArtifacts(db, runId) {
 }
 
 export function insertCheckResults(db, runId, results) {
+  requireRunId(runId, 'insert check results');
   const run = db.prepare('SELECT * FROM runs WHERE id = ?').get(runId) || {};
   const retentionPolicy = retentionPolicyFromRun(run);
   const insert = db.prepare(`
@@ -807,7 +888,7 @@ export function insertCheckResults(db, runId, results) {
       evaluationState, scoreEligible, scoreExclusionReason, scoreDeduplicationKey,
       reportGroupingKey, findingType, confidence, reviewRecommended,
       maturityImpact, dataBasis, evidenceLevel, reviewReason, automationCoverage,
-      interpretation, limitations, relatedCheckIdsJson
+      interpretation, limitations, relatedCheckIdsJson, checkVersion, provenanceJson
     )
     VALUES (
       @runId, @checkId, @category, @checkName, @status, @priority, @effort, @score,
@@ -816,7 +897,7 @@ export function insertCheckResults(db, runId, results) {
       @evaluationState, @scoreEligible, @scoreExclusionReason, @scoreDeduplicationKey,
       @reportGroupingKey, @findingType, @confidence, @reviewRecommended,
       @maturityImpact, @dataBasis, @evidenceLevel, @reviewReason, @automationCoverage,
-      @interpretation, @limitations, @relatedCheckIdsJson
+      @interpretation, @limitations, @relatedCheckIdsJson, @checkVersion, @provenanceJson
     )
   `);
 
@@ -862,7 +943,9 @@ export function insertCheckResults(db, runId, results) {
         automationCoverage: normalizeAutomationCoverage(storedItem.automationCoverage),
         interpretation: truncateText(storedItem.interpretation || null, 2000),
         limitations: truncateText(storedItem.limitations || null, 2000),
-        relatedCheckIdsJson: JSON.stringify(Array.isArray(storedItem.relatedCheckIds) ? storedItem.relatedCheckIds.slice(0, 20) : [])
+        relatedCheckIdsJson: JSON.stringify(Array.isArray(storedItem.relatedCheckIds) ? storedItem.relatedCheckIds.slice(0, 20) : []),
+        checkVersion: String(storedItem.provenance?.checkVersion || storedItem.checkVersion || '1'),
+        provenanceJson: boundedJson(storedItem.provenance || {}, retentionPolicy)
       });
     }
   });
@@ -1291,7 +1374,7 @@ export function listReviewsForRun(db, runId) {
       fr.createdAt AS reviewCreatedAt,
       fr.updatedAt AS reviewUpdatedAt
     FROM check_results cr
-    LEFT JOIN finding_reviews fr ON fr.checkResultId = cr.id
+    LEFT JOIN finding_reviews fr ON fr.runId = cr.runId AND fr.checkResultId = cr.id
     WHERE cr.runId = ?
     ORDER BY
       CASE cr.priority WHEN 'High' THEN 1 WHEN 'Medium' THEN 2 ELSE 3 END,
@@ -1349,7 +1432,7 @@ export function getReviewSummary(db, runId) {
       COALESCE(fr.reviewStatus, 'unreviewed') AS reviewStatus,
       COALESCE(fr.actionStatus, 'open') AS actionStatus
     FROM check_results cr
-    LEFT JOIN finding_reviews fr ON fr.checkResultId = cr.id
+    LEFT JOIN finding_reviews fr ON fr.runId = cr.runId AND fr.checkResultId = cr.id
     WHERE cr.runId = ?
   `).all(runId).map(applyEffectiveValues);
 
@@ -1854,6 +1937,16 @@ function normalizedDomain(value) {
     return new URL(input.includes('://') ? input : `https://${input}`).hostname.replace(/^www\./, '').toLowerCase();
   } catch {
     return input.replace(/^https?:\/\//, '').replace(/^www\./, '').split('/')[0].toLowerCase();
+  }
+}
+
+function hostOf(value) {
+  const input = String(value || '').trim();
+  if (!input) return null;
+  try {
+    return new URL(input.includes('://') ? input : `https://${input}`).hostname.toLowerCase();
+  } catch {
+    return null;
   }
 }
 

@@ -4,10 +4,13 @@ import { getRunHealth, getRunWithProject, getLatestLogs, getReviewSummary, getSa
 import { loadResultsWithScores } from '../checks/checkEngine.js';
 import { buildDisplaySummary, isCoreActionItem } from '../reviews/displaySemantics.js';
 import { buildEnterpriseSummary } from '../analysis/enterpriseSummary.js';
+import { assertRunStorageScope, createRunScope, requireRunId } from '../scope/runScope.js';
 
 export function generateReport(db, runId) {
+  requireRunId(runId, 'generate report');
   const run = getRunWithProject(db, runId);
   if (!run) throw new Error(`Run ${runId} not found`);
+  assertRunStorageScope(db, createRunScope(run, { id: run.projectId, inputDomain: run.inputDomain, finalDomain: run.finalDomain }));
 
   const { results, scores } = loadResultsWithScores(db, runId);
   const pages = db.prepare(`
@@ -424,6 +427,9 @@ function renderHtml(data) {
     <h3>Run Configuration</h3>
     <table>
       <tr><th>Input Domain</th><td>${escapeHtml(run.inputDomain)}</td><th>Final Domain</th><td>${escapeHtml(run.finalDomain || '')}</td></tr>
+      <tr><th>Project ID</th><td>${escapeHtml(run.projectId)}</td><th>Primary Host</th><td>${escapeHtml(run.primaryHost || 'not recorded')}</td></tr>
+      <tr><th>Git Commit</th><td>${escapeHtml(run.runtimeGitCommit || 'not recorded')}</td><th>Build Version</th><td>${escapeHtml(run.runtimeBuildVersion || 'not recorded')}</td></tr>
+      <tr><th>Configuration Hash</th><td colspan="3"><code>${escapeHtml(run.runtimeConfigHash || 'not recorded')}</code></td></tr>
       <tr><th>Audit Type</th><td>${escapeHtml(run.auditType)}</td><th>Brand</th><td>${escapeHtml(run.brandName || '')}</td></tr>
       <tr><th>Trigger Type</th><td>${escapeHtml(run.triggerType || 'manual')}</td><th>Schedule</th><td>${escapeHtml(run.scheduleName || run.scheduledRunId || '')}</td></tr>
       <tr><th>Baseline Run</th><td>${escapeHtml(run.baselineRunId || '')}</td><th>Auto Comparison</th><td>${escapeHtml(run.comparisonId || '')}</td></tr>
