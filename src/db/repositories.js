@@ -844,16 +844,17 @@ export function insertDomainAsset(db, asset) {
       UPDATE domain_assets
       SET statusCode = @statusCode,
           content = @content,
-          responseHeadersJson = @responseHeadersJson
+          responseHeadersJson = @responseHeadersJson,
+          metadataJson = @metadataJson
       WHERE id = @id
     `).run({ ...payload, id: existing.id });
     return existing.id;
   }
   db.prepare(`
     INSERT INTO domain_assets (
-      runId, type, url, statusCode, content, responseHeadersJson
+      runId, type, url, statusCode, content, responseHeadersJson, metadataJson
     )
-    VALUES (@runId, @type, @url, @statusCode, @content, @responseHeadersJson)
+    VALUES (@runId, @type, @url, @statusCode, @content, @responseHeadersJson, @metadataJson)
   `).run(payload);
   return db.prepare('SELECT last_insert_rowid() AS id').get().id;
 }

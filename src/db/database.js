@@ -120,6 +120,7 @@ export function initDatabase(database = getDb()) {
       sitemapUrlsQueued INTEGER NOT NULL DEFAULT 0,
       sitemapFilesProcessed INTEGER NOT NULL DEFAULT 0,
       currentSitemapUrl TEXT,
+      sitemapDiscoveryJson TEXT,
       scheduledRunId INTEGER,
       triggerType TEXT NOT NULL DEFAULT 'manual',
       baselineRunId INTEGER,
@@ -452,6 +453,7 @@ export function initDatabase(database = getDb()) {
       statusCode INTEGER,
       content TEXT,
       responseHeadersJson TEXT,
+      metadataJson TEXT,
       createdAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (runId) REFERENCES runs(id)
     );
@@ -1075,6 +1077,7 @@ export function initDatabase(database = getDb()) {
     ['sitemapUrlsQueued', 'INTEGER NOT NULL DEFAULT 0'],
     ['sitemapFilesProcessed', 'INTEGER NOT NULL DEFAULT 0'],
     ['currentSitemapUrl', 'TEXT'],
+    ['sitemapDiscoveryJson', 'TEXT'],
     ['scheduledRunId', 'INTEGER'],
     ['triggerType', "TEXT NOT NULL DEFAULT 'manual'"],
     ['baselineRunId', 'INTEGER'],
@@ -1154,6 +1157,10 @@ export function initDatabase(database = getDb()) {
     ['lockToken', 'TEXT'],
     ['shardKey', 'TEXT'],
     ['shardId', 'INTEGER']
+  ]);
+
+  ensureColumns(database, 'domain_assets', [
+    ['metadataJson', 'TEXT']
   ]);
 
   ensureColumns(database, 'page_images', [

@@ -433,21 +433,34 @@ function sqlString(value) {
 
 function statusPageDetails({ db, runId, checkResult, recommendation }) {
   if (checkResult.checkId === 'tech.sitemap_urls_non_200') {
+    const coverageFacts = checkResult.facts || {};
     const rows = db.prepare(`
       SELECT q.url, p.initialStatusCode, p.statusCode, p.redirectChainJson,
              p.finalUrl, p.httpAttemptHistoryJson, q.status AS queueStatus
       FROM crawl_queue q
       LEFT JOIN pages p ON p.runId = q.runId AND p.normalizedUrl = q.normalizedUrl
-      WHERE q.runId = ? AND q.sourceType IN ('sitemap', 'robots_sitemap')
+      WHERE q.runId = ? AND (q.sourceType LIKE 'sitemap%' OR q.sourceType LIKE 'robots_sitemap%')
         AND p.statusCode IS NOT NULL
         AND (COALESCE(p.initialStatusCode, p.statusCode) <> 200 OR p.statusCode <> 200)
       ORDER BY q.id
-    `).all(runId).map((row) => ({ ...row, measurementStability: classifyHttpStability(row.httpAttemptHistoryJson).status, recommendation }));
+    `).all(runId).map((row) => ({
+      ...row,
+      measurementStability: classifyHttpStability(row.httpAttemptHistoryJson).status,
+      totalListedUrls: coverageFacts.totalListedUrls ?? null,
+      testedUrls: coverageFacts.testedUrls ?? null,
+      successfulMeasurements: coverageFacts.successfulMeasurements ?? null,
+      coverageRatio: coverageFacts.coverageRatio ?? null,
+      sampleStrategy: coverageFacts.sampleStrategy ?? null,
+      recommendation
+    }));
     return {
       columns: [
         ['url', 'URL'], ['initialStatusCode', 'Initial Status Code'], ['statusCode', 'Final Status Code'],
         ['redirectChainJson', 'Redirect Chain'], ['finalUrl', 'Final URL'],
         ['measurementStability', 'Measurement Stability'], ['httpAttemptHistoryJson', 'Measurement Attempts'],
+        ['totalListedUrls', 'Total Listed URLs'], ['testedUrls', 'Tested URLs'],
+        ['successfulMeasurements', 'Successful Measurements'], ['coverageRatio', 'Coverage Ratio'],
+        ['sampleStrategy', 'Sample Strategy'],
         ['recommendation', 'Recommendation']
       ],
       rows,

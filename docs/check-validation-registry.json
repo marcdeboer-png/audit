@@ -1,7 +1,7 @@
 {
-  "registry_version": "check-validation-registry-v3",
-  "generated_at": "2026-07-19T20:30:00.000Z",
-  "source_commit": "901a096a43169a8fa5fd21ec6682da30507f5a9d",
+  "registry_version": "check-validation-registry-v4",
+  "generated_at": "2026-07-19T22:15:00.000Z",
+  "source_commit": "496247f1f8b8e21cd45fd9081d85e1210489c56c",
   "check_logic_version": "csr-render-provenance-v1",
   "http_status_validation_version": "http-status-validation-v1",
   "status_values": [
@@ -28,14 +28,14 @@
     "total_checks": 137,
     "total_active_checks": 137,
     "historical_checks": 0,
-    "validated_active_checks": 102,
+    "validated_active_checks": 105,
     "status_assignment_coverage": 100,
     "status_counts": {
-      "unvalidated": 10,
+      "unvalidated": 7,
       "fixture_validated": 9,
       "single_domain_validated": 16,
-      "cross_domain_validated": 4,
-      "validated_with_limits": 8,
+      "cross_domain_validated": 5,
+      "validated_with_limits": 10,
       "manual_review_required": 90,
       "invalid": 0,
       "deprecated": 0
@@ -73,19 +73,19 @@
       "Medium": 38
     },
     "evidence_class_counts": {
-      "inventory": 10,
-      "optional_opportunity": 54,
-      "primary_conditional": 19,
-      "primary_required": 44,
+      "inventory": 11,
+      "optional_opportunity": 55,
+      "primary_conditional": 22,
+      "primary_required": 39,
       "secondary_diagnostic": 10
     },
-    "score_capable_checks": 45,
-    "checks_without_central_requirement_definition": 45,
-    "check_validation_coverage": 74.45,
-    "score_weighted_validation_coverage": 34.44,
+    "score_capable_checks": 44,
+    "checks_without_central_requirement_definition": 42,
+    "check_validation_coverage": 76.64,
+    "score_weighted_validation_coverage": 37.4,
     "critical_high_validation_coverage": 33.33,
-    "primary_evidence_validation_coverage": 49.21,
-    "usage_weighted_validation_coverage": 73.91,
+    "primary_evidence_validation_coverage": 52.46,
+    "usage_weighted_validation_coverage": 76.69,
     "historical_usage_snapshot": {
       "result_observations": 6895,
       "distinct_runs_with_results": 64,
@@ -173,37 +173,60 @@
       "current_validation_status": "manual_review_required",
       "validation_status": "manual_review_required",
       "validation_confidence": "medium",
-      "tested_domains": [],
-      "tested_archetypes": [],
+      "tested_domains": [
+        "marcdeboer.de",
+        "trinkgut-zierles.de",
+        "react.dev",
+        "web.dev",
+        "developer.mozilla.org",
+        "www.ikea.com",
+        "app.uniswap.org",
+        "nextjs.org"
+      ],
+      "tested_archetypes": [
+        "small_static_expert_site",
+        "hydrated_local_business_site",
+        "ssr_hydration_documentation",
+        "large_multilingual_documentation",
+        "ecommerce",
+        "csr_application"
+      ],
       "positive_cases": 0,
-      "negative_cases": 0,
+      "negative_cases": 8,
       "fixture_tests": [
         "tests/batch102.test.js",
         "tests/batch41.test.js",
         "tests/batch85.test.js",
         "tests/batch851.test.js",
         "tests/batch91.test.js",
-        "tests/report-semantics.test.js"
+        "tests/report-semantics.test.js",
+        "tests/robots-sitemap-validation.test.js"
       ],
-      "real_world_runs": [],
+      "real_world_runs": [
+        "robots-sitemap-validation-v1-independent-live-probes",
+        "run-77-robots-sitemap-reconstruction"
+      ],
       "false_positives": 0,
       "false_negatives": 0,
       "severity_errors": 0,
       "scope_errors": 0,
-      "stability_runs": 0,
+      "stability_runs": 8,
       "known_limits": [
-        "Automated facts do not determine business relevance, search intent, editorial quality, or implementation priority without human context."
+        "Automated facts do not determine business relevance, search intent, editorial quality, or implementation priority without human context.",
+        "robots.txt 4xx means no explicit policy document; it is not interpreted as an explicit allow/block business decision."
       ],
       "manual_review_reason": "AI bots allowed/blocked/unclear from robots.txt can collect technical facts automatically, but the conclusion depends on page purpose, search intent, business context, editorial judgment, or implementation trade-offs.",
       "last_validated_at": "2026-07-19",
-      "last_validated_commit": "020e13c8fc2cc16c689ec01eed415c4e0b2950ad",
+      "last_validated_commit": "496247f1f8b8e21cd45fd9081d85e1210489c56c",
       "evidence_references": [
         "tests/batch102.test.js",
         "tests/batch41.test.js",
         "tests/batch85.test.js",
         "tests/batch851.test.js",
         "tests/batch91.test.js",
-        "tests/report-semantics.test.js"
+        "tests/report-semantics.test.js",
+        "tests/robots-sitemap-validation.test.js",
+        "docs/robots-sitemap-check-validation-v1.md"
       ],
       "recommended_trust_action": "manual_review_before_scoring",
       "historical_observations": 64,
@@ -964,7 +987,7 @@
       "finding_type": "opportunity",
       "default_severity": "Low",
       "active": true,
-      "score_effect": "conditional",
+      "score_effect": "score_free",
       "evidence_class": "optional_opportunity",
       "coverage_unit": "check:geo.robots_blocks_txt_files",
       "required_facts": [
@@ -981,25 +1004,50 @@
       "root_cause_family": "geo.robots_blocks_txt_files",
       "current_validation_status": "manual_review_required",
       "validation_status": "manual_review_required",
-      "validation_confidence": "low",
-      "tested_domains": [],
-      "tested_archetypes": [],
+      "validation_confidence": "medium",
+      "tested_domains": [
+        "marcdeboer.de",
+        "trinkgut-zierles.de",
+        "react.dev",
+        "web.dev",
+        "developer.mozilla.org",
+        "www.ikea.com",
+        "app.uniswap.org",
+        "nextjs.org"
+      ],
+      "tested_archetypes": [
+        "small_static_expert_site",
+        "hydrated_local_business_site",
+        "ssr_hydration_documentation",
+        "large_multilingual_documentation",
+        "ecommerce",
+        "csr_application"
+      ],
       "positive_cases": 0,
-      "negative_cases": 0,
-      "fixture_tests": [],
-      "real_world_runs": [],
+      "negative_cases": 8,
+      "fixture_tests": [
+        "tests/robots-sitemap-validation.test.js"
+      ],
+      "real_world_runs": [
+        "robots-sitemap-validation-v1-independent-live-probes",
+        "run-77-robots-sitemap-reconstruction"
+      ],
       "false_positives": 0,
       "false_negatives": 0,
       "severity_errors": 0,
       "scope_errors": 0,
-      "stability_runs": 0,
+      "stability_runs": 8,
       "known_limits": [
-        "Automated facts do not determine business relevance, search intent, editorial quality, or implementation priority without human context."
+        "Automated facts do not determine business relevance, search intent, editorial quality, or implementation priority without human context.",
+        "robots.txt 4xx means no explicit policy document; it is not interpreted as an explicit allow/block business decision."
       ],
       "manual_review_reason": "robots.txt blockiert .txt-Dateien can collect technical facts automatically, but the conclusion depends on page purpose, search intent, business context, editorial judgment, or implementation trade-offs.",
-      "last_validated_at": "",
-      "last_validated_commit": "",
-      "evidence_references": [],
+      "last_validated_at": "2026-07-19",
+      "last_validated_commit": "496247f1f8b8e21cd45fd9081d85e1210489c56c",
+      "evidence_references": [
+        "tests/robots-sitemap-validation.test.js",
+        "docs/robots-sitemap-check-validation-v1.md"
+      ],
       "recommended_trust_action": "manual_review_before_scoring",
       "historical_observations": 64,
       "historical_run_count": 44,
@@ -1012,7 +1060,7 @@
       "finding_type": "opportunity",
       "default_severity": "Low",
       "active": true,
-      "score_effect": "conditional",
+      "score_effect": "score_free",
       "evidence_class": "optional_opportunity",
       "coverage_unit": "check:geo.robots_mentions_applebot",
       "required_facts": [
@@ -1029,25 +1077,50 @@
       "root_cause_family": "geo.robots_mentions_applebot",
       "current_validation_status": "manual_review_required",
       "validation_status": "manual_review_required",
-      "validation_confidence": "low",
-      "tested_domains": [],
-      "tested_archetypes": [],
+      "validation_confidence": "medium",
+      "tested_domains": [
+        "marcdeboer.de",
+        "trinkgut-zierles.de",
+        "react.dev",
+        "web.dev",
+        "developer.mozilla.org",
+        "www.ikea.com",
+        "app.uniswap.org",
+        "nextjs.org"
+      ],
+      "tested_archetypes": [
+        "small_static_expert_site",
+        "hydrated_local_business_site",
+        "ssr_hydration_documentation",
+        "large_multilingual_documentation",
+        "ecommerce",
+        "csr_application"
+      ],
       "positive_cases": 0,
-      "negative_cases": 0,
-      "fixture_tests": [],
-      "real_world_runs": [],
+      "negative_cases": 8,
+      "fixture_tests": [
+        "tests/robots-sitemap-validation.test.js"
+      ],
+      "real_world_runs": [
+        "robots-sitemap-validation-v1-independent-live-probes",
+        "run-77-robots-sitemap-reconstruction"
+      ],
       "false_positives": 0,
       "false_negatives": 0,
       "severity_errors": 0,
       "scope_errors": 0,
-      "stability_runs": 0,
+      "stability_runs": 8,
       "known_limits": [
-        "Automated facts do not determine business relevance, search intent, editorial quality, or implementation priority without human context."
+        "Automated facts do not determine business relevance, search intent, editorial quality, or implementation priority without human context.",
+        "robots.txt 4xx means no explicit policy document; it is not interpreted as an explicit allow/block business decision."
       ],
       "manual_review_reason": "robots.txt mentions Applebot can collect technical facts automatically, but the conclusion depends on page purpose, search intent, business context, editorial judgment, or implementation trade-offs.",
-      "last_validated_at": "",
-      "last_validated_commit": "",
-      "evidence_references": [],
+      "last_validated_at": "2026-07-19",
+      "last_validated_commit": "496247f1f8b8e21cd45fd9081d85e1210489c56c",
+      "evidence_references": [
+        "tests/robots-sitemap-validation.test.js",
+        "docs/robots-sitemap-check-validation-v1.md"
+      ],
       "recommended_trust_action": "manual_review_before_scoring",
       "historical_observations": 1,
       "historical_run_count": 1,
@@ -1060,7 +1133,7 @@
       "finding_type": "opportunity",
       "default_severity": "Low",
       "active": true,
-      "score_effect": "conditional",
+      "score_effect": "score_free",
       "evidence_class": "optional_opportunity",
       "coverage_unit": "check:geo.robots_mentions_bytespider",
       "required_facts": [
@@ -1077,25 +1150,50 @@
       "root_cause_family": "geo.robots_mentions_bytespider",
       "current_validation_status": "manual_review_required",
       "validation_status": "manual_review_required",
-      "validation_confidence": "low",
-      "tested_domains": [],
-      "tested_archetypes": [],
+      "validation_confidence": "medium",
+      "tested_domains": [
+        "marcdeboer.de",
+        "trinkgut-zierles.de",
+        "react.dev",
+        "web.dev",
+        "developer.mozilla.org",
+        "www.ikea.com",
+        "app.uniswap.org",
+        "nextjs.org"
+      ],
+      "tested_archetypes": [
+        "small_static_expert_site",
+        "hydrated_local_business_site",
+        "ssr_hydration_documentation",
+        "large_multilingual_documentation",
+        "ecommerce",
+        "csr_application"
+      ],
       "positive_cases": 0,
-      "negative_cases": 0,
-      "fixture_tests": [],
-      "real_world_runs": [],
+      "negative_cases": 8,
+      "fixture_tests": [
+        "tests/robots-sitemap-validation.test.js"
+      ],
+      "real_world_runs": [
+        "robots-sitemap-validation-v1-independent-live-probes",
+        "run-77-robots-sitemap-reconstruction"
+      ],
       "false_positives": 0,
       "false_negatives": 0,
       "severity_errors": 0,
       "scope_errors": 0,
-      "stability_runs": 0,
+      "stability_runs": 8,
       "known_limits": [
-        "Automated facts do not determine business relevance, search intent, editorial quality, or implementation priority without human context."
+        "Automated facts do not determine business relevance, search intent, editorial quality, or implementation priority without human context.",
+        "robots.txt 4xx means no explicit policy document; it is not interpreted as an explicit allow/block business decision."
       ],
       "manual_review_reason": "robots.txt mentions Bytespider can collect technical facts automatically, but the conclusion depends on page purpose, search intent, business context, editorial judgment, or implementation trade-offs.",
-      "last_validated_at": "",
-      "last_validated_commit": "",
-      "evidence_references": [],
+      "last_validated_at": "2026-07-19",
+      "last_validated_commit": "496247f1f8b8e21cd45fd9081d85e1210489c56c",
+      "evidence_references": [
+        "tests/robots-sitemap-validation.test.js",
+        "docs/robots-sitemap-check-validation-v1.md"
+      ],
       "recommended_trust_action": "manual_review_before_scoring",
       "historical_observations": 1,
       "historical_run_count": 1,
@@ -1108,7 +1206,7 @@
       "finding_type": "opportunity",
       "default_severity": "Low",
       "active": true,
-      "score_effect": "conditional",
+      "score_effect": "score_free",
       "evidence_class": "optional_opportunity",
       "coverage_unit": "check:geo.robots_mentions_ccbot",
       "required_facts": [
@@ -1125,25 +1223,50 @@
       "root_cause_family": "geo.robots_mentions_ccbot",
       "current_validation_status": "manual_review_required",
       "validation_status": "manual_review_required",
-      "validation_confidence": "low",
-      "tested_domains": [],
-      "tested_archetypes": [],
+      "validation_confidence": "medium",
+      "tested_domains": [
+        "marcdeboer.de",
+        "trinkgut-zierles.de",
+        "react.dev",
+        "web.dev",
+        "developer.mozilla.org",
+        "www.ikea.com",
+        "app.uniswap.org",
+        "nextjs.org"
+      ],
+      "tested_archetypes": [
+        "small_static_expert_site",
+        "hydrated_local_business_site",
+        "ssr_hydration_documentation",
+        "large_multilingual_documentation",
+        "ecommerce",
+        "csr_application"
+      ],
       "positive_cases": 0,
-      "negative_cases": 0,
-      "fixture_tests": [],
-      "real_world_runs": [],
+      "negative_cases": 8,
+      "fixture_tests": [
+        "tests/robots-sitemap-validation.test.js"
+      ],
+      "real_world_runs": [
+        "robots-sitemap-validation-v1-independent-live-probes",
+        "run-77-robots-sitemap-reconstruction"
+      ],
       "false_positives": 0,
       "false_negatives": 0,
       "severity_errors": 0,
       "scope_errors": 0,
-      "stability_runs": 0,
+      "stability_runs": 8,
       "known_limits": [
-        "Automated facts do not determine business relevance, search intent, editorial quality, or implementation priority without human context."
+        "Automated facts do not determine business relevance, search intent, editorial quality, or implementation priority without human context.",
+        "robots.txt 4xx means no explicit policy document; it is not interpreted as an explicit allow/block business decision."
       ],
       "manual_review_reason": "robots.txt mentions CCBot can collect technical facts automatically, but the conclusion depends on page purpose, search intent, business context, editorial judgment, or implementation trade-offs.",
-      "last_validated_at": "",
-      "last_validated_commit": "",
-      "evidence_references": [],
+      "last_validated_at": "2026-07-19",
+      "last_validated_commit": "496247f1f8b8e21cd45fd9081d85e1210489c56c",
+      "evidence_references": [
+        "tests/robots-sitemap-validation.test.js",
+        "docs/robots-sitemap-check-validation-v1.md"
+      ],
       "recommended_trust_action": "manual_review_before_scoring",
       "historical_observations": 1,
       "historical_run_count": 1,
@@ -1156,7 +1279,7 @@
       "finding_type": "opportunity",
       "default_severity": "Low",
       "active": true,
-      "score_effect": "conditional",
+      "score_effect": "score_free",
       "evidence_class": "optional_opportunity",
       "coverage_unit": "check:geo.robots_mentions_chatgpt_user",
       "required_facts": [
@@ -1173,25 +1296,50 @@
       "root_cause_family": "geo.robots_mentions_chatgpt_user",
       "current_validation_status": "manual_review_required",
       "validation_status": "manual_review_required",
-      "validation_confidence": "low",
-      "tested_domains": [],
-      "tested_archetypes": [],
+      "validation_confidence": "medium",
+      "tested_domains": [
+        "marcdeboer.de",
+        "trinkgut-zierles.de",
+        "react.dev",
+        "web.dev",
+        "developer.mozilla.org",
+        "www.ikea.com",
+        "app.uniswap.org",
+        "nextjs.org"
+      ],
+      "tested_archetypes": [
+        "small_static_expert_site",
+        "hydrated_local_business_site",
+        "ssr_hydration_documentation",
+        "large_multilingual_documentation",
+        "ecommerce",
+        "csr_application"
+      ],
       "positive_cases": 0,
-      "negative_cases": 0,
-      "fixture_tests": [],
-      "real_world_runs": [],
+      "negative_cases": 8,
+      "fixture_tests": [
+        "tests/robots-sitemap-validation.test.js"
+      ],
+      "real_world_runs": [
+        "robots-sitemap-validation-v1-independent-live-probes",
+        "run-77-robots-sitemap-reconstruction"
+      ],
       "false_positives": 0,
       "false_negatives": 0,
       "severity_errors": 0,
       "scope_errors": 0,
-      "stability_runs": 0,
+      "stability_runs": 8,
       "known_limits": [
-        "Automated facts do not determine business relevance, search intent, editorial quality, or implementation priority without human context."
+        "Automated facts do not determine business relevance, search intent, editorial quality, or implementation priority without human context.",
+        "robots.txt 4xx means no explicit policy document; it is not interpreted as an explicit allow/block business decision."
       ],
       "manual_review_reason": "robots.txt mentions ChatGPT-User can collect technical facts automatically, but the conclusion depends on page purpose, search intent, business context, editorial judgment, or implementation trade-offs.",
-      "last_validated_at": "",
-      "last_validated_commit": "",
-      "evidence_references": [],
+      "last_validated_at": "2026-07-19",
+      "last_validated_commit": "496247f1f8b8e21cd45fd9081d85e1210489c56c",
+      "evidence_references": [
+        "tests/robots-sitemap-validation.test.js",
+        "docs/robots-sitemap-check-validation-v1.md"
+      ],
       "recommended_trust_action": "manual_review_before_scoring",
       "historical_observations": 1,
       "historical_run_count": 1,
@@ -1204,7 +1352,7 @@
       "finding_type": "opportunity",
       "default_severity": "Low",
       "active": true,
-      "score_effect": "conditional",
+      "score_effect": "score_free",
       "evidence_class": "optional_opportunity",
       "coverage_unit": "check:geo.robots_mentions_claude_web",
       "required_facts": [
@@ -1221,25 +1369,50 @@
       "root_cause_family": "geo.robots_mentions_claude_web",
       "current_validation_status": "manual_review_required",
       "validation_status": "manual_review_required",
-      "validation_confidence": "low",
-      "tested_domains": [],
-      "tested_archetypes": [],
+      "validation_confidence": "medium",
+      "tested_domains": [
+        "marcdeboer.de",
+        "trinkgut-zierles.de",
+        "react.dev",
+        "web.dev",
+        "developer.mozilla.org",
+        "www.ikea.com",
+        "app.uniswap.org",
+        "nextjs.org"
+      ],
+      "tested_archetypes": [
+        "small_static_expert_site",
+        "hydrated_local_business_site",
+        "ssr_hydration_documentation",
+        "large_multilingual_documentation",
+        "ecommerce",
+        "csr_application"
+      ],
       "positive_cases": 0,
-      "negative_cases": 0,
-      "fixture_tests": [],
-      "real_world_runs": [],
+      "negative_cases": 8,
+      "fixture_tests": [
+        "tests/robots-sitemap-validation.test.js"
+      ],
+      "real_world_runs": [
+        "robots-sitemap-validation-v1-independent-live-probes",
+        "run-77-robots-sitemap-reconstruction"
+      ],
       "false_positives": 0,
       "false_negatives": 0,
       "severity_errors": 0,
       "scope_errors": 0,
-      "stability_runs": 0,
+      "stability_runs": 8,
       "known_limits": [
-        "Automated facts do not determine business relevance, search intent, editorial quality, or implementation priority without human context."
+        "Automated facts do not determine business relevance, search intent, editorial quality, or implementation priority without human context.",
+        "robots.txt 4xx means no explicit policy document; it is not interpreted as an explicit allow/block business decision."
       ],
       "manual_review_reason": "robots.txt mentions Claude-Web can collect technical facts automatically, but the conclusion depends on page purpose, search intent, business context, editorial judgment, or implementation trade-offs.",
-      "last_validated_at": "",
-      "last_validated_commit": "",
-      "evidence_references": [],
+      "last_validated_at": "2026-07-19",
+      "last_validated_commit": "496247f1f8b8e21cd45fd9081d85e1210489c56c",
+      "evidence_references": [
+        "tests/robots-sitemap-validation.test.js",
+        "docs/robots-sitemap-check-validation-v1.md"
+      ],
       "recommended_trust_action": "manual_review_before_scoring",
       "historical_observations": 1,
       "historical_run_count": 1,
@@ -1252,7 +1425,7 @@
       "finding_type": "opportunity",
       "default_severity": "Low",
       "active": true,
-      "score_effect": "conditional",
+      "score_effect": "score_free",
       "evidence_class": "optional_opportunity",
       "coverage_unit": "check:geo.robots_mentions_claudebot",
       "required_facts": [
@@ -1270,27 +1443,50 @@
       "current_validation_status": "manual_review_required",
       "validation_status": "manual_review_required",
       "validation_confidence": "medium",
-      "tested_domains": [],
-      "tested_archetypes": [],
-      "positive_cases": 0,
-      "negative_cases": 0,
-      "fixture_tests": [
-        "tests/batch85.test.js"
+      "tested_domains": [
+        "marcdeboer.de",
+        "trinkgut-zierles.de",
+        "react.dev",
+        "web.dev",
+        "developer.mozilla.org",
+        "www.ikea.com",
+        "app.uniswap.org",
+        "nextjs.org"
       ],
-      "real_world_runs": [],
-      "false_positives": 0,
+      "tested_archetypes": [
+        "small_static_expert_site",
+        "hydrated_local_business_site",
+        "ssr_hydration_documentation",
+        "large_multilingual_documentation",
+        "ecommerce",
+        "csr_application"
+      ],
+      "positive_cases": 0,
+      "negative_cases": 8,
+      "fixture_tests": [
+        "tests/batch85.test.js",
+        "tests/robots-sitemap-validation.test.js"
+      ],
+      "real_world_runs": [
+        "robots-sitemap-validation-v1-independent-live-probes",
+        "run-77-robots-sitemap-reconstruction"
+      ],
+      "false_positives": 1,
       "false_negatives": 0,
       "severity_errors": 0,
       "scope_errors": 0,
-      "stability_runs": 0,
+      "stability_runs": 8,
       "known_limits": [
-        "Automated facts do not determine business relevance, search intent, editorial quality, or implementation priority without human context."
+        "Automated facts do not determine business relevance, search intent, editorial quality, or implementation priority without human context.",
+        "robots.txt 4xx means no explicit policy document; it is not interpreted as an explicit allow/block business decision."
       ],
       "manual_review_reason": "robots.txt mentions ClaudeBot can collect technical facts automatically, but the conclusion depends on page purpose, search intent, business context, editorial judgment, or implementation trade-offs.",
       "last_validated_at": "2026-07-19",
-      "last_validated_commit": "020e13c8fc2cc16c689ec01eed415c4e0b2950ad",
+      "last_validated_commit": "496247f1f8b8e21cd45fd9081d85e1210489c56c",
       "evidence_references": [
-        "tests/batch85.test.js"
+        "tests/batch85.test.js",
+        "tests/robots-sitemap-validation.test.js",
+        "docs/robots-sitemap-check-validation-v1.md"
       ],
       "recommended_trust_action": "manual_review_before_scoring",
       "historical_observations": 64,
@@ -1304,7 +1500,7 @@
       "finding_type": "opportunity",
       "default_severity": "Low",
       "active": true,
-      "score_effect": "conditional",
+      "score_effect": "score_free",
       "evidence_class": "optional_opportunity",
       "coverage_unit": "check:geo.robots_mentions_google_extended",
       "required_facts": [
@@ -1322,27 +1518,50 @@
       "current_validation_status": "manual_review_required",
       "validation_status": "manual_review_required",
       "validation_confidence": "medium",
-      "tested_domains": [],
-      "tested_archetypes": [],
-      "positive_cases": 0,
-      "negative_cases": 0,
-      "fixture_tests": [
-        "tests/batch85.test.js"
+      "tested_domains": [
+        "marcdeboer.de",
+        "trinkgut-zierles.de",
+        "react.dev",
+        "web.dev",
+        "developer.mozilla.org",
+        "www.ikea.com",
+        "app.uniswap.org",
+        "nextjs.org"
       ],
-      "real_world_runs": [],
-      "false_positives": 0,
+      "tested_archetypes": [
+        "small_static_expert_site",
+        "hydrated_local_business_site",
+        "ssr_hydration_documentation",
+        "large_multilingual_documentation",
+        "ecommerce",
+        "csr_application"
+      ],
+      "positive_cases": 0,
+      "negative_cases": 8,
+      "fixture_tests": [
+        "tests/batch85.test.js",
+        "tests/robots-sitemap-validation.test.js"
+      ],
+      "real_world_runs": [
+        "robots-sitemap-validation-v1-independent-live-probes",
+        "run-77-robots-sitemap-reconstruction"
+      ],
+      "false_positives": 1,
       "false_negatives": 0,
       "severity_errors": 0,
       "scope_errors": 0,
-      "stability_runs": 0,
+      "stability_runs": 8,
       "known_limits": [
-        "Automated facts do not determine business relevance, search intent, editorial quality, or implementation priority without human context."
+        "Automated facts do not determine business relevance, search intent, editorial quality, or implementation priority without human context.",
+        "robots.txt 4xx means no explicit policy document; it is not interpreted as an explicit allow/block business decision."
       ],
       "manual_review_reason": "robots.txt mentions Google-Extended can collect technical facts automatically, but the conclusion depends on page purpose, search intent, business context, editorial judgment, or implementation trade-offs.",
       "last_validated_at": "2026-07-19",
-      "last_validated_commit": "020e13c8fc2cc16c689ec01eed415c4e0b2950ad",
+      "last_validated_commit": "496247f1f8b8e21cd45fd9081d85e1210489c56c",
       "evidence_references": [
-        "tests/batch85.test.js"
+        "tests/batch85.test.js",
+        "tests/robots-sitemap-validation.test.js",
+        "docs/robots-sitemap-check-validation-v1.md"
       ],
       "recommended_trust_action": "manual_review_before_scoring",
       "historical_observations": 64,
@@ -1356,7 +1575,7 @@
       "finding_type": "opportunity",
       "default_severity": "Low",
       "active": true,
-      "score_effect": "conditional",
+      "score_effect": "score_free",
       "evidence_class": "optional_opportunity",
       "coverage_unit": "check:geo.robots_mentions_gptbot",
       "required_facts": [
@@ -1374,35 +1593,58 @@
       "current_validation_status": "manual_review_required",
       "validation_status": "manual_review_required",
       "validation_confidence": "medium",
-      "tested_domains": [],
-      "tested_archetypes": [],
+      "tested_domains": [
+        "marcdeboer.de",
+        "trinkgut-zierles.de",
+        "react.dev",
+        "web.dev",
+        "developer.mozilla.org",
+        "www.ikea.com",
+        "app.uniswap.org",
+        "nextjs.org"
+      ],
+      "tested_archetypes": [
+        "small_static_expert_site",
+        "hydrated_local_business_site",
+        "ssr_hydration_documentation",
+        "large_multilingual_documentation",
+        "ecommerce",
+        "csr_application"
+      ],
       "positive_cases": 0,
-      "negative_cases": 0,
+      "negative_cases": 8,
       "fixture_tests": [
         "tests/batch41.test.js",
         "tests/batch83.test.js",
         "tests/batch85.test.js",
         "tests/batch91.test.js",
-        "tests/report-semantics.test.js"
+        "tests/report-semantics.test.js",
+        "tests/robots-sitemap-validation.test.js"
       ],
-      "real_world_runs": [],
-      "false_positives": 0,
+      "real_world_runs": [
+        "robots-sitemap-validation-v1-independent-live-probes",
+        "run-77-robots-sitemap-reconstruction"
+      ],
+      "false_positives": 1,
       "false_negatives": 0,
       "severity_errors": 0,
       "scope_errors": 0,
-      "stability_runs": 0,
+      "stability_runs": 8,
       "known_limits": [
-        "Automated facts do not determine business relevance, search intent, editorial quality, or implementation priority without human context."
+        "Automated facts do not determine business relevance, search intent, editorial quality, or implementation priority without human context.",
+        "robots.txt 4xx means no explicit policy document; it is not interpreted as an explicit allow/block business decision."
       ],
       "manual_review_reason": "robots.txt mentions GPTBot can collect technical facts automatically, but the conclusion depends on page purpose, search intent, business context, editorial judgment, or implementation trade-offs.",
       "last_validated_at": "2026-07-19",
-      "last_validated_commit": "020e13c8fc2cc16c689ec01eed415c4e0b2950ad",
+      "last_validated_commit": "496247f1f8b8e21cd45fd9081d85e1210489c56c",
       "evidence_references": [
         "tests/batch41.test.js",
         "tests/batch83.test.js",
         "tests/batch85.test.js",
         "tests/batch91.test.js",
-        "tests/report-semantics.test.js"
+        "tests/report-semantics.test.js",
+        "tests/robots-sitemap-validation.test.js",
+        "docs/robots-sitemap-check-validation-v1.md"
       ],
       "recommended_trust_action": "manual_review_before_scoring",
       "historical_observations": 64,
@@ -1416,7 +1658,7 @@
       "finding_type": "opportunity",
       "default_severity": "Low",
       "active": true,
-      "score_effect": "conditional",
+      "score_effect": "score_free",
       "evidence_class": "optional_opportunity",
       "coverage_unit": "check:geo.robots_mentions_oai_searchbot",
       "required_facts": [
@@ -1434,27 +1676,50 @@
       "current_validation_status": "manual_review_required",
       "validation_status": "manual_review_required",
       "validation_confidence": "medium",
-      "tested_domains": [],
-      "tested_archetypes": [],
-      "positive_cases": 0,
-      "negative_cases": 0,
-      "fixture_tests": [
-        "tests/batch85.test.js"
+      "tested_domains": [
+        "marcdeboer.de",
+        "trinkgut-zierles.de",
+        "react.dev",
+        "web.dev",
+        "developer.mozilla.org",
+        "www.ikea.com",
+        "app.uniswap.org",
+        "nextjs.org"
       ],
-      "real_world_runs": [],
-      "false_positives": 0,
+      "tested_archetypes": [
+        "small_static_expert_site",
+        "hydrated_local_business_site",
+        "ssr_hydration_documentation",
+        "large_multilingual_documentation",
+        "ecommerce",
+        "csr_application"
+      ],
+      "positive_cases": 0,
+      "negative_cases": 8,
+      "fixture_tests": [
+        "tests/batch85.test.js",
+        "tests/robots-sitemap-validation.test.js"
+      ],
+      "real_world_runs": [
+        "robots-sitemap-validation-v1-independent-live-probes",
+        "run-77-robots-sitemap-reconstruction"
+      ],
+      "false_positives": 1,
       "false_negatives": 0,
       "severity_errors": 0,
       "scope_errors": 0,
-      "stability_runs": 0,
+      "stability_runs": 8,
       "known_limits": [
-        "Automated facts do not determine business relevance, search intent, editorial quality, or implementation priority without human context."
+        "Automated facts do not determine business relevance, search intent, editorial quality, or implementation priority without human context.",
+        "robots.txt 4xx means no explicit policy document; it is not interpreted as an explicit allow/block business decision."
       ],
       "manual_review_reason": "robots.txt mentions OAI-SearchBot can collect technical facts automatically, but the conclusion depends on page purpose, search intent, business context, editorial judgment, or implementation trade-offs.",
       "last_validated_at": "2026-07-19",
-      "last_validated_commit": "020e13c8fc2cc16c689ec01eed415c4e0b2950ad",
+      "last_validated_commit": "496247f1f8b8e21cd45fd9081d85e1210489c56c",
       "evidence_references": [
-        "tests/batch85.test.js"
+        "tests/batch85.test.js",
+        "tests/robots-sitemap-validation.test.js",
+        "docs/robots-sitemap-check-validation-v1.md"
       ],
       "recommended_trust_action": "manual_review_before_scoring",
       "historical_observations": 64,
@@ -1468,7 +1733,7 @@
       "finding_type": "opportunity",
       "default_severity": "Low",
       "active": true,
-      "score_effect": "conditional",
+      "score_effect": "score_free",
       "evidence_class": "optional_opportunity",
       "coverage_unit": "check:geo.robots_mentions_perplexitybot",
       "required_facts": [
@@ -1486,27 +1751,50 @@
       "current_validation_status": "manual_review_required",
       "validation_status": "manual_review_required",
       "validation_confidence": "medium",
-      "tested_domains": [],
-      "tested_archetypes": [],
-      "positive_cases": 0,
-      "negative_cases": 0,
-      "fixture_tests": [
-        "tests/batch85.test.js"
+      "tested_domains": [
+        "marcdeboer.de",
+        "trinkgut-zierles.de",
+        "react.dev",
+        "web.dev",
+        "developer.mozilla.org",
+        "www.ikea.com",
+        "app.uniswap.org",
+        "nextjs.org"
       ],
-      "real_world_runs": [],
-      "false_positives": 0,
+      "tested_archetypes": [
+        "small_static_expert_site",
+        "hydrated_local_business_site",
+        "ssr_hydration_documentation",
+        "large_multilingual_documentation",
+        "ecommerce",
+        "csr_application"
+      ],
+      "positive_cases": 0,
+      "negative_cases": 8,
+      "fixture_tests": [
+        "tests/batch85.test.js",
+        "tests/robots-sitemap-validation.test.js"
+      ],
+      "real_world_runs": [
+        "robots-sitemap-validation-v1-independent-live-probes",
+        "run-77-robots-sitemap-reconstruction"
+      ],
+      "false_positives": 1,
       "false_negatives": 0,
       "severity_errors": 0,
       "scope_errors": 0,
-      "stability_runs": 0,
+      "stability_runs": 8,
       "known_limits": [
-        "Automated facts do not determine business relevance, search intent, editorial quality, or implementation priority without human context."
+        "Automated facts do not determine business relevance, search intent, editorial quality, or implementation priority without human context.",
+        "robots.txt 4xx means no explicit policy document; it is not interpreted as an explicit allow/block business decision."
       ],
       "manual_review_reason": "robots.txt mentions PerplexityBot can collect technical facts automatically, but the conclusion depends on page purpose, search intent, business context, editorial judgment, or implementation trade-offs.",
       "last_validated_at": "2026-07-19",
-      "last_validated_commit": "020e13c8fc2cc16c689ec01eed415c4e0b2950ad",
+      "last_validated_commit": "496247f1f8b8e21cd45fd9081d85e1210489c56c",
       "evidence_references": [
-        "tests/batch85.test.js"
+        "tests/batch85.test.js",
+        "tests/robots-sitemap-validation.test.js",
+        "docs/robots-sitemap-check-validation-v1.md"
       ],
       "recommended_trust_action": "manual_review_before_scoring",
       "historical_observations": 64,
@@ -5391,20 +5679,22 @@
       "check_id": "tech.orphan_like_sitemap_urls",
       "name": "Orphan-like sitemap URLs without internal links",
       "category": "Crawling & Indexing",
-      "finding_type": "core_issue",
+      "finding_type": "opportunity",
       "default_severity": "Low",
       "active": true,
-      "score_effect": "conditional",
-      "evidence_class": "primary_required",
-      "coverage_unit": "check:tech.orphan_like_sitemap_urls",
+      "score_effect": "score_free",
+      "evidence_class": "primary_conditional",
+      "coverage_unit": "sitemap_url:internal_inlink_observation",
       "required_facts": [
         "sitemapSourceFacts",
-        "normalizedInternalLinkRows"
+        "normalizedInternalLinkRows",
+        "completeSitemapDiscovery"
       ],
       "requirement_definition_status": "declared",
       "inventory_issues": [],
       "data_sources": [
-        "domain_assets",
+        "runs.sitemapDiscoveryJson",
+        "crawl_queue",
         "pages",
         "page_links"
       ],
@@ -5412,25 +5702,37 @@
       "root_cause_family": "tech.orphan_like_sitemap_urls",
       "current_validation_status": "manual_review_required",
       "validation_status": "manual_review_required",
-      "validation_confidence": "low",
-      "tested_domains": [],
-      "tested_archetypes": [],
-      "positive_cases": 0,
-      "negative_cases": 0,
-      "fixture_tests": [],
-      "real_world_runs": [],
-      "false_positives": 0,
-      "false_negatives": 0,
-      "severity_errors": 0,
-      "scope_errors": 0,
-      "stability_runs": 0,
-      "known_limits": [
-        "Automated facts do not determine business relevance, search intent, editorial quality, or implementation priority without human context."
+      "validation_confidence": "medium",
+      "tested_domains": [
+        "trinkgut-zierles.de"
       ],
-      "manual_review_reason": "Orphan-like sitemap URLs without internal links can collect technical facts automatically, but the conclusion depends on page purpose, search intent, business context, editorial judgment, or implementation trade-offs.",
-      "last_validated_at": "",
-      "last_validated_commit": "",
-      "evidence_references": [],
+      "tested_archetypes": [
+        "hydrated_local_business_site"
+      ],
+      "positive_cases": 1,
+      "negative_cases": 1,
+      "fixture_tests": [
+        "tests/robots-sitemap-validation.test.js"
+      ],
+      "real_world_runs": [
+        "run-77-robots-sitemap-reconstruction"
+      ],
+      "false_positives": 0,
+      "false_negatives": 1,
+      "severity_errors": 0,
+      "scope_errors": 1,
+      "stability_runs": 1,
+      "known_limits": [
+        "A URL without observed inlinks is only an orphan candidate when crawl and link-storage coverage are complete.",
+        "Legitimate XML-only, utility, campaign or newly published URLs require manual context."
+      ],
+      "manual_review_reason": "The fact can be measured only with complete discovery and internal-link coverage; whether the URL should receive links remains a site-architecture decision.",
+      "last_validated_at": "2026-07-19",
+      "last_validated_commit": "496247f1f8b8e21cd45fd9081d85e1210489c56c",
+      "evidence_references": [
+        "tests/robots-sitemap-validation.test.js",
+        "docs/robots-sitemap-check-validation-v1.md"
+      ],
       "recommended_trust_action": "manual_review_before_scoring",
       "historical_observations": 64,
       "historical_run_count": 44,
@@ -6214,62 +6516,71 @@
       "default_severity": "Medium",
       "active": true,
       "score_effect": "score_capable",
-      "evidence_class": "primary_required",
-      "coverage_unit": "check:tech.robots_txt_present",
-      "required_facts": [],
-      "requirement_definition_status": "missing",
-      "inventory_issues": [
-        "missing_central_requirement_definition"
+      "evidence_class": "inventory",
+      "coverage_unit": "site:robots_txt_resource",
+      "required_facts": [
+        "robotsTxtGetObservation",
+        "robotsTxtRepresentationClassification"
       ],
+      "requirement_definition_status": "declared",
+      "inventory_issues": [],
       "data_sources": [
-        "domain_assets",
-        "pages",
-        "page_links"
+        "domain_assets"
       ],
       "scope": "site",
       "root_cause_family": "tech.robots_txt",
-      "current_validation_status": "unvalidated",
-      "validation_status": "unvalidated",
-      "validation_confidence": "low",
-      "tested_domains": [],
-      "tested_archetypes": [],
-      "positive_cases": 0,
-      "negative_cases": 0,
-      "fixture_tests": [],
-      "real_world_runs": [],
-      "false_positives": 0,
+      "current_validation_status": "validated_with_limits",
+      "validation_status": "validated_with_limits",
+      "validation_confidence": "high",
+      "tested_domains": [
+        "marcdeboer.de",
+        "trinkgut-zierles.de",
+        "react.dev",
+        "web.dev",
+        "developer.mozilla.org",
+        "www.ikea.com",
+        "app.uniswap.org",
+        "nextjs.org",
+        "example.com"
+      ],
+      "tested_archetypes": [
+        "small_static_expert_site",
+        "hydrated_local_business_site",
+        "ssr_hydration_documentation",
+        "large_multilingual_documentation",
+        "ecommerce",
+        "csr_application"
+      ],
+      "positive_cases": 1,
+      "negative_cases": 9,
+      "fixture_tests": [
+        "tests/robots-sitemap-validation.test.js"
+      ],
+      "real_world_runs": [
+        "robots-sitemap-validation-v1-independent-live-probes",
+        "run-77-robots-sitemap-reconstruction"
+      ],
+      "false_positives": 1,
       "false_negatives": 0,
-      "severity_errors": 0,
+      "severity_errors": 1,
       "scope_errors": 0,
-      "stability_runs": 0,
-      "known_limits": [],
+      "stability_runs": 8,
+      "known_limits": [
+        "No organic real-domain 200-HTML robots misrepresentation was observed; the actionable positive remains fixture-based.",
+        "A single 5xx/429/network observation is availability evidence, not proof of a persistent website defect.",
+        "Crawler-specific interpretations can differ at unsupported or non-standard directives."
+      ],
       "manual_review_reason": "",
-      "last_validated_at": "",
-      "last_validated_commit": "",
-      "evidence_references": [],
-      "recommended_trust_action": "validation_required_score_free",
+      "last_validated_at": "2026-07-19",
+      "last_validated_commit": "496247f1f8b8e21cd45fd9081d85e1210489c56c",
+      "evidence_references": [
+        "tests/robots-sitemap-validation.test.js",
+        "docs/robots-sitemap-check-validation-v1.md"
+      ],
+      "recommended_trust_action": "automated_with_limits",
       "historical_observations": 64,
       "historical_run_count": 44,
-      "validation_gap": {
-        "missing_evidence": [
-          "direct regression fixture",
-          "independent real-domain validation",
-          "real positive case",
-          "real negative case",
-          "severity and scope review",
-          "repeatability confirmation"
-        ],
-        "needed_real_positive_cases": 1,
-        "needed_real_negative_cases": 1,
-        "suitable_archetypes": [
-          "small_static_site",
-          "large_dynamic_site"
-        ],
-        "needed_fixture": "Add controlled positive and negative fixtures for tech.robots_txt_present.",
-        "manual_method": "Independent curl GET/redirect/header validation with body spot-checks.",
-        "expected_effort": "M",
-        "risk_if_unchanged": "Medium: a primary-evidence conclusion remains insufficiently demonstrated on real implementations."
-      }
+      "validation_gap": null
     },
     {
       "check_id": "tech.schema_types_coverage_summary",
@@ -6327,66 +6638,72 @@
       "check_id": "tech.sitemap_in_robots",
       "name": "Sitemap in robots.txt referenziert",
       "category": "Crawling & Indexing",
-      "finding_type": "core_issue",
+      "finding_type": "opportunity",
       "default_severity": "Low",
       "active": true,
-      "score_effect": "score_capable",
-      "evidence_class": "primary_required",
-      "coverage_unit": "check:tech.sitemap_in_robots",
-      "required_facts": [],
-      "requirement_definition_status": "missing",
-      "inventory_issues": [
-        "missing_central_requirement_definition"
+      "score_effect": "score_free",
+      "evidence_class": "optional_opportunity",
+      "coverage_unit": "site:robots_sitemap_directives",
+      "required_facts": [
+        "usableRobotsTxt",
+        "parsedSitemapDirectives"
       ],
+      "requirement_definition_status": "declared",
+      "inventory_issues": [],
       "data_sources": [
-        "domain_assets",
-        "pages",
-        "page_links"
+        "domain_assets"
       ],
       "scope": "site",
       "root_cause_family": "tech.sitemap_in_robots",
-      "current_validation_status": "unvalidated",
-      "validation_status": "unvalidated",
-      "validation_confidence": "low",
-      "tested_domains": [],
-      "tested_archetypes": [],
-      "positive_cases": 0,
-      "negative_cases": 0,
-      "fixture_tests": [],
-      "real_world_runs": [],
+      "current_validation_status": "cross_domain_validated",
+      "validation_status": "cross_domain_validated",
+      "validation_confidence": "high",
+      "tested_domains": [
+        "marcdeboer.de",
+        "trinkgut-zierles.de",
+        "react.dev",
+        "web.dev",
+        "developer.mozilla.org",
+        "www.ikea.com",
+        "app.uniswap.org",
+        "nextjs.org"
+      ],
+      "tested_archetypes": [
+        "small_static_expert_site",
+        "hydrated_local_business_site",
+        "ssr_hydration_documentation",
+        "large_multilingual_documentation",
+        "ecommerce",
+        "csr_application"
+      ],
+      "positive_cases": 1,
+      "negative_cases": 7,
+      "fixture_tests": [
+        "tests/robots-sitemap-validation.test.js"
+      ],
+      "real_world_runs": [
+        "robots-sitemap-validation-v1-independent-live-probes",
+        "run-77-robots-sitemap-reconstruction"
+      ],
       "false_positives": 0,
       "false_negatives": 0,
       "severity_errors": 0,
       "scope_errors": 0,
-      "stability_runs": 0,
-      "known_limits": [],
+      "stability_runs": 8,
+      "known_limits": [
+        "The check validates discovery syntax only; it does not prove that declared sitemaps are complete or submitted to a search engine."
+      ],
       "manual_review_reason": "",
-      "last_validated_at": "",
-      "last_validated_commit": "",
-      "evidence_references": [],
-      "recommended_trust_action": "validation_required_score_free",
+      "last_validated_at": "2026-07-19",
+      "last_validated_commit": "496247f1f8b8e21cd45fd9081d85e1210489c56c",
+      "evidence_references": [
+        "tests/robots-sitemap-validation.test.js",
+        "docs/robots-sitemap-check-validation-v1.md"
+      ],
+      "recommended_trust_action": "fully_automated",
       "historical_observations": 64,
       "historical_run_count": 44,
-      "validation_gap": {
-        "missing_evidence": [
-          "direct regression fixture",
-          "independent real-domain validation",
-          "real positive case",
-          "real negative case",
-          "severity and scope review",
-          "repeatability confirmation"
-        ],
-        "needed_real_positive_cases": 1,
-        "needed_real_negative_cases": 1,
-        "suitable_archetypes": [
-          "small_static_site",
-          "large_dynamic_site"
-        ],
-        "needed_fixture": "Add controlled positive and negative fixtures for tech.sitemap_in_robots.",
-        "manual_method": "Independent curl GET/redirect/header validation with body spot-checks.",
-        "expected_effort": "M",
-        "risk_if_unchanged": "Medium: a primary-evidence conclusion remains insufficiently demonstrated on real implementations."
-      }
+      "validation_gap": null
     },
     {
       "check_id": "tech.sitemap_present",
@@ -6396,62 +6713,72 @@
       "default_severity": "Medium",
       "active": true,
       "score_effect": "score_capable",
-      "evidence_class": "primary_required",
-      "coverage_unit": "check:tech.sitemap_present",
-      "required_facts": [],
-      "requirement_definition_status": "missing",
-      "inventory_issues": [
-        "missing_central_requirement_definition"
+      "evidence_class": "primary_conditional",
+      "coverage_unit": "site:xml_sitemap_discovery",
+      "required_facts": [
+        "sitemapDiscoveryRequests",
+        "validatedSitemapDocumentRoot"
       ],
+      "requirement_definition_status": "declared",
+      "inventory_issues": [],
       "data_sources": [
         "domain_assets",
-        "pages",
-        "page_links"
+        "runs.sitemapDiscoveryJson"
       ],
       "scope": "site",
       "root_cause_family": "tech.sitemap",
-      "current_validation_status": "unvalidated",
-      "validation_status": "unvalidated",
-      "validation_confidence": "low",
-      "tested_domains": [],
-      "tested_archetypes": [],
-      "positive_cases": 0,
-      "negative_cases": 0,
-      "fixture_tests": [],
-      "real_world_runs": [],
-      "false_positives": 0,
-      "false_negatives": 0,
-      "severity_errors": 0,
+      "current_validation_status": "validated_with_limits",
+      "validation_status": "validated_with_limits",
+      "validation_confidence": "high",
+      "tested_domains": [
+        "marcdeboer.de",
+        "trinkgut-zierles.de",
+        "react.dev",
+        "web.dev",
+        "developer.mozilla.org",
+        "www.ikea.com",
+        "app.uniswap.org",
+        "nextjs.org"
+      ],
+      "tested_archetypes": [
+        "small_static_expert_site",
+        "hydrated_local_business_site",
+        "ssr_hydration_documentation",
+        "large_multilingual_documentation",
+        "ecommerce",
+        "csr_application"
+      ],
+      "positive_cases": 2,
+      "negative_cases": 7,
+      "fixture_tests": [
+        "tests/robots-sitemap-validation.test.js",
+        "tests/batch4.test.js"
+      ],
+      "real_world_runs": [
+        "robots-sitemap-validation-v1-independent-live-probes",
+        "run-77-robots-sitemap-reconstruction"
+      ],
+      "false_positives": 1,
+      "false_negatives": 1,
+      "severity_errors": 1,
       "scope_errors": 0,
-      "stability_runs": 0,
-      "known_limits": [],
+      "stability_runs": 8,
+      "known_limits": [
+        "No organic real-domain invalid 200 XML/HTML soft response or broken declared child was observed; those positives remain fixtures.",
+        "Sitemap absence is a score-free opportunity whose relevance depends on site size and discovery architecture.",
+        "Large child sitemaps can exceed the targeted validation budget and must remain explicitly partially covered."
+      ],
       "manual_review_reason": "",
-      "last_validated_at": "",
-      "last_validated_commit": "",
-      "evidence_references": [],
-      "recommended_trust_action": "validation_required_score_free",
+      "last_validated_at": "2026-07-19",
+      "last_validated_commit": "496247f1f8b8e21cd45fd9081d85e1210489c56c",
+      "evidence_references": [
+        "tests/robots-sitemap-validation.test.js",
+        "docs/robots-sitemap-check-validation-v1.md"
+      ],
+      "recommended_trust_action": "automated_with_limits",
       "historical_observations": 64,
       "historical_run_count": 44,
-      "validation_gap": {
-        "missing_evidence": [
-          "direct regression fixture",
-          "independent real-domain validation",
-          "real positive case",
-          "real negative case",
-          "severity and scope review",
-          "repeatability confirmation"
-        ],
-        "needed_real_positive_cases": 1,
-        "needed_real_negative_cases": 1,
-        "suitable_archetypes": [
-          "small_static_site",
-          "large_dynamic_site"
-        ],
-        "needed_fixture": "Add controlled positive and negative fixtures for tech.sitemap_present.",
-        "manual_method": "Independent curl GET/redirect/header validation with body spot-checks.",
-        "expected_effort": "M",
-        "risk_if_unchanged": "Medium: a primary-evidence conclusion remains insufficiently demonstrated on real implementations."
-      }
+      "validation_gap": null
     },
     {
       "check_id": "tech.sitemap_urls_non_200",
@@ -6461,17 +6788,18 @@
       "default_severity": "Medium",
       "active": true,
       "score_effect": "score_capable",
-      "evidence_class": "primary_required",
-      "coverage_unit": "check:tech.sitemap_urls_non_200",
+      "evidence_class": "primary_conditional",
+      "coverage_unit": "sitemap_url:direct_get_status",
       "required_facts": [
+        "sitemapDiscoveryCoverage",
         "initialAndFinalGetStatusForEverySitemapUrl"
       ],
       "requirement_definition_status": "declared",
       "inventory_issues": [],
       "data_sources": [
-        "domain_assets",
-        "pages",
-        "page_links"
+        "runs.sitemapDiscoveryJson",
+        "crawl_queue",
+        "pages"
       ],
       "scope": "url_aggregate",
       "root_cause_family": "tech.sitemap_urls_non_200",
@@ -6479,54 +6807,69 @@
       "validation_status": "fixture_validated",
       "validation_confidence": "medium",
       "tested_domains": [
-        "trinkgut-zierles.de"
+        "marcdeboer.de",
+        "trinkgut-zierles.de",
+        "react.dev",
+        "web.dev",
+        "developer.mozilla.org",
+        "www.ikea.com",
+        "app.uniswap.org",
+        "nextjs.org"
       ],
       "tested_archetypes": [
-        "small_local_business_website"
+        "small_static_expert_site",
+        "hydrated_local_business_site",
+        "ssr_hydration_documentation",
+        "large_multilingual_documentation",
+        "ecommerce",
+        "csr_application"
       ],
-      "positive_cases": 2,
-      "negative_cases": 1,
+      "positive_cases": 8,
+      "negative_cases": 17,
       "fixture_tests": [
+        "tests/robots-sitemap-validation.test.js",
         "tests/http-status-validation.test.js"
       ],
       "real_world_runs": [
-        "run-77-forensic-validation"
+        "robots-sitemap-validation-v1-independent-live-probes",
+        "run-77-robots-sitemap-reconstruction"
       ],
       "false_positives": 0,
-      "false_negatives": 0,
+      "false_negatives": 1,
       "severity_errors": 0,
-      "scope_errors": 0,
-      "stability_runs": 1,
+      "scope_errors": 1,
+      "stability_runs": 8,
       "known_limits": [
-        "Real-domain validation currently confirms only a negative direct-200 case; redirect and missing-measurement positives are fixtures.",
-        "The check covers sitemap URLs selected into the audit plan, not every URL in an arbitrarily large sitemap corpus."
+        "No organic real-domain redirect, 4xx or reproducible 5xx URL listed inside a sitemap was observed; positive status cases remain fixtures.",
+        "Real-domain URL probes were deterministic samples, not complete large-corpus validation.",
+        "Canonical, noindex and content-quality consistency are separate checks."
       ],
       "manual_review_reason": "",
       "last_validated_at": "2026-07-19",
-      "last_validated_commit": "901a096a43169a8fa5fd21ec6682da30507f5a9d",
+      "last_validated_commit": "496247f1f8b8e21cd45fd9081d85e1210489c56c",
       "evidence_references": [
-        "tests/http-status-validation.test.js",
-        "docs/http-status-check-validation-v1.md"
+        "tests/robots-sitemap-validation.test.js",
+        "docs/robots-sitemap-check-validation-v1.md"
       ],
       "recommended_trust_action": "automated_with_limits",
       "historical_observations": 64,
       "historical_run_count": 44,
       "validation_gap": {
         "missing_evidence": [
-          "real positive case",
-          "second real domain",
-          "repeatability confirmation"
+          "organic real positive listed-URL case",
+          "complete real-domain status validation of a non-trivial sitemap corpus"
         ],
         "needed_real_positive_cases": 1,
         "needed_real_negative_cases": 0,
         "suitable_archetypes": [
-          "small_static_site",
-          "large_dynamic_site"
+          "large_ecommerce",
+          "large_documentation",
+          "publishing_site"
         ],
-        "needed_fixture": "Direct-200, redirect-to-200 and missing-measurement fixtures exist.",
-        "manual_method": "Independent curl GET/redirect/header validation with body spot-checks.",
-        "expected_effort": "M",
-        "risk_if_unchanged": "Medium: a primary-evidence conclusion remains insufficiently demonstrated on real implementations."
+        "needed_fixture": "Covered by tests/robots-sitemap-validation.test.js and tests/http-status-validation.test.js.",
+        "manual_method": "Independently parse the full sitemap corpus and GET every unique internal listed URL with bounded retries.",
+        "expected_effort": "L",
+        "risk_if_unchanged": "Medium: confirmed fixture failures are reliable, but production precision on organic positive cases is not yet demonstrated."
       }
     },
     {
@@ -8606,5 +8949,6 @@
       "historical_run_count": 1,
       "validation_gap": null
     }
-  ]
+  ],
+  "robots_sitemap_validation_version": "robots-sitemap-validation-v1"
 }

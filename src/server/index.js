@@ -1172,6 +1172,7 @@ function formatRunSummary(run) {
     sitemapUrlsQueued: run.sitemapUrlsQueued || 0,
     sitemapFilesProcessed: run.sitemapFilesProcessed || 0,
     currentSitemapUrl: run.currentSitemapUrl || null,
+    sitemapDiscovery: safeParse(run.sitemapDiscoveryJson, null),
     pagesPerMinute: ppm,
     reviewSummary,
     reviewProgress: `${reviewSummary.reviewed}/${reviewSummary.reviewableFindings}`,

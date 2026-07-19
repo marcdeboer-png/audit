@@ -17,7 +17,7 @@ speichert hoechstens fuenf kompakte Messversuche ohne Response-Body.
 | `tech.redirect_pages` | Eine angefragte URL lieferte initial 3xx. | scorefreies Inventar | `cross_domain_validated` |
 | `tech.internal_links_to_3xx` | Ein interner HTML-Seitenlink zeigt auf eine URL mit initialem 3xx. | Medium | `single_domain_validated` |
 | `tech.internal_links_to_4xx_5xx` | Ein interner HTML-Seitenlink endet stabil mit 4xx/5xx; Vorkommen und eindeutige Ziele werden getrennt gezaehlt. | Medium bei Einzelfaellen, High bei breitem Scope | `single_domain_validated` |
-| `tech.sitemap_urls_non_200` | Eine in den Auditplan uebernommene Sitemap-URL liefert nicht direkt initial und final 200. | Medium; reale Positivvalidierung offen | `fixture_validated` |
+| `tech.sitemap_urls_non_200` | Eine gemessene interne Sitemap-URL liefert nicht direkt initial und final 200; ein Voll-Pass verlangt vollstaendige versionierte Discovery- und Statusabdeckung. | Medium; reale Positivvalidierung offen | `fixture_validated` |
 | `tech.status_code_distribution` | Inventar der initialen und finalen GET-Statuscodes; technische Fehler sind separat. | scorefreies Inventar | `single_domain_validated` |
 | `tech.synthetic_not_found_handling` | Vier kollisionssichere unbekannte URLs liefern stabil 404/410; Soft-404, Homepage-Redirect, Loop und bestaetigte 5xx werden getrennt. | High; technische Fehler scorefrei | `cross_domain_validated` |
 

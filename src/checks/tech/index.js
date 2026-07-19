@@ -27,6 +27,13 @@ import {
   canonicalTargetFacts,
   evaluateCanonicalPage
 } from '../canonicalSemantics.js';
+import {
+  analyzeRobotsAsset,
+  extractSitemapDirectives,
+  parseJson as parseDiscoveryJson,
+  ROBOTS_SITEMAP_VALIDATION_VERSION,
+  sitemapMetadata
+} from '../../utils/discoverySemantics.js';
 
 const tech = (id, category, name, run, options = {}) => ({
   id: id.startsWith('template.') ? id : `tech.${id}`,
@@ -852,25 +859,117 @@ function charsetUtf8Check() {
 function robotsTxtPresent() {
   return tech('robots_txt_present', 'Crawling & Indexing', 'robots.txt vorhanden', function run(ctx) {
     const asset = ctx.db.prepare("SELECT * FROM domain_assets WHERE runId = ? AND type = 'robots' ORDER BY id DESC LIMIT 1").get(ctx.run.id);
-    const ok = asset && asset.statusCode >= 200 && asset.statusCode < 300;
-    return makeResult(this, ok ? 'OK' : 'Warning', {
-      affectedCount: ok ? 0 : 1,
-      finding: ok ? 'robots.txt was fetched successfully.' : 'robots.txt was not fetched with a 2xx status.',
-      recommendation: 'Provide a robots.txt file at the canonical origin.',
-      evidence: { url: asset?.url, statusCode: asset?.statusCode ?? null }
+    if (!asset) return availabilityResult(this, 'not_executed', {
+      finding: 'No robots.txt GET observation was collected; absence was not inferred.',
+      evidence: { logicVersion: ROBOTS_SITEMAP_VALIDATION_VERSION, runId: ctx.run.id },
+      requirements: { requiredFacts: ['robotsTxtGetObservation'], missingFacts: ['robotsTxtGetObservation'], minimumCoverage: 1, canCollectWithTargetedRun: true }
+    });
+    const analysis = analyzeRobotsAsset(asset);
+    const requirements = { requiredFacts: ['robotsTxtGetObservation', 'robotsTxtRepresentationClassification'], optionalFacts: ['robotsDirectives'], missingFacts: [], minimumCoverage: 1, canCollectWithTargetedRun: true };
+    if (['technical_error', 'temporarily_unreachable', 'unexpected_status'].includes(analysis.state)) {
+      return availabilityResult(this, analysis.state === 'technical_error' ? 'technical_error' : 'insufficient_evidence', {
+        finding: `robots.txt could not be classified reliably (${analysis.state}); no website defect was inferred.`,
+        facts: { robotsState: analysis.state, crawlDefault: analysis.crawlDefault },
+        evidence: analysis,
+        requirements: { ...requirements, missingFacts: ['stableRobotsTxtRepresentation'], reason: 'A stable robots.txt response is required for a content conclusion.' }
+      });
+    }
+    if (analysis.state === 'absent') {
+      return makeResult(this, 'OK', {
+        affectedCount: 0,
+        finding: `robots.txt returned ${analysis.finalStatusCode}; under the Robots Exclusion Protocol this means no crawl restrictions were supplied.`,
+        recommendation: 'Add robots.txt only when crawl directives or sitemap discovery are useful; absence alone is not an SEO defect.',
+        facts: { robotsPresent: false, crawlDefault: 'allowed' },
+        evidence: analysis,
+        requirements,
+        findingType: 'info',
+        scoreEligible: false,
+        scoreExclusionReason: 'robots_txt_absence_is_not_a_crawl_error',
+        confidence: 'high'
+      });
+    }
+    const invalid = analysis.state === 'invalid_html_representation';
+    return makeResult(this, invalid ? 'Warning' : 'OK', {
+      affectedCount: invalid ? 1 : 0,
+      finding: invalid ? 'The robots.txt URL returned an HTML representation instead of a usable robots policy.' : `robots.txt was classified as ${analysis.state === 'valid_empty' ? 'an empty, permissive policy' : 'a usable policy resource'}.`,
+      recommendation: invalid ? 'Serve plain robots directives or an intentionally empty response body at /robots.txt, not an HTML fallback page.' : '',
+      facts: { robotsPresent: true, robotsState: analysis.state, crawlDefault: analysis.crawlDefault },
+      evidence: analysis,
+      requirements,
+      findingType: invalid ? 'core_issue' : 'inventory',
+      confidence: 'high'
     });
   });
 }
 
 function sitemapPresent() {
   return tech('sitemap_present', 'Crawling & Indexing', 'Sitemap vorhanden', function run(ctx) {
-    const rows = all(ctx.db, "SELECT url, statusCode FROM domain_assets WHERE runId = ? AND type = 'sitemap'", [ctx.run.id]);
-    const okRows = rows.filter((row) => row.statusCode >= 200 && row.statusCode < 300);
-    return makeResult(this, okRows.length ? 'OK' : 'Warning', {
-      affectedCount: okRows.length ? 0 : 1,
-      finding: okRows.length ? `${okRows.length} sitemap asset(s) returned 2xx.` : 'No sitemap asset returned 2xx.',
-      recommendation: 'Expose an XML sitemap and reference it from robots.txt.',
-      evidence: { sitemaps: rows }
+    const rows = all(ctx.db, "SELECT * FROM domain_assets WHERE runId = ? AND type = 'sitemap' ORDER BY id", [ctx.run.id]).map((row) => ({
+      url: row.url,
+      statusCode: row.statusCode,
+      metadata: sitemapMetadata(row),
+      request: parseDiscoveryJson(row.metadataJson, {})
+    }));
+    if (!rows.length) return availabilityResult(this, 'not_executed', {
+      finding: 'No sitemap discovery request was collected; sitemap absence was not inferred.',
+      evidence: { logicVersion: ROBOTS_SITEMAP_VALIDATION_VERSION, sitemapAssets: 0 },
+      requirements: { requiredFacts: ['sitemapDiscoveryRequests'], missingFacts: ['sitemapDiscoveryRequests'], minimumCoverage: 1, canCollectWithTargetedRun: true }
+    });
+    const valid = rows.filter((row) => row.statusCode >= 200 && row.statusCode < 300 && row.metadata.valid);
+    const invalid2xx = rows.filter((row) => row.statusCode >= 200 && row.statusCode < 300 && !row.metadata.valid);
+    const declaredFailures = rows.filter((row) => ['robots_sitemap'].includes(row.request.sourceType) && (row.statusCode === null || row.statusCode >= 400));
+    const deterministicDeclaredFailures = declaredFailures.filter((row) => row.statusCode >= 400 && row.statusCode < 500 && row.statusCode !== 429);
+    const invalidDeclared2xx = invalid2xx.filter((row) => row.request.sourceType === 'robots_sitemap');
+    const protocolViolations = valid.filter((row) => row.metadata.protocolLimitExceeded);
+    const transient = declaredFailures.filter((row) => row.statusCode === null || row.statusCode === 429 || row.statusCode >= 500);
+    const evidence = { logicVersion: ROBOTS_SITEMAP_VALIDATION_VERSION, validSitemaps: valid, invalid2xxSitemaps: invalid2xx, declaredFailures, allSitemaps: rows };
+    const requirements = { requiredFacts: ['sitemapGetObservation', 'validatedSitemapDocumentRoot'], optionalFacts: ['completeSitemapIndexTraversal'], missingFacts: [], minimumCoverage: 1, canCollectWithTargetedRun: true };
+    if (valid.length && (invalidDeclared2xx.length || deterministicDeclaredFailures.length || protocolViolations.length)) return makeResult(this, 'Warning', {
+      affectedCount: invalidDeclared2xx.length + deterministicDeclaredFailures.length + protocolViolations.length,
+      finding: `${valid.length} parseable sitemap document(s) were found, but ${invalidDeclared2xx.length + deterministicDeclaredFailures.length + protocolViolations.length} declared resource or protocol constraint(s) require correction.`,
+      recommendation: 'Remove or correct invalid Sitemap directives and broken child references, and split sitemap documents that exceed protocol limits.',
+      facts: { validSitemapCount: valid.length, invalidDeclaredSitemapCount: invalidDeclared2xx.length, deterministicDeclaredFailureCount: deterministicDeclaredFailures.length, protocolLimitViolationCount: protocolViolations.length },
+      evidence,
+      requirements,
+      confidence: 'high'
+    });
+    if (valid.length) return makeResult(this, 'OK', {
+      affectedCount: 0,
+      finding: `${valid.length} valid XML sitemap document(s) were discovered.`,
+      facts: { validSitemapCount: valid.length, invalidSitemapCount: invalid2xx.length },
+      evidence,
+      requirements,
+      findingType: 'inventory',
+      confidence: 'high'
+    });
+    if (transient.length && !invalid2xx.length) return availabilityResult(this, 'technical_error', {
+      finding: 'Declared sitemap resources could not be measured stably; no missing-sitemap defect was inferred.',
+      facts: { validSitemapCount: 0, transientFailures: transient.length },
+      evidence,
+      requirements: { ...requirements, missingFacts: ['stableDeclaredSitemapResponse'] }
+    });
+    if (invalid2xx.length || declaredFailures.length) return makeResult(this, 'Warning', {
+      affectedCount: invalid2xx.length + declaredFailures.length,
+      finding: `${invalid2xx.length + declaredFailures.length} declared or successful-looking sitemap resource(s) were invalid or unavailable.`,
+      recommendation: 'Serve declared sitemap resources as valid urlset or sitemapindex XML and fix deterministic 4xx responses.',
+      facts: { validSitemapCount: 0, invalidSitemapCount: invalid2xx.length, declaredFailureCount: declaredFailures.length },
+      evidence,
+      requirements,
+      confidence: 'high'
+    });
+    return makeResult(this, 'Warning', {
+      priority: 'Low',
+      affectedCount: 1,
+      finding: 'No valid XML sitemap was discovered; only optional default-path probes were absent.',
+      recommendation: 'Consider an XML sitemap when it materially improves discovery, especially for larger or weakly linked sites.',
+      facts: { validSitemapCount: 0, defaultCandidatesAbsent: rows.length },
+      evidence,
+      requirements,
+      findingType: 'opportunity',
+      scoreEligible: false,
+      scoreExclusionReason: 'sitemap_absence_requires_site_context',
+      reviewRecommended: true,
+      confidence: 'high'
     });
   });
 }
@@ -878,12 +977,38 @@ function sitemapPresent() {
 function sitemapInRobots() {
   return tech('sitemap_in_robots', 'Crawling & Indexing', 'Sitemap in robots.txt referenziert', function run(ctx) {
     const asset = ctx.db.prepare("SELECT * FROM domain_assets WHERE runId = ? AND type = 'robots' ORDER BY id DESC LIMIT 1").get(ctx.run.id);
-    const hasReference = /(^|\n)\s*sitemap\s*:/i.test(asset?.content || '');
+    if (!asset) return availabilityResult(this, 'not_executed', {
+      finding: 'No robots.txt observation was collected; Sitemap directives were not evaluated.',
+      evidence: { logicVersion: ROBOTS_SITEMAP_VALIDATION_VERSION },
+      requirements: { requiredFacts: ['robotsTxtGetObservation'], missingFacts: ['robotsTxtGetObservation'], canCollectWithTargetedRun: true }
+    });
+    const robots = analyzeRobotsAsset(asset);
+    if (robots.state === 'absent') return availabilityResult(this, 'not_applicable', {
+      finding: 'robots.txt is absent, so no Sitemap directive can be required; sitemap discovery may use other channels.',
+      facts: { robotsPresent: false },
+      evidence: robots,
+      requirements: { requiredFacts: ['usableRobotsTxt'], missingFacts: [], canCollectWithTargetedRun: false, reason: 'Sitemap declaration in robots.txt is optional and robots.txt is absent.' }
+    });
+    if (!['valid', 'valid_empty'].includes(robots.state)) return availabilityResult(this, robots.state === 'technical_error' ? 'technical_error' : 'insufficient_evidence', {
+      finding: `Sitemap directives could not be evaluated because robots.txt was ${robots.state}.`,
+      evidence: robots,
+      requirements: { requiredFacts: ['usableRobotsTxt'], missingFacts: ['usableRobotsTxt'], canCollectWithTargetedRun: true }
+    });
+    const directives = extractSitemapDirectives(asset.content, asset.url);
+    const valid = directives.filter((item) => item.valid);
+    const invalid = directives.filter((item) => !item.valid);
+    const hasReference = valid.length > 0;
     return makeResult(this, hasReference ? 'OK' : 'Warning', {
       affectedCount: hasReference ? 0 : 1,
-      finding: hasReference ? 'robots.txt references at least one sitemap.' : 'robots.txt does not reference a sitemap.',
-      recommendation: 'Add Sitemap directives to robots.txt.',
-      evidence: { robotsUrl: asset?.url, statusCode: asset?.statusCode ?? null, hasReference }
+      finding: hasReference ? `robots.txt contains ${valid.length} valid absolute Sitemap directive(s).` : invalid.length ? 'robots.txt contains Sitemap directives, but none is a valid absolute HTTP(S) URL.' : 'robots.txt does not contain a Sitemap directive.',
+      recommendation: 'Optionally add a valid absolute Sitemap directive to improve discovery; this is not required when the sitemap is submitted or discovered elsewhere.',
+      facts: { hasValidSitemapDirective: hasReference, validDirectiveCount: valid.length, invalidDirectiveCount: invalid.length },
+      evidence: { logicVersion: ROBOTS_SITEMAP_VALIDATION_VERSION, robots, directives },
+      requirements: { requiredFacts: ['usableRobotsTxt', 'parsedSitemapDirectives'], optionalFacts: ['validAbsoluteSitemapDirective'], missingFacts: [], minimumCoverage: 1, canCollectWithTargetedRun: true },
+      findingType: hasReference ? 'inventory' : 'opportunity',
+      scoreEligible: false,
+      scoreExclusionReason: 'robots_sitemap_directive_is_optional_discovery_metadata',
+      confidence: 'high'
     });
   }, { priority: 'Low' });
 }
@@ -896,12 +1021,19 @@ function sitemapUrlsNon200() {
              p.redirectChainJson, p.httpAttemptHistoryJson
       FROM crawl_queue q
       LEFT JOIN pages p ON p.runId = q.runId AND p.normalizedUrl = q.normalizedUrl
-      WHERE q.runId = ? AND q.sourceType IN ('sitemap', 'robots_sitemap')
+      WHERE q.runId = ? AND (q.sourceType LIKE 'sitemap%' OR q.sourceType LIKE 'robots_sitemap%')
       ORDER BY q.id
     `, [ctx.run.id]);
+    const discovery = parseDiscoveryJson(ctx.run.sitemapDiscoveryJson, null);
+    const totalListedUrls = Number(discovery?.uniqueListedUrls ?? rows.length);
+    if (!rows.length && totalListedUrls > 0) return availabilityResult(this, 'not_executed', {
+      finding: `${totalListedUrls} unique sitemap URL(s) were discovered, but none received a page-status measurement.`,
+      evidence: { logicVersion: ROBOTS_SITEMAP_VALIDATION_VERSION, discovery },
+      requirements: { requiredFacts: ['sitemapUrlUnits', 'initialAndFinalGetStatusForEverySitemapUrl'], missingFacts: ['sitemapUrlStatusMeasurements'], minimumCoverage: 1, canCollectWithTargetedRun: true }
+    });
     if (!rows.length) return availabilityResult(this, 'not_applicable', {
       finding: 'No sitemap URL units were planned for this run.',
-      evidence: { logicVersion: HTTP_STATUS_VALIDATION_VERSION, sitemapUrlCount: 0 },
+      evidence: { logicVersion: ROBOTS_SITEMAP_VALIDATION_VERSION, sitemapUrlCount: 0, discovery },
       requirements: { requiredFacts: ['sitemapUrlUnits'], missingFacts: [], minimumCoverage: 1, canCollectWithTargetedRun: true }
     });
     const inconclusive = rows.filter((row) => {
@@ -911,19 +1043,25 @@ function sitemapUrlsNon200() {
     });
     const inconclusiveUrls = new Set(inconclusive.map((row) => row.url));
     const missing = rows.filter((row) => row.initialStatusCode === null || row.initialStatusCode === undefined || row.finalStatusCode === null || row.finalStatusCode === undefined || inconclusiveUrls.has(row.url));
+    const successfulMeasurements = rows.length - missing.length;
+    const coverageRatio = totalListedUrls > 0 ? successfulMeasurements / totalListedUrls : 1;
+    const completeCoverage = discovery ? Boolean(discovery.discoveryComplete) && coverageRatio >= 1 : false;
     const affected = rows.filter((row) => !inconclusiveUrls.has(row.url) && (Number(row.initialStatusCode ?? row.finalStatusCode) !== 200 || Number(row.finalStatusCode) !== 200));
-    if (missing.length && !affected.length) return availabilityResult(this, missing.some((row) => row.queueStatus === 'failed') ? 'technical_error' : 'insufficient_evidence', {
-      finding: `${missing.length} sitemap URL(s) lack a complete GET status measurement; no pass was inferred.`,
-      evidence: { logicVersion: HTTP_STATUS_VALIDATION_VERSION, missing: missing.slice(0, 10) },
+    if (!completeCoverage && !affected.length) return availabilityResult(this, missing.some((row) => row.queueStatus === 'failed') ? 'technical_error' : 'insufficient_evidence', {
+      finding: `${successfulMeasurements}/${totalListedUrls} unique sitemap URL(s) have a complete GET status measurement; no full pass was inferred.`,
+      facts: { totalListedUrls, testedUrls: rows.length, successfulMeasurements, failedMeasurements: missing.length, coverageRatio, sampleStrategy: discovery?.sampleStrategy || 'historical_planned_units' },
+      evidence: { logicVersion: ROBOTS_SITEMAP_VALIDATION_VERSION, discovery, missing: missing.slice(0, 10) },
       requirements: { requiredFacts: ['initialAndFinalGetStatusForEverySitemapUrl'], missingFacts: ['completeSitemapUrlStatusCoverage'], minimumCoverage: 1, canCollectWithTargetedRun: true }
     });
     return makeResult(this, affected.length ? 'Warning' : 'OK', {
       affectedCount: affected.length,
       sampleUrls: affected.map((row) => row.url),
-      finding: affected.length ? `${affected.length} sitemap URL(s) did not return a direct 200 response.` : 'Crawled sitemap URLs returned a direct 200 response.',
+      finding: affected.length ? `${affected.length} measured sitemap URL(s) did not return a direct initial and final 200 response.` : 'All discovered sitemap URLs with required coverage returned a direct 200 response.',
       recommendation: 'Remove or fix sitemap URLs that do not return 200.',
-      evidence: { logicVersion: HTTP_STATUS_VALIDATION_VERSION, affectedCount: affected.length, displayedSamples: Math.min(affected.length, 10), samples: affected.slice(0, 10), incompleteMeasurements: missing.length, inconclusiveMeasurements: inconclusive.length },
-      requirements: { requiredFacts: ['initialAndFinalGetStatusForEverySitemapUrl'], optionalFacts: [], missingFacts: missing.length ? ['completeSitemapUrlStatusCoverage'] : [], minimumCoverage: 1, canCollectWithTargetedRun: true }
+      facts: { totalListedUrls, testedUrls: rows.length, successfulMeasurements, failedMeasurements: missing.length, coverageRatio, completeCoverage, sampleStrategy: discovery?.sampleStrategy || 'historical_planned_units' },
+      evidence: { logicVersion: ROBOTS_SITEMAP_VALIDATION_VERSION, affectedCount: affected.length, displayedSamples: Math.min(affected.length, 10), samples: affected.slice(0, 10), incompleteMeasurements: missing.length, inconclusiveMeasurements: inconclusive.length, discovery },
+      requirements: { requiredFacts: ['initialAndFinalGetStatusForEverySitemapUrl'], optionalFacts: [], missingFacts: completeCoverage ? [] : ['completeSitemapUrlStatusCoverage'], minimumCoverage: 1, canCollectWithTargetedRun: true },
+      confidence: completeCoverage ? 'high' : 'medium'
     });
   });
 }
@@ -1864,12 +2002,28 @@ function orphanLikeSitemapUrls() {
   return tech('orphan_like_sitemap_urls', 'Crawling & Indexing', 'Orphan-like sitemap URLs without internal links', function run(ctx) {
     const gate = storedFactGate(this, ctx, 'storeAllLinks', 'normalized internal link rows');
     if (gate) return gate;
+    const discovery = parseDiscoveryJson(ctx.run.sitemapDiscoveryJson, null);
+    const planned = Number(discovery?.plannedSitemapUrls ?? 0);
+    const processedSitemapUnits = count(ctx.db, `
+      SELECT COUNT(*) AS count
+      FROM crawl_queue
+      WHERE runId = ? AND (sourceType LIKE 'sitemap%' OR sourceType LIKE 'robots_sitemap%') AND status = 'done'
+    `, [ctx.run.id]);
+    const completeObservation = discovery
+      ? Boolean(discovery.discoveryComplete) && processedSitemapUnits >= planned
+      : false;
+    if (discovery && planned === 0) return availabilityResult(this, 'not_applicable', {
+      finding: 'No internal sitemap URL units were planned, so orphan-like discovery is not applicable.',
+      facts: { plannedSitemapUrls: 0 },
+      evidence: { logicVersion: ROBOTS_SITEMAP_VALIDATION_VERSION, discovery },
+      requirements: { requiredFacts: ['sitemapSourceFacts'], missingFacts: [], minimumCoverage: 1, canCollectWithTargetedRun: false }
+    });
     const rows = all(ctx.db, `
       SELECT p.url
       FROM pages p
       JOIN crawl_queue q ON q.runId = p.runId AND q.normalizedUrl = p.normalizedUrl
       LEFT JOIN page_links l ON l.runId = p.runId AND l.normalizedTargetUrl = p.normalizedUrl AND l.linkType = 'internal'
-      WHERE p.runId = ? AND q.sourceType IN ('sitemap', 'robots_sitemap') AND l.id IS NULL
+      WHERE p.runId = ? AND (q.sourceType LIKE 'sitemap%' OR q.sourceType LIKE 'robots_sitemap%') AND l.id IS NULL
       ORDER BY p.id
       LIMIT 10
     `, [ctx.run.id]);
@@ -1878,15 +2032,26 @@ function orphanLikeSitemapUrls() {
       FROM pages p
       JOIN crawl_queue q ON q.runId = p.runId AND q.normalizedUrl = p.normalizedUrl
       LEFT JOIN page_links l ON l.runId = p.runId AND l.normalizedTargetUrl = p.normalizedUrl AND l.linkType = 'internal'
-      WHERE p.runId = ? AND q.sourceType IN ('sitemap', 'robots_sitemap') AND l.id IS NULL
+      WHERE p.runId = ? AND (q.sourceType LIKE 'sitemap%' OR q.sourceType LIKE 'robots_sitemap%') AND l.id IS NULL
     `, [ctx.run.id]);
+    if (!completeObservation) return availabilityResult(this, 'insufficient_evidence', {
+      finding: 'Internal-link and sitemap coverage is incomplete; orphan-like absence of inlinks was not inferred.',
+      facts: { plannedSitemapUrls: planned, processedSitemapUnits, completeObservation },
+      evidence: { logicVersion: ROBOTS_SITEMAP_VALIDATION_VERSION, discovery, observedCandidates: rows.map((row) => row.url), observedCandidateCount: affectedCount },
+      requirements: { requiredFacts: ['completeSitemapDiscovery', 'completeInternalLinkObservation'], missingFacts: ['completeSitemapAndLinkCoverage'], minimumCoverage: 1, canCollectWithTargetedRun: true }
+    });
     return makeResult(this, affectedCount ? 'Warning' : 'OK', {
       affectedCount,
       sampleUrls: rows.map((row) => row.url),
       finding: affectedCount ? `${affectedCount} sitemap URL(s) have no observed internal inlinks.` : 'Crawled sitemap URLs have observed internal inlinks where detectable.',
       recommendation: 'Review XML-only URLs and add crawlable internal links where they should be discoverable.',
-      evidence: { affectedCount, sampleUrls: rows.map((row) => row.url) },
-      requirements: { requiredFacts: ['sitemapSourceFacts', 'normalizedInternalLinkRows'], optionalFacts: [], missingFacts: [], minimumCoverage: 1, canCollectWithTargetedRun: true }
+      evidence: { logicVersion: ROBOTS_SITEMAP_VALIDATION_VERSION, affectedCount, sampleUrls: rows.map((row) => row.url), discovery },
+      requirements: { requiredFacts: ['sitemapSourceFacts', 'normalizedInternalLinkRows', 'completeSitemapDiscovery'], optionalFacts: [], missingFacts: completeObservation ? [] : ['completeSitemapAndLinkCoverage'], minimumCoverage: 1, canCollectWithTargetedRun: true },
+      findingType: 'opportunity',
+      scoreEligible: false,
+      scoreExclusionReason: 'orphan_like_requires_complete_crawl_and_manual_context',
+      reviewRecommended: affectedCount > 0,
+      confidence: completeObservation ? 'high' : 'medium'
     });
   }, { priority: 'Low' });
 }

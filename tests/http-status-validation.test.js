@@ -222,11 +222,14 @@ test('sitemap URLs use authored initial status and missing measurement does not 
   const fixture = setupRun('https://sitemap.invalid');
   addPage(fixture, '/direct', 200, attempts(200));
   addQueue(fixture, '/direct', 'sitemap', 'done');
+  setSitemapDiscovery(fixture, 1);
   assert.equal(runCheck(fixture, 'tech.sitemap_urls_non_200').status, 'OK');
   addPage(fixture, '/alias', 200, attempts(200), { initialStatusCode: 301, finalUrl: 'https://sitemap.invalid/final', redirectChain: [{ statusCode: 301, url: 'https://sitemap.invalid/alias', location: 'https://sitemap.invalid/final' }] });
   addQueue(fixture, '/alias', 'sitemap', 'done');
+  setSitemapDiscovery(fixture, 2);
   assert.equal(runCheck(fixture, 'tech.sitemap_urls_non_200').affectedCount, 1);
   addQueue(fixture, '/not-measured', 'sitemap', 'failed');
+  setSitemapDiscovery(fixture, 3);
   const partial = runCheck(fixture, 'tech.sitemap_urls_non_200');
   assert.equal(partial.status, 'Warning');
   assert.equal(partial.requirements.missingFacts.includes('completeSitemapUrlStatusCoverage'), true);
@@ -235,9 +238,19 @@ test('sitemap URLs use authored initial status and missing measurement does not 
   const limited = setupRun('https://sitemap-limited.invalid');
   addPage(limited, '/limited', 429, attempts(429, 429));
   addQueue(limited, '/limited', 'sitemap', 'done');
+  setSitemapDiscovery(limited, 1);
   assert.equal(runCheck(limited, 'tech.sitemap_urls_non_200').evaluationState, 'insufficient_evidence');
   limited.db.close();
 });
+
+function setSitemapDiscovery(fixture, uniqueListedUrls) {
+  fixture.db.prepare('UPDATE runs SET sitemapDiscoveryJson=? WHERE id=?').run(JSON.stringify({
+    logicVersion: 'robots-sitemap-validation-v1',
+    discoveryComplete: true,
+    uniqueListedUrls,
+    sampleStrategy: 'all_internal_urls_subject_to_run_limits'
+  }), fixture.runId);
+}
 
 test('HTTP evidence stays aligned across detail, CSV, JSON and HTML report', () => {
   const fixture = setupRun('https://parity.invalid');

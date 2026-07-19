@@ -84,11 +84,41 @@ export async function fetchWithTimeout(url, options = {}) {
     }
 
     const ttfbMs = Date.now() - started;
-    const arrayBuffer = await response.arrayBuffer();
+    let bytes;
+    let observedBytes;
+    let truncated;
+    if (options.abortOnMaxBytes && response.body) {
+      const reader = response.body.getReader();
+      const chunks = [];
+      let retainedBytes = 0;
+      observedBytes = 0;
+      truncated = false;
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        observedBytes += value.byteLength;
+        const retained = Math.max(0, maxBytes - retainedBytes);
+        if (retained > 0) {
+          const chunk = Buffer.from(value).subarray(0, retained);
+          chunks.push(chunk);
+          retainedBytes += chunk.length;
+        }
+        if (observedBytes > maxBytes) {
+          truncated = true;
+          await reader.cancel('maximum response bytes exceeded');
+          break;
+        }
+      }
+      bytes = Buffer.concat(chunks);
+    } else {
+      const arrayBuffer = await response.arrayBuffer();
+      bytes = Buffer.from(arrayBuffer);
+      observedBytes = bytes.length;
+      truncated = bytes.length > maxBytes;
+      bytes = bytes.subarray(0, maxBytes);
+    }
     const loadTimeMs = Date.now() - started;
-    const bytes = Buffer.from(arrayBuffer);
-    const truncated = bytes.length > maxBytes;
-    const body = bytes.subarray(0, maxBytes).toString('utf8');
+    const body = bytes.toString('utf8');
 
     return {
       ok: response.ok,
@@ -99,8 +129,8 @@ export async function fetchWithTimeout(url, options = {}) {
       contentType: response.headers.get('content-type') || '',
       headers: headersToObject(response.headers),
       body,
-      buffer: bytes.subarray(0, maxBytes),
-      sizeBytes: bytes.length,
+      buffer: bytes,
+      sizeBytes: observedBytes,
       truncated,
       ttfbMs,
       loadTimeMs,

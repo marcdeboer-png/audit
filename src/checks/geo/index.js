@@ -12,6 +12,7 @@ import {
 import { blocksTxtFiles, summarizeAiBotRules } from '../../utils/robots.js';
 import { hasArticleSchema } from '../../extractors/pageType.js';
 import { hasVisibleTextProvenance, VISIBLE_TEXT_NORMALIZATION_VERSION } from '../../extractors/visibleText.js';
+import { analyzeRobotsAsset, ROBOTS_SITEMAP_VALIDATION_VERSION } from '../../utils/discoverySemantics.js';
 
 const geo = (id, category, name, run, options = {}) => ({
   id: `geo.${id}`,
@@ -139,6 +140,25 @@ function assetContentGate(check, asset, factName) {
       requirements: { requiredFacts: [factName], missingFacts: [factName], canCollectWithTargetedRun: true }
     });
   }
+  return null;
+}
+
+function robotsPolicyGate(check, asset) {
+  const contentGate = assetContentGate(check, asset, 'robotsTxtContent');
+  if (contentGate) return contentGate;
+  const analysis = analyzeRobotsAsset(asset);
+  if (analysis.state === 'absent') return availabilityResult(check, 'not_applicable', {
+    finding: `${check.name}: robots.txt is absent, so no explicit policy document exists to evaluate.`,
+    facts: { robotsPresent: false, crawlDefault: analysis.crawlDefault },
+    evidence: analysis,
+    requirements: { requiredFacts: ['usableRobotsTxtPolicy'], missingFacts: [], canCollectWithTargetedRun: false, reason: 'robots.txt policy checks are conditional on a usable policy resource.' }
+  });
+  if (!['valid', 'valid_empty'].includes(analysis.state)) return availabilityResult(check, analysis.state === 'technical_error' ? 'technical_error' : 'insufficient_evidence', {
+    finding: `${check.name}: robots.txt policy is unavailable or invalid (${analysis.state}).`,
+    facts: { robotsState: analysis.state },
+    evidence: { ...analysis, logicVersion: ROBOTS_SITEMAP_VALIDATION_VERSION },
+    requirements: { requiredFacts: ['usableRobotsTxtPolicy'], missingFacts: ['usableRobotsTxtPolicy'], canCollectWithTargetedRun: true }
+  });
   return null;
 }
 
@@ -285,14 +305,18 @@ function comparableUrl(value) {
 function robotsBlocksTxt() {
   return geo('robots_blocks_txt_files', 'AI File Access', 'robots.txt blockiert .txt-Dateien', function run(ctx) {
     const robots = getAsset(ctx, 'robots');
-    const gate = assetContentGate(this, robots, 'robotsTxtContent');
+    const gate = robotsPolicyGate(this, robots);
     if (gate) return gate;
     const blocked = blocksTxtFiles(robots?.content || '');
     return makeResult(this, blocked ? 'Warning' : 'OK', {
       affectedCount: blocked ? 1 : 0,
       finding: blocked ? 'robots.txt contains a .txt blocking pattern.' : 'No .txt blocking pattern detected in robots.txt.',
       recommendation: 'Verify that Markdown or llms text files are not unintentionally blocked.',
-      evidence: { robotsUrl: robots?.url, statusCode: robots?.statusCode ?? null, blocksTxtFiles: blocked }
+      evidence: { robotsUrl: robots?.url, statusCode: robots?.statusCode ?? null, blocksTxtFiles: blocked },
+      findingType: blocked ? 'opportunity' : 'inventory',
+      scoreEligible: false,
+      scoreExclusionReason: 'robots_txt_file_policy_requires_business_context',
+      reviewRecommended: blocked
     });
   }, { priority: 'Low' });
 }
@@ -301,7 +325,7 @@ function robotsMentionsBot(botName) {
   const id = `robots_mentions_${botName.toLowerCase().replace(/[^a-z0-9]+/g, '_')}`;
   return geo(id, 'AI Crawler Policy', `robots.txt mentions ${botName}`, function run(ctx) {
     const robots = getAsset(ctx, 'robots');
-    const gate = assetContentGate(this, robots, 'robotsTxtContent');
+    const gate = robotsPolicyGate(this, robots);
     if (gate) return gate;
     const policy = summarizeAiBotRules(robots.url, robots.content).find((item) => item.bot === botName);
     if (!policy?.mentioned) {
@@ -323,6 +347,8 @@ function robotsMentionsBot(botName) {
       requirements: { requiredFacts: ['robotsTxtContent', 'effectiveBotPolicy'], optionalFacts: ['explicitBotPolicy'], missingFacts: [], minimumCoverage: 1, canCollectWithTargetedRun: true },
       findingType: 'info',
       confidence: 'high',
+      scoreEligible: false,
+      scoreExclusionReason: 'explicit_ai_bot_policy_is_optional',
       reportGroupingKey: `ai_crawler_policy.${botName.toLowerCase().replace(/[^a-z0-9]+/g, '_')}`,
       scoreDeduplicationKey: 'ai_crawler_policy.summary'
     });
@@ -332,7 +358,7 @@ function robotsMentionsBot(botName) {
 function aiBotsPolicySummary() {
   return geo('ai_bots_policy_summary', 'AI Crawler Policy', 'AI bots allowed/blocked/unclear from robots.txt', function run(ctx) {
     const robots = getAsset(ctx, 'robots');
-    const gate = assetContentGate(this, robots, 'robotsTxtContent');
+    const gate = robotsPolicyGate(this, robots);
     if (gate) return gate;
     const summary = summarizeAiBotRules(robots.url, robots.content);
     const blocked = summary.filter((item) => item.status === 'blocked');
@@ -368,6 +394,9 @@ function aiBotsPolicySummary() {
       automationCoverage: 'partial',
       interpretation: 'This is a technical policy inventory, not a recommendation to allow or block every AI crawler.',
       limitations: 'Business strategy, licensing and content policy determine whether explicit allow/block rules are desirable.',
+      scoreEligible: false,
+      scoreExclusionReason: 'ai_crawler_policy_requires_business_context',
+      reviewRecommended: blocked.length > 0,
       requirements: { requiredFacts: ['robotsTxtContent', 'effectiveBotPolicy'], optionalFacts: ['businessAiCrawlerPolicy'], missingFacts: [], minimumCoverage: 1, canCollectWithTargetedRun: true },
       scoreDeduplicationKey: 'ai_crawler_policy.summary'
     });

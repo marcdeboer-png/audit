@@ -232,6 +232,7 @@ export function normalizeDomainAssetForStorage(run = {}, asset = {}) {
     ...asset,
     content,
     responseHeadersJson: asset.responseHeadersJson ? truncateText(asset.responseHeadersJson, storage.storageProfile === 'debug' ? 20000 : 4000) : null,
+    metadataJson: asset.metadataJson ? truncateText(asset.metadataJson, storage.storageProfile === 'debug' ? 40000 : 12000) : null,
     storageTruncated: Boolean(asset.content && content !== asset.content)
   };
 }

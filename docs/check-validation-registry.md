@@ -21,9 +21,9 @@ benoetigte Fakten, Datenquellen, Scope, Root-Cause-Familie, Validierungsstatus,
 Evidenzreferenzen, Fehlerhistorie, bekannte Grenzen und eine konkrete
 Vertrauensempfehlung. Wo ein Check seine Requirements in einem leeren Lauf
 nicht zentral deklariert, bleibt `required_facts` bewusst leer und
-`missing_central_requirement_definition` wird ausgewiesen. Das betrifft 45
-Checks und ist selbst eine
-priorisierte Architekturluecke; es wurde keine
+`missing_central_requirement_definition` wird ausgewiesen. Das betrifft nach
+der Robots-/Sitemap-Validierung 42 Checks und ist selbst eine priorisierte
+Architekturluecke; es wurde keine
 Anforderung erfunden.
 
 Validierung wurde nur dann als reale Validierung gewertet, wenn eine
@@ -37,12 +37,12 @@ aggregierten Ergebniszaehlern ohne Domain- oder Inhaltsdaten.
 
 | Status | Aktive Checks |
 | --- | ---: |
-| `cross_domain_validated` | 4 |
-| `validated_with_limits` | 8 |
+| `cross_domain_validated` | 5 |
+| `validated_with_limits` | 10 |
 | `manual_review_required` | 90 |
 | `single_domain_validated` | 16 |
 | `fixture_validated` | 9 |
-| `unvalidated` | 10 |
+| `unvalidated` | 7 |
 | `invalid` | 0 |
 | `deprecated` | 0 |
 
@@ -50,14 +50,14 @@ Alle 137 aktiven Checks besitzen damit einen dokumentierten Status
 (`status_assignment_coverage`: 100 %). Die strengere
 `check_validation_coverage` zaehlt nur `cross_domain_validated`,
 `validated_with_limits` und dauerhaft `manual_review_required` und liegt bei
-74,45 %. Weitere Kennzahlen:
+76,64 %. Weitere Kennzahlen:
 
-- scoregewichtete Validierungsabdeckung: 34,44 %;
+- scoregewichtete Validierungsabdeckung: 37,40 %;
 - Critical-/High-Abdeckung: 33,33 % (es gibt aktuell keine als Critical
   registrierte Default-Severity und neun High-Checks);
-- Primary-Evidence-Abdeckung: 49,21 %;
-- nach historischer Ausfuehrungshaeufigkeit gewichtete Abdeckung: 73,91 %;
-- 45 `score_capable`; `tech.redirect_pages` ist nach der HTTP-Validierung ein
+- Primary-Evidence-Abdeckung: 52,46 %;
+- nach historischer Ausfuehrungshaeufigkeit gewichtete Abdeckung: 76,69 %;
+- 44 `score_capable`; `tech.redirect_pages` ist nach der HTTP-Validierung ein
   scorefreies Inventar und kein eigenstaendiger Defekt.
 
 Die scoregewichtete Registry-Kennzahl ist kein Audit-Score. Sie verwendet nur
@@ -96,7 +96,6 @@ Die hoechsten offenen Risiken sind die verbleibenden High-Checks:
   einer realen Domain unabhaengig validiert.
 
 Danach folgen die unvalidierten Medium-Checks
-`tech.robots_txt_present`, `tech.sitemap_present`,
 `tech.viewport_missing`, `template.high_tbt`,
 `template.js_required_content` und `template.low_lighthouse_seo` sowie der
 verbleibenden unvalidierten Checks. Die HTTP-Familie ist in
@@ -187,3 +186,29 @@ messbar, die Fehleraussage benoetigt aber Konsolidierungs-, Syndication- oder
 Migrationskontext. `tech.canonical_target_non_200` bleibt konservativ
 `fixture_validated`, bis ein realer positiver Zielstatusfall unabhaengig
 beobachtet wurde.
+
+## Robots and sitemap validation group
+
+Die Robots-/Sitemap-Gruppe umfasst `tech.robots_txt_present`,
+`tech.sitemap_present`, `tech.sitemap_in_robots`,
+`tech.sitemap_urls_non_200`, `tech.orphan_like_sitemap_urls` sowie die
+eng verwandten GEO-Policy-Inventare. Methodik, acht reale Architekturen,
+Run-77-Rekonstruktion, Korrekturen und Grenzen stehen in
+[`robots-sitemap-check-validation-v1.md`](robots-sitemap-check-validation-v1.md).
+
+`tech.sitemap_in_robots` ist als rein technische, scorefreie
+Discovery-Aussage `cross_domain_validated`. `tech.robots_txt_present` und
+`tech.sitemap_present` sind `validated_with_limits`: reale gueltige und
+Abwesenheitsfaelle sind domainuebergreifend belegt, waehrend organische
+200-HTML- beziehungsweise defekte deklarierte Positivfaelle noch fehlen.
+`tech.sitemap_urls_non_200` bleibt ohne organischen realen Redirect-/4xx-/5xx-
+Positivfall konservativ `fixture_validated`. Orphan- und Bot-Policy-Aussagen
+bleiben wegen Architektur- beziehungsweise Geschaeftskontext
+`manual_review_required`.
+
+Die fruehere Run-77-Anforderung expliziter Bot-Einzelgruppen war falsch: Eine
+wirksame Wildcard-Regel reicht technisch aus. Fehlende Einzelgruppen erzeugen
+heute kein Finding. robots.txt-Abwesenheit ist ebenfalls keine Crawlblockade,
+und optionale Sitemap-Deklarationen sind scorefrei. Bot-Einzelinventare und
+die Frage, ob Textressourcen absichtlich blockiert werden, bleiben ebenfalls
+scorefrei, weil ihre Bewertung eine Geschaefts- und Contentpolitik voraussetzt.

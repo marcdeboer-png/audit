@@ -1,4 +1,5 @@
 import robotsParser from 'robots-parser';
+import { extractValidSitemapUrls } from './discoverySemantics.js';
 
 const AI_BOTS = [
   'GPTBot',
@@ -21,12 +22,8 @@ export function parseRobots(url, content) {
   }
 }
 
-export function extractSitemapUrls(content) {
-  if (!content) return [];
-  return String(content)
-    .split(/\r?\n/)
-    .map((line) => line.match(/^\s*Sitemap\s*:\s*(.+)\s*$/i)?.[1]?.trim())
-    .filter(Boolean);
+export function extractSitemapUrls(content, robotsUrl = null) {
+  return extractValidSitemapUrls(content, robotsUrl);
 }
 
 export function robotsMentions(content, botName) {

@@ -1,10 +1,15 @@
-import zlib from 'node:zlib';
 import { urlPatternForPage } from '../analysis/templateClusterer.js';
 import { insertDomainAsset, logRun, updateRun } from '../db/repositories.js';
 import { detectPageType } from '../extractors/pageType.js';
 import { totalCount } from '../queue/sqliteQueue.js';
 import { fetchWithTimeout } from '../utils/http.js';
-import { extractSitemapUrls } from '../utils/robots.js';
+import {
+  analyzeRobotsAsset,
+  extractSitemapDirectives,
+  extractValidSitemapUrls,
+  parseSitemapDocument,
+  ROBOTS_SITEMAP_VALIDATION_VERSION
+} from '../utils/discoverySemantics.js';
 import { isInternalUrl, isLikelyHtmlPage, normalizeUrl } from '../utils/url.js';
 import { enqueueBatchWithPolicy, enqueueUrlWithPolicy } from './crawlPolicy.js';
 import { crawlerDefaults } from './defaults.js';
@@ -12,7 +17,9 @@ import { crawlerDefaults } from './defaults.js';
 export async function discoverDomainAssets(db, run, finalStartUrl, robotsContent = '') {
   const origin = new URL(finalStartUrl).origin;
   const defaultSitemaps = new Set([`${origin}/sitemap.xml`]);
-  const robotsSitemaps = new Set(extractSitemapUrls(robotsContent));
+  const robotsUrl = `${origin}/robots.txt`;
+  const robotsDirectives = extractSitemapDirectives(robotsContent, robotsUrl);
+  const robotsSitemaps = new Set(extractValidSitemapUrls(robotsContent, robotsUrl));
 
   const fetchOptions = { userAgent: run.userAgent };
   await fetchTextAsset(db, run.id, 'llms', `${origin}/llms.txt`, run.requestTimeoutMs, fetchOptions);
@@ -23,7 +30,23 @@ export async function discoverDomainAssets(db, run, finalStartUrl, robotsContent
 
   const state = {
     seenSitemaps: new Set(),
+    seenListedUrls: new Set(),
+    filesAttempted: 0,
     filesProcessed: 0,
+    validFiles: 0,
+    invalidFiles: 0,
+    invalidRequiredFiles: 0,
+    failedFiles: 0,
+    defaultCandidateFailures: 0,
+    childReferences: 0,
+    duplicateSitemapReferences: 0,
+    cyclesDetected: 0,
+    totalListedUrls: 0,
+    uniqueListedUrls: 0,
+    duplicateListedUrls: 0,
+    externalListedUrls: 0,
+    invalidListedUrls: 0,
+    limitReasons: new Set(),
     urlsDiscovered: 0,
     urlsQueued: 0,
     maxSitemaps: Number(run.maxSitemaps || crawlerDefaults.maxSitemaps),
@@ -33,18 +56,21 @@ export async function discoverDomainAssets(db, run, finalStartUrl, robotsContent
     templateSampleUrlsPerPattern: Number(run.sampleUrlsPerTemplate || crawlerDefaults.sampleUrlsPerTemplate)
   };
 
-  for (const sitemapUrl of defaultSitemaps) {
-    await processSitemap(db, run, sitemapUrl, finalStartUrl, state, 0, 'sitemap');
-  }
   for (const sitemapUrl of robotsSitemaps) {
-    await processSitemap(db, run, sitemapUrl, finalStartUrl, state, 0, 'robots_sitemap');
+    await processSitemap(db, run, sitemapUrl, finalStartUrl, state, 0, 'robots_sitemap', new Set());
   }
+  for (const sitemapUrl of defaultSitemaps) {
+    await processSitemap(db, run, sitemapUrl, finalStartUrl, state, 0, 'sitemap', new Set());
+  }
+  const discovery = sitemapDiscoverySummary(state, robotsDirectives);
   updateRun(db, run.id, {
     currentSitemapUrl: null,
     sitemapUrlsDiscovered: state.urlsDiscovered,
     sitemapUrlsQueued: state.urlsQueued,
-    sitemapFilesProcessed: state.filesProcessed
+    sitemapFilesProcessed: state.filesProcessed,
+    sitemapDiscoveryJson: JSON.stringify(discovery)
   });
+  return discovery;
 }
 
 export async function fetchTextAsset(db, runId, type, url, timeoutMs = 10000, options = {}) {
@@ -56,7 +82,24 @@ export async function fetchTextAsset(db, runId, type, url, timeoutMs = 10000, op
       url,
       statusCode: response.statusCode,
       content: response.body.slice(0, 1024 * 1024),
-      responseHeadersJson: JSON.stringify(response.headers).slice(0, 20000)
+      responseHeadersJson: JSON.stringify(response.headers).slice(0, 20000),
+      metadataJson: JSON.stringify({
+        logicVersion: ROBOTS_SITEMAP_VALIDATION_VERSION,
+        initialStatusCode: response.initialStatusCode,
+        finalStatusCode: response.statusCode,
+        finalUrl: response.url,
+        redirectChain: response.redirectChain,
+        contentType: response.contentType,
+        sizeBytes: response.sizeBytes,
+        truncated: response.truncated,
+        robots: type === 'robots' ? analyzeRobotsAsset({
+          url,
+          statusCode: response.statusCode,
+          content: response.body,
+          responseHeadersJson: JSON.stringify(response.headers),
+          metadataJson: JSON.stringify({ initialStatusCode: response.initialStatusCode, finalStatusCode: response.statusCode, finalUrl: response.url, redirectChain: response.redirectChain, contentType: response.contentType })
+        }) : undefined
+      })
     });
     return response;
   } catch (error) {
@@ -66,16 +109,35 @@ export async function fetchTextAsset(db, runId, type, url, timeoutMs = 10000, op
       url,
       statusCode: null,
       content: '',
-      responseHeadersJson: JSON.stringify({ error: error.message })
+      responseHeadersJson: JSON.stringify({ error: error.message }),
+      metadataJson: JSON.stringify({ logicVersion: ROBOTS_SITEMAP_VALIDATION_VERSION, fetchError: error.message })
     });
     return null;
   }
 }
 
-async function processSitemap(db, run, sitemapUrl, finalStartUrl, state, depth, queueSourceType) {
+async function processSitemap(db, run, sitemapUrl, finalStartUrl, state, depth, queueSourceType, ancestors) {
   const normalizedSitemapUrl = normalizeUrl(sitemapUrl);
-  if (!normalizedSitemapUrl || state.seenSitemaps.has(normalizedSitemapUrl) || depth > 4) return;
-  if (state.filesProcessed >= state.maxSitemaps) {
+  if (!normalizedSitemapUrl) {
+    state.invalidFiles += 1;
+    if (queueSourceType === 'robots_sitemap' || depth > 0) state.invalidRequiredFiles += 1;
+    return;
+  }
+  if (ancestors.has(normalizedSitemapUrl)) {
+    state.cyclesDetected += 1;
+    state.limitReasons.add('sitemap_index_cycle');
+    return;
+  }
+  if (state.seenSitemaps.has(normalizedSitemapUrl)) {
+    state.duplicateSitemapReferences += 1;
+    return;
+  }
+  if (depth > 4) {
+    state.limitReasons.add('maximum_recursion_depth');
+    return;
+  }
+  if (state.filesAttempted >= state.maxSitemaps) {
+    state.limitReasons.add('maximum_sitemap_files');
     logRun(db, run.id, 'warning', 'Sitemap file limit reached', {
       maxSitemaps: state.maxSitemaps,
       skippedUrl: normalizedSitemapUrl
@@ -83,19 +145,29 @@ async function processSitemap(db, run, sitemapUrl, finalStartUrl, state, depth, 
     return;
   }
   state.seenSitemaps.add(normalizedSitemapUrl);
+  state.filesAttempted += 1;
   updateRun(db, run.id, { currentSitemapUrl: normalizedSitemapUrl });
 
   let response;
   try {
-    response = await fetchWithTimeout(normalizedSitemapUrl, { timeoutMs: run.requestTimeoutMs || 15000, maxBytes: 50 * 1024 * 1024, userAgent: run.userAgent });
+    response = await fetchWithTimeout(normalizedSitemapUrl, { timeoutMs: run.requestTimeoutMs || 15000, maxBytes: 50 * 1024 * 1024, abortOnMaxBytes: true, userAgent: run.userAgent });
   } catch (error) {
+    state.failedFiles += 1;
+    if (queueSourceType === 'sitemap' && depth === 0) state.defaultCandidateFailures += 1;
     insertDomainAsset(db, {
       runId: run.id,
       type: 'sitemap',
       url: normalizedSitemapUrl,
       statusCode: null,
       content: '',
-      responseHeadersJson: JSON.stringify({ error: error.message })
+      responseHeadersJson: JSON.stringify({ error: error.message }),
+      metadataJson: JSON.stringify({
+        logicVersion: ROBOTS_SITEMAP_VALIDATION_VERSION,
+        sourceType: queueSourceType,
+        depth,
+        fetchError: error.message,
+        sitemap: { valid: false, documentType: 'unavailable', parseError: 'fetch_failed' }
+      })
     });
     logRun(db, run.id, 'warning', 'Sitemap fetch failed', { url: normalizedSitemapUrl, error: error.message });
     return;
@@ -106,25 +178,68 @@ async function processSitemap(db, run, sitemapUrl, finalStartUrl, state, depth, 
     currentSitemapUrl: normalizedSitemapUrl
   });
 
-  const xml = sitemapBody(response, normalizedSitemapUrl);
+  const parsed = response.truncated
+    ? { valid: false, documentType: 'invalid', parseError: 'download_size_limit_exceeded', locationCount: 0, uniqueLocationCount: 0, duplicateLocationCount: 0, compressedBytes: response.sizeBytes, uncompressedBytes: null, protocolLimitExceeded: false }
+    : parseSitemapDocument(response.buffer || response.body || '', { url: normalizedSitemapUrl });
+  const requiredSource = queueSourceType === 'robots_sitemap' || depth > 0;
+  if (response.statusCode < 200 || response.statusCode >= 300) {
+    if (requiredSource) state.failedFiles += 1;
+    else state.defaultCandidateFailures += 1;
+  } else if (!parsed.valid) {
+    state.invalidFiles += 1;
+    if (requiredSource) state.invalidRequiredFiles += 1;
+  } else {
+    state.validFiles += 1;
+  }
 
   insertDomainAsset(db, {
     runId: run.id,
     type: 'sitemap',
     url: normalizedSitemapUrl,
     statusCode: response.statusCode,
-    content: xml.slice(0, 1024 * 1024),
-    responseHeadersJson: JSON.stringify(response.headers).slice(0, 20000)
+    content: response.body.slice(0, 1024 * 1024),
+    responseHeadersJson: JSON.stringify(response.headers).slice(0, 20000),
+    metadataJson: JSON.stringify({
+      logicVersion: ROBOTS_SITEMAP_VALIDATION_VERSION,
+      sourceType: queueSourceType,
+      depth,
+      initialStatusCode: response.initialStatusCode,
+      finalStatusCode: response.statusCode,
+      finalUrl: response.url,
+      redirectChain: response.redirectChain,
+      contentType: response.contentType,
+      sizeBytes: response.sizeBytes,
+      truncated: response.truncated,
+      sitemap: {
+        valid: parsed.valid,
+        documentType: parsed.documentType,
+        parseError: parsed.parseError,
+        locationCount: parsed.locationCount || 0,
+        uniqueLocationCount: parsed.uniqueLocationCount || 0,
+        duplicateLocationCount: parsed.duplicateLocationCount || 0,
+        compressedBytes: parsed.compressedBytes,
+        uncompressedBytes: parsed.uncompressedBytes,
+        protocolLimitExceeded: Boolean(parsed.protocolLimitExceeded)
+      }
+    })
   });
 
-  if (response.statusCode < 200 || response.statusCode >= 300 || !xml) return;
+  if (response.statusCode < 200 || response.statusCode >= 300 || !parsed.valid) return;
+  if (parsed.protocolLimitExceeded) state.limitReasons.add('sitemap_protocol_url_limit_exceeded');
 
-  if (isSitemapIndex(xml)) {
+  if (parsed.documentType === 'sitemapindex') {
+    state.duplicateSitemapReferences += parsed.duplicateLocationCount || 0;
     let childCount = 0;
-    for (const childUrl of extractLocValues(xml)) {
+    const nextAncestors = new Set(ancestors);
+    nextAncestors.add(normalizedSitemapUrl);
+    for (const childUrl of parsed.uniqueLocations) {
+      if (state.filesAttempted >= state.maxSitemaps) {
+        state.limitReasons.add('maximum_sitemap_files');
+        break;
+      }
       childCount += 1;
-      await processSitemap(db, run, childUrl, finalStartUrl, state, depth + 1, queueSourceType);
-      if (state.filesProcessed >= state.maxSitemaps) break;
+      state.childReferences += 1;
+      await processSitemap(db, run, childUrl, finalStartUrl, state, depth + 1, queueSourceType, nextAncestors);
     }
     logRun(db, run.id, 'info', 'Sitemap index processed', {
       sitemapUrl: normalizedSitemapUrl,
@@ -134,10 +249,12 @@ async function processSitemap(db, run, sitemapUrl, finalStartUrl, state, depth, 
     return;
   }
 
-  await processUrlSet(db, run, normalizedSitemapUrl, finalStartUrl, state, queueSourceType, xml);
+  state.totalListedUrls += parsed.duplicateLocationCount || 0;
+  state.duplicateListedUrls += parsed.duplicateLocationCount || 0;
+  await processUrlSet(db, run, normalizedSitemapUrl, finalStartUrl, state, queueSourceType, parsed.uniqueLocations);
 }
 
-async function processUrlSet(db, run, normalizedSitemapUrl, finalStartUrl, state, queueSourceType, xml) {
+async function processUrlSet(db, run, normalizedSitemapUrl, finalStartUrl, state, queueSourceType, locations) {
   let discoveredInFile = 0;
   let queuedInFile = 0;
   let batch = [];
@@ -184,13 +301,39 @@ async function processUrlSet(db, run, normalizedSitemapUrl, finalStartUrl, state
     return result.inserted;
   };
 
-  for (const url of extractLocValues(xml)) {
-    if (!isInternalUrl(url, finalStartUrl)) continue;
-    if (state.maxSitemapUrls !== null && state.urlsDiscovered >= state.maxSitemapUrls) break;
-
+  for (const url of locations) {
+    state.totalListedUrls += 1;
+    let parsedUrl;
+    try { parsedUrl = new URL(url); } catch {
+      state.invalidListedUrls += 1;
+      continue;
+    }
+    if (!['http:', 'https:'].includes(parsedUrl.protocol)) {
+      state.invalidListedUrls += 1;
+      continue;
+    }
+    if (!isInternalUrl(url, finalStartUrl)) {
+      state.externalListedUrls += 1;
+      continue;
+    }
+    const normalizedListedUrl = normalizeUrl(url);
+    if (!normalizedListedUrl) {
+      state.invalidListedUrls += 1;
+      continue;
+    }
+    if (state.seenListedUrls.has(normalizedListedUrl)) {
+      state.duplicateListedUrls += 1;
+      continue;
+    }
+    state.seenListedUrls.add(normalizedListedUrl);
+    state.uniqueListedUrls += 1;
+    if (state.maxSitemapUrls !== null && state.urlsDiscovered >= state.maxSitemapUrls) {
+      state.limitReasons.add('maximum_sitemap_urls');
+      continue;
+    }
     state.urlsDiscovered += 1;
     discoveredInFile += 1;
-    batch.push(url);
+    batch.push(normalizedListedUrl);
 
     if (batch.length >= state.sitemapBatchSize) flush();
   }
@@ -253,39 +396,43 @@ function queueTemplateSampleUrl(db, run, state, url, sourceUrl, sourceType) {
 }
 
 export function isSitemapIndex(xml) {
-  return /<\s*(?:[\w.-]+:)?sitemapindex[\s>]/i.test(xml);
+  return parseSitemapDocument(xml).documentType === 'sitemapindex';
 }
 
 export function extractLocValues(xml) {
-  const output = [];
-  const pattern = /<\s*(?:[\w.-]+:)?loc\s*>\s*([\s\S]*?)\s*<\s*\/\s*(?:[\w.-]+:)?loc\s*>/gi;
-  let match;
-  while ((match = pattern.exec(xml))) {
-    const value = decodeXmlText(match[1].trim());
-    if (value) output.push(value);
-  }
-  return output;
+  return parseSitemapDocument(xml).locations || [];
 }
 
-function sitemapBody(response, url) {
-  const headers = response.headers || {};
-  const contentType = headers['content-type'] || response.contentType || '';
-  const isGzip = /\.gz($|\?)/i.test(url) || /gzip|x-gzip/i.test(contentType);
-  if (!isGzip) return response.body || '';
-
-  try {
-    return zlib.gunzipSync(response.buffer || Buffer.from(response.body || '', 'binary')).toString('utf8');
-  } catch {
-    return response.body || '';
-  }
-}
-
-function decodeXmlText(value) {
-  return value
-    .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1')
-    .replaceAll('&amp;', '&')
-    .replaceAll('&lt;', '<')
-    .replaceAll('&gt;', '>')
-    .replaceAll('&quot;', '"')
-    .replaceAll('&apos;', "'");
+function sitemapDiscoverySummary(state, robotsDirectives) {
+  const validRobotsDirectives = robotsDirectives.filter((item) => item.valid).length;
+  const invalidRobotsDirectives = robotsDirectives.length - validRobotsDirectives;
+  const limitReasons = [...state.limitReasons].sort();
+  return {
+    logicVersion: ROBOTS_SITEMAP_VALIDATION_VERSION,
+    discoveryComplete: limitReasons.length === 0 && state.failedFiles === 0 && state.invalidRequiredFiles === 0 && state.cyclesDetected === 0,
+    filesAttempted: state.filesAttempted,
+    filesProcessed: state.filesProcessed,
+    validFiles: state.validFiles,
+    invalidFiles: state.invalidFiles,
+    invalidRequiredFiles: state.invalidRequiredFiles,
+    failedFiles: state.failedFiles,
+    defaultCandidateFailures: state.defaultCandidateFailures,
+    childReferences: state.childReferences,
+    duplicateSitemapReferences: state.duplicateSitemapReferences,
+    cyclesDetected: state.cyclesDetected,
+    robotsSitemapDirectives: robotsDirectives.length,
+    validRobotsSitemapDirectives: validRobotsDirectives,
+    invalidRobotsSitemapDirectives: invalidRobotsDirectives,
+    totalListedUrls: state.totalListedUrls,
+    uniqueListedUrls: state.uniqueListedUrls,
+    duplicateListedUrls: state.duplicateListedUrls,
+    externalListedUrls: state.externalListedUrls,
+    invalidListedUrls: state.invalidListedUrls,
+    plannedSitemapUrls: state.urlsDiscovered,
+    queuedSitemapUrls: state.urlsQueued,
+    limitReasons,
+    sampleStrategy: state.maxSitemapUrls === null ? 'all_internal_urls_subject_to_run_limits' : 'deterministic_document_order_limit',
+    maxSitemaps: state.maxSitemaps,
+    maxSitemapUrls: state.maxSitemapUrls
+  };
 }

@@ -159,6 +159,7 @@ export function generateReport(db, runId) {
     worstSampleUrls: safeParse(row.worstSampleUrlsJson, [])
   }));
   const robots = db.prepare("SELECT * FROM domain_assets WHERE runId = ? AND type = 'robots' ORDER BY id DESC LIMIT 1").get(runId);
+  const sitemapDiscovery = safeParse(run.sitemapDiscoveryJson, null);
   const llms = db.prepare("SELECT * FROM domain_assets WHERE runId = ? AND type IN ('llms', 'llms_full') ORDER BY type").all(runId);
   const logs = getLatestLogs(db, runId, 50);
   const health = getRunHealth(db, runId);
@@ -252,6 +253,7 @@ export function generateReport(db, runId) {
     enterpriseSummary,
     health,
     robots,
+    sitemapDiscovery,
     llms,
     logs
   }), 'utf8');
@@ -299,6 +301,7 @@ function renderHtml(data) {
     enterpriseSummary,
     health,
     robots,
+    sitemapDiscovery,
     llms,
     logs
   } = data;
@@ -504,8 +507,13 @@ function renderHtml(data) {
       sitemapFilesProcessed: run.sitemapFilesProcessed || 0,
       sitemapUrlsDiscovered: run.sitemapUrlsDiscovered || 0,
       sitemapUrlsQueued: run.sitemapUrlsQueued || 0,
-      currentSitemapUrl: run.currentSitemapUrl || ''
-    }], ['sitemapFilesProcessed', 'sitemapUrlsDiscovered', 'sitemapUrlsQueued', 'currentSitemapUrl'])}
+      currentSitemapUrl: run.currentSitemapUrl || '',
+      discoveryComplete: sitemapDiscovery?.discoveryComplete ?? 'historical / unknown',
+      uniqueListedUrls: sitemapDiscovery?.uniqueListedUrls ?? 'historical / unknown',
+      duplicateListedUrls: sitemapDiscovery?.duplicateListedUrls ?? 'historical / unknown',
+      failedFiles: sitemapDiscovery?.failedFiles ?? 'historical / unknown',
+      limitReasons: sitemapDiscovery?.limitReasons || []
+    }], ['sitemapFilesProcessed', 'sitemapUrlsDiscovered', 'sitemapUrlsQueued', 'discoveryComplete', 'uniqueListedUrls', 'duplicateListedUrls', 'failedFiles', 'limitReasons', 'currentSitemapUrl'])}
     <h3>Template Sampling / Rendering / Lighthouse Status</h3>
     <p class="muted">Template sampling measures representative sample URLs from URL clusters. It is not a full measurement of every crawled URL, and Lighthouse results are local lab data rather than CrUX/field data.</p>
     ${simpleTable([samplingSummary || {}], ['enableTemplateSampling', 'enablePlaywrightSampling', 'enableLighthouseSampling', 'renderingStatus', 'lighthouseStatus', 'samplesTotal', 'samplesProcessed', 'sampleRows', 'playwrightSuccessCount', 'playwrightIssueCount', 'lighthouseSuccessCount', 'lighthouseIssueCount', 'sampleErrorCount'])}

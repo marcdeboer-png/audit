@@ -16,7 +16,7 @@ test('every active audit check has one valid registry entry', () => {
   const summary = summarizeCheckValidationRegistry(registry);
   assert.equal(summary.activeChecks, activeChecks.length);
   assert.equal(summary.totalChecks, registry.checks.length);
-  assert.equal(summary.statusCounts.cross_domain_validated, 4);
+  assert.equal(summary.statusCounts.cross_domain_validated, 5);
 });
 
 test('registry validation fails closed for a new unregistered check', () => {
@@ -99,4 +99,20 @@ test('HTTP family records retry, host and inventory trust limits conservatively'
   assert.equal(byId.get('tech.redirect_pages').validation_status, 'cross_domain_validated');
   assert.equal(byId.get('tech.redirect_pages').score_effect, 'score_free');
   assert.equal(byId.get('tech.internal_links_to_4xx_5xx').validation_status, 'single_domain_validated');
+});
+
+test('robots and sitemap family records XML, coverage and policy limits conservatively', () => {
+  const registry = loadCheckValidationRegistry();
+  const byId = new Map(registry.checks.map((entry) => [entry.check_id, entry]));
+  assert.equal(byId.get('tech.robots_txt_present').validation_status, 'validated_with_limits');
+  assert.equal(byId.get('tech.sitemap_present').validation_status, 'validated_with_limits');
+  assert.equal(byId.get('tech.sitemap_in_robots').validation_status, 'cross_domain_validated');
+  assert.equal(byId.get('tech.sitemap_in_robots').score_effect, 'score_free');
+  assert.equal(byId.get('tech.sitemap_urls_non_200').validation_status, 'fixture_validated');
+  assert.match(
+    byId.get('tech.sitemap_urls_non_200').validation_gap.missing_evidence.join(' '),
+    /organic real positive/
+  );
+  assert.equal(byId.get('tech.orphan_like_sitemap_urls').validation_status, 'manual_review_required');
+  assert.equal(byId.get('tech.orphan_like_sitemap_urls').score_effect, 'score_free');
 });
