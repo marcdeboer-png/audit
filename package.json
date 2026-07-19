@@ -9,6 +9,7 @@
     "start": "node src/server/index.js",
     "audit": "node src/cli/audit.js",
     "benchmark:render": "node scripts/benchmark-rendering.js",
+    "validate:check-registry": "node scripts/validate-check-registry.js",
     "validate:audit": "node scripts/validate-audit.js",
     "validate:fressnapf": "node scripts/prepare-fressnapf-reference.js",
     "validate:fressnapf:sf": "node scripts/prepare-fressnapf-sf-import.js",
