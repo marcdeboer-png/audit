@@ -3,16 +3,21 @@ import { launchBrowser, renderPage } from '../extractors/renderExtractor.js';
 import { buildEffectiveDocumentState, RENDER_PROVENANCE_VERSION, SETTLING_POLICY_VERSION } from '../extractors/documentState.js';
 import { isInternalUrl } from '../utils/url.js';
 import { logRun } from '../db/repositories.js';
-import { buildDeterministicRenderPlan, classifyRenderNeed, RENDER_NEEDS } from './renderPlanner.js';
+import { activeRenderCheckIdsForAuditType, buildDeterministicRenderPlan, classifierForRenderPlanningVersion, RENDER_NEEDS } from './renderPlanner.js';
 import { serializedRenderProvenanceBytes } from '../runtime/renderMetrics.js';
 
 export async function runDeterministicRenderPlan(db, run, runtimeMetrics = null, dependencies = {}) {
   const launchBrowserFn = dependencies.launchBrowserFn || launchBrowser;
   const renderPageFn = dependencies.renderPageFn || renderPage;
   if (!run.usePlaywright || run.playwrightMode !== 'gate') return { skipped: true, reason: 'strategy_not_gate' };
+  const classifyRenderNeed = classifierForRenderPlanningVersion(run.renderPlanningVersion);
   const pages = loadEligiblePages(db, run.id).map((page) => ({
     ...page,
-    classification: classifyRenderNeed(page, { scriptCount: page.scriptCount, hydrationBytes: page.hydrationBytes })
+    classification: classifyRenderNeed(page, {
+      scriptCount: page.scriptCount,
+      hydrationBytes: page.hydrationBytes,
+      activeCheckIds: activeRenderCheckIdsForAuditType(run.auditType)
+    })
   }));
   const observed = priorRenderObservations(db, run.id);
   const plan = buildDeterministicRenderPlan(pages, {
@@ -124,10 +129,11 @@ export async function runDeterministicRenderPlan(db, run, runtimeMetrics = null,
 
 function loadEligiblePages(db, runId) {
   return db.prepare(`
-    SELECT p.*,
+    SELECT p.*, tc.clusterKey AS templateClusterKey,
       COALESCE((SELECT COUNT(*) FROM resources r WHERE r.runId=p.runId AND r.pageUrl=p.finalUrl AND r.resourceType='script'), 0) AS scriptCount,
       0 AS hydrationBytes
     FROM pages p
+    LEFT JOIN template_clusters tc ON tc.runId=p.runId AND tc.id=p.templateClusterId
     WHERE p.runId=? AND p.statusCode BETWEEN 200 AND 299
       AND (LOWER(COALESCE(p.contentType,'')) LIKE 'text/html%' OR LOWER(COALESCE(p.contentType,'')) LIKE 'application/xhtml+xml%')
     ORDER BY p.url
@@ -150,6 +156,11 @@ function metricForPlanRow(row, run) {
     renderDecision: row.executionDecision,
     reason: { summary: row.classification.reason, priorityKey: row.priorityKey },
     renderSignals: row.classification.signals,
+    renderNegativeSignals: row.classification.negativeSignals,
+    renderSignalContributions: row.classification.signalContributions,
+    renderRecommendationScore: row.classification.recommendationScore,
+    renderRecommendationThreshold: row.classification.recommendationThreshold,
+    renderCheckRequirements: row.classification.checkRequirements,
     renderUnmetPrerequisites: row.classification.unmetPrerequisites,
     renderConfidence: row.classification.confidence,
     requestedCheckFamilies: row.classification.requestedCheckFamilies,

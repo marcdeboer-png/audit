@@ -15,6 +15,7 @@ import { evaluateRuntimeRenderBudget, runDeterministicRenderPlan } from '../src/
 import {
   buildDeterministicRenderPlan,
   classifyRenderNeed,
+  classifyRenderNeedV1,
   estimateRenderCost,
   RENDER_NEEDS
 } from '../src/rendering/renderPlanner.js';
@@ -30,8 +31,11 @@ test('render gate distinguishes complete raw documents from app shells without f
   assert.equal(classifyRenderNeed(pageFixture({ words: 4, h1: [], links: [] }), { scriptCount: 1 }).decision, RENDER_NEEDS.required, 'few scripts do not conceal an app shell');
   assert.equal(classifyRenderNeed(pageFixture({ words: 4, h1: [], links: [], pageType: 'other' }), { scriptCount: 1 }).decision, RENDER_NEEDS.required, 'an unknown app shell combines missing content with executable structure');
   assert.equal(classifyRenderNeed(pageFixture({ words: 20, h1: ['Privacy'], pageType: 'legal' }), { scriptCount: 0 }).decision, RENDER_NEEDS.notRequired, 'concise utility pages are not treated as incomplete');
-  assert.equal(classifyRenderNeed(pageFixture({ words: 180, h1: ['Complete'], metadata: { metaDescription: null } })).decision, RENDER_NEEDS.recommended, 'late optional metadata remains a recommendation');
-  assert.equal(classifyRenderNeed(complete, { scriptCount: 50 }).signals.includes('substantial_script_or_hydration_structure'), true);
+  const optionalMetadata = pageFixture({ words: 180, h1: ['Complete'], metadata: { metaDescription: null } });
+  assert.equal(classifyRenderNeed(optionalMetadata).decision, RENDER_NEEDS.notRequired, 'late optional metadata cannot force a browser run');
+  assert.equal(classifyRenderNeedV1(optionalMetadata).decision, RENDER_NEEDS.recommended, 'the benchmark baseline remains reproducible');
+  assert.equal(classifyRenderNeed(complete, { scriptCount: 50 }).negativeSignals.includes('substantial_raw_content_present'), false);
+  assert.equal(classifyRenderNeed(complete, { scriptCount: 50 }).negativeSignals.includes('substantial_main_content'), true);
 });
 
 test('render plans are deterministic, template-stratified and unaffected by URL order', () => {
@@ -239,7 +243,16 @@ test('runtime metrics remain compatible with historical runs and are present in 
   const historical = makeRun({ metricsMode: 'off' });
   historical.db.prepare('UPDATE runs SET renderPlanningVersion=NULL, runtimeMetricsVersion=NULL WHERE id=?').run(historical.run.id);
   const tracker = createRuntimeMetricsTracker(fixture.db, fixture.run);
-  tracker.recordUrl({ url: fixture.run.inputDomain, renderDecision: RENDER_NEEDS.notRequired, reason: { summary: 'complete raw' } });
+  tracker.recordUrl({
+    url: fixture.run.inputDomain,
+    renderDecision: RENDER_NEEDS.notRequired,
+    reason: { summary: 'complete raw' },
+    renderNegativeSignals: ['substantial_main_content'],
+    renderSignalContributions: [{ signal: 'substantial_main_content', appliedContribution: -4 }],
+    renderRecommendationScore: -4,
+    renderRecommendationThreshold: 4,
+    renderCheckRequirements: [{ checkId: 'tech.js_dependent_content', requirement: 'render_optional' }]
+  });
   tracker.finish();
   const csv = collectCsvExport(fixture.db, fixture.run.id, 'render-runtime');
   assert.match(csv, /renderDecision/);
@@ -248,6 +261,10 @@ test('runtime metrics remain compatible with historical runs and are present in 
   assert.equal(json.runtimeMetrics.metricsMode, 'basic');
   assert.equal(json.runtimeMetrics.summary.metricsVersion, 'render-runtime-metrics-v1');
   assert.equal(json.renderDecisions.length, 1);
+  assert.equal(json.renderDecisions[0].renderRecommendationScore, -4);
+  assert.equal(json.renderDecisions[0].renderSignalContributions[0].signal, 'substantial_main_content');
+  assert.match(csv, /renderRecommendationScore/);
+  assert.match(csv, /substantial_main_content/);
   const report = fs.readFileSync(generateReport(fixture.db, fixture.run.id), 'utf8');
   assert.match(report, /Browser Runtime and Resource Metrics/);
   const oldReport = fs.readFileSync(generateReport(historical.db, historical.run.id), 'utf8');
@@ -275,6 +292,9 @@ test('additive migration recreates runtime metric tables and budget columns with
   assert.ok(columns.has('metricsMode'));
   assert.ok(columns.has('maxPersistedRenderBytes'));
   assert.ok(new Set(db.prepare('PRAGMA table_info(url_runtime_metrics)').all().map((row) => row.name)).has('rawContentClass'));
+  for (const column of ['renderNegativeSignalsJson', 'renderSignalContributionsJson', 'renderRecommendationScore', 'renderRecommendationThreshold', 'renderCheckRequirementsJson']) {
+    assert.ok(new Set(db.prepare('PRAGMA table_info(url_runtime_metrics)').all().map((row) => row.name)).has(column));
+  }
   assert.ok(db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='run_runtime_metrics'").get());
   assert.ok(db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='url_runtime_metrics'").get());
   assert.equal(db.prepare('SELECT COUNT(*) AS count FROM run_runtime_metrics').get().count, 0);

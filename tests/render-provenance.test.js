@@ -268,6 +268,20 @@ test('metadata and JS checks use settled effective state and fail closed on unst
   const removedTitle = runTech('tech.title_missing', context);
   assert.equal(removedTitle.status, 'Error');
   assert.equal(removedTitle.affectedCount, 1);
+  db.prepare(`INSERT INTO url_runtime_metrics (
+    runId,url,renderDecision,renderNegativeSignalsJson,renderSignalContributionsJson,
+    renderRecommendationScore,renderRecommendationThreshold,renderCheckRequirementsJson,metricsVersion
+  ) VALUES (?,?,?,?,?,?,?,?,?)`).run(
+    runId,
+    'https://checks.invalid/a',
+    'render_required',
+    JSON.stringify(['substantial_main_content']),
+    JSON.stringify([{ signal: 'substantial_main_content', appliedContribution: -4 }]),
+    -4,
+    4,
+    JSON.stringify([{ checkId: 'tech.js_dependent_content', requirement: 'render_required' }]),
+    'render-runtime-metrics-v1'
+  );
   insertCheckResults(db, runId, [removedTitle]);
   const checkRow = db.prepare("SELECT id FROM check_results WHERE runId=? AND checkId='tech.title_missing'").get(runId);
   const detail = getCheckDetail(db, runId, checkRow.id);
@@ -277,6 +291,9 @@ test('metadata and JS checks use settled effective state and fail closed on unst
   assert.equal(detail.renderProvenance.available, true);
   assert.equal(detail.renderProvenance.rows[0].settledTitle, 'Effective title');
   assert.equal(detail.renderProvenance.rows[0].effectiveTitle, null);
+  assert.equal(detail.renderProvenance.rows[0].renderRecommendationScore, -4);
+  assert.equal(detail.renderProvenance.rows[0].renderSignalContributions[0].signal, 'substantial_main_content');
+  assert.equal(detail.renderProvenance.rows[0].renderCheckRequirements[0].requirement, 'render_required');
   const provenanceCsv = collectCsvExport(db, runId, 'render-provenance');
   assert.match(provenanceCsv, /rawDocumentStateJson,initialRenderedStateJson,settledRenderedStateJson,effectiveDocumentStateJson/);
   const exported = JSON.parse(collectFullAuditJson(db, runId, []).body);

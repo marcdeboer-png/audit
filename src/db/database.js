@@ -839,6 +839,11 @@ export function initDatabase(database = getDb()) {
       renderDecision TEXT,
       renderDecisionReasonJson TEXT,
       renderSignalsJson TEXT,
+      renderNegativeSignalsJson TEXT,
+      renderSignalContributionsJson TEXT,
+      renderRecommendationScore REAL,
+      renderRecommendationThreshold REAL,
+      renderCheckRequirementsJson TEXT,
       renderUnmetPrerequisitesJson TEXT,
       renderConfidence TEXT,
       requestedCheckFamiliesJson TEXT,
@@ -1101,10 +1106,15 @@ export function initDatabase(database = getDb()) {
     ['scoreBreakdownJson', 'TEXT'],
     ['scoreComputedAt', 'TEXT']
   ]);
-  ensureColumns(database, 'url_runtime_metrics', [
-    ['rawContentClass', 'TEXT']
-  ]);
 
+  ensureColumns(database, 'url_runtime_metrics', [
+    ['rawContentClass', 'TEXT'],
+    ['renderNegativeSignalsJson', 'TEXT'],
+    ['renderSignalContributionsJson', 'TEXT'],
+    ['renderRecommendationScore', 'REAL'],
+    ['renderRecommendationThreshold', 'REAL'],
+    ['renderCheckRequirementsJson', 'TEXT']
+  ]);
   ensureColumns(database, 'scheduled_runs', [
     ['name', 'TEXT'],
     ['intervalValue', 'INTEGER'],

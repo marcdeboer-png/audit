@@ -206,7 +206,9 @@ const EXPORTS = {
       'settlingDurationMs', 'snapshotCount', 'extractionDurationMs', 'persistenceDurationMs',
       'totalUrlDurationMs', 'rawHtmlBytes', 'renderProvenanceBytes', 'networkRequestCount',
       'failedRequestCount', 'finalSettlingStatus', 'renderStatus', 'measurementError',
-      'renderDecisionReasonJson', 'renderSignalsJson', 'renderUnmetPrerequisitesJson',
+      'renderDecisionReasonJson', 'renderSignalsJson', 'renderNegativeSignalsJson',
+      'renderSignalContributionsJson', 'renderRecommendationScore', 'renderRecommendationThreshold',
+      'renderCheckRequirementsJson', 'renderUnmetPrerequisitesJson',
       'requestedCheckFamiliesJson', 'budgetStatusJson', 'metricsVersion'
     ],
     sql: `
@@ -215,7 +217,9 @@ const EXPORTS = {
         settlingDurationMs,snapshotCount,extractionDurationMs,persistenceDurationMs,
         totalUrlDurationMs,rawHtmlBytes,renderProvenanceBytes,networkRequestCount,
         failedRequestCount,finalSettlingStatus,renderStatus,measurementError,
-        renderDecisionReasonJson,renderSignalsJson,renderUnmetPrerequisitesJson,
+        renderDecisionReasonJson,renderSignalsJson,renderNegativeSignalsJson,
+        renderSignalContributionsJson,renderRecommendationScore,renderRecommendationThreshold,
+        renderCheckRequirementsJson,renderUnmetPrerequisitesJson,
         requestedCheckFamiliesJson,budgetStatusJson,metricsVersion
       FROM url_runtime_metrics WHERE runId=? ORDER BY url
     `

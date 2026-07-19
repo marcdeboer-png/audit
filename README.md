@@ -55,7 +55,7 @@ npm run audit -- --domain example.com --crawlMode hybrid --includePatterns blog,
 
 `crawlMode` kann `hybrid`, `sitemap_only`, `internal_links_only` oder `template_sample` sein. `template_sample` gruppiert Sitemap-URLs vor dem Queuing nach URL-Template und crawlt nur einen kleinen Querschnitt pro Pattern. Playwright ist standardmaessig aus (`usePlaywright false`, `playwrightMode off`), damit Chromium optional bleibt.
 
-Browser-Laufzeitmessung und deterministische Budgets sind in [docs/render-runtime-benchmark-v1.md](docs/render-runtime-benchmark-v1.md) dokumentiert. Fuer einen expliziten zweistufigen Renderplan kann `--usePlaywright true --playwrightMode gate` verwendet werden. `--metricsMode basic` sammelt leichte Laufzeit- und Zaehlerdaten; `profiling` aktiviert zusaetzlich Prozessspeicher-Sampling. Budgetausschluesse bleiben als fehlende Render-Evidenz sichtbar und werden nicht als Pass interpretiert.
+Browser-Laufzeitmessung und deterministische Budgets sind in [docs/render-runtime-benchmark-v1.md](docs/render-runtime-benchmark-v1.md) dokumentiert. Die domainunabhaengige Praezisierung von `render_recommended`, explizite positive und negative Signale, check-getriebene Mindestmessungen sowie der kontrollierte 50-URL-Vergleich stehen in [docs/render-gate-calibration-v2.md](docs/render-gate-calibration-v2.md). Fuer einen expliziten zweistufigen Renderplan kann `--usePlaywright true --playwrightMode gate` verwendet werden. `--metricsMode basic` sammelt leichte Laufzeit- und Zaehlerdaten; `profiling` aktiviert zusaetzlich Prozessspeicher-Sampling. Budgetausschluesse und absichtlich nicht erhobene optionale Browserdiagnostik bleiben als fehlende Render-Evidenz sichtbar und werden nicht als Pass interpretiert.
 
 Crawler-Identitaet und Geschwindigkeit:
 

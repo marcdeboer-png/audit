@@ -13,6 +13,7 @@ import { buildTemplateClusters } from '../src/analysis/templateClusterer.js';
 import { runDeterministicRenderPlan } from '../src/rendering/renderPlanRunner.js';
 import { createRuntimeMetricsTracker } from '../src/runtime/renderMetrics.js';
 import { runChecks, loadResultsWithScores } from '../src/checks/checkEngine.js';
+import { RENDER_PLANNING_VERSIONS } from '../src/rendering/renderPlanner.js';
 
 const configPath = argument('--config');
 if (!configPath) throw new Error('Usage: npm run benchmark:render -- --config /tmp/benchmark-config.json');
@@ -63,7 +64,10 @@ async function executeTarget(target, strategy, repetition) {
   for (const suffix of ['', '-wal', '-shm']) fs.rmSync(`${dbPath}${suffix}`, { force: true });
   const db = new Database(dbPath);
   initDatabase(db);
-  const playwrightMode = strategy === 'browser_all' ? 'all' : strategy === 'deterministic_gate' ? 'gate' : 'off';
+  const playwrightMode = strategy === 'browser_all' ? 'all' : strategy.startsWith('deterministic_gate') ? 'gate' : 'off';
+  const renderPlanningVersion = strategy === 'deterministic_gate_v1'
+    ? RENDER_PLANNING_VERSIONS.v1
+    : RENDER_PLANNING_VERSIONS.v2;
   const auditConfig = normalizeAuditConfig({
     domain: target.domain,
     auditType: target.auditType || 'both',
@@ -73,6 +77,7 @@ async function executeTarget(target, strategy, repetition) {
     crawlMode: 'sitemap_only',
     usePlaywright: playwrightMode !== 'off',
     playwrightMode,
+    renderPlanningVersion,
     metricsMode: config.metricsMode || 'profiling',
     enableTemplateSampling: false,
     enablePlaywrightSampling: false,
@@ -157,6 +162,12 @@ async function executeTarget(target, strategy, repetition) {
       rawContentClass: row.rawContentClass,
       renderNeed: row.renderNeed,
       renderDecision: row.renderDecision,
+      renderSignals: safeJson(row.renderSignalsJson, []),
+      renderNegativeSignals: safeJson(row.renderNegativeSignalsJson, []),
+      renderSignalContributions: safeJson(row.renderSignalContributionsJson, []),
+      renderRecommendationScore: row.renderRecommendationScore,
+      renderRecommendationThreshold: row.renderRecommendationThreshold,
+      renderCheckRequirements: safeJson(row.renderCheckRequirementsJson, []),
       resultingBrowserRun: Boolean(row.resultingBrowserRun),
       settlingDurationMs: row.settlingDurationMs,
       snapshotCount: row.snapshotCount,
@@ -235,4 +246,8 @@ function argument(name) {
 
 function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function safeJson(value, fallback) {
+  try { return value ? JSON.parse(value) : fallback; } catch { return fallback; }
 }

@@ -45,12 +45,17 @@ export function generateReport(db, runId) {
       settlingDurationMs,snapshotCount,extractionDurationMs,persistenceDurationMs,
       totalUrlDurationMs,rawHtmlBytes,renderProvenanceBytes,networkRequestCount,
       failedRequestCount,finalSettlingStatus,renderStatus,measurementError,
-      renderDecisionReasonJson,renderSignalsJson,budgetStatusJson
+      renderDecisionReasonJson,renderSignalsJson,renderNegativeSignalsJson,
+      renderSignalContributionsJson,renderRecommendationScore,renderRecommendationThreshold,
+      renderCheckRequirementsJson,budgetStatusJson
     FROM url_runtime_metrics WHERE runId=? ORDER BY url LIMIT 500
   `).all(runId).map((row) => ({
     ...row,
     reason: safeParse(row.renderDecisionReasonJson, {}).summary || '',
     signals: safeParse(row.renderSignalsJson, []).join(', '),
+    negativeSignals: safeParse(row.renderNegativeSignalsJson, []).join(', '),
+    contributions: safeParse(row.renderSignalContributionsJson, []).map((item) => `${item.signal}:${item.appliedContribution}`).join(', '),
+    checkRequirements: safeParse(row.renderCheckRequirementsJson, []).map((item) => `${item.checkId}:${item.requirement}`).join(', '),
     budget: safeParse(row.budgetStatusJson, {}).reason || ''
   }));
   const statusDistribution = db.prepare(`
@@ -547,7 +552,7 @@ function renderHtml(data) {
       warning: forecast.warning
     })), ['urlCount', 'expectedBrowserRuns', 'expectedTotalDurationP50Ms', 'expectedTotalDurationP90Ms', 'expectedRenderDurationP50Ms', 'expectedRenderDurationP90Ms', 'expectedPersistedRenderBytes', 'warning'])}
     <h3>URL Render Decisions and Costs</h3>
-    ${simpleTable(renderDecisionRows, ['url', 'pageType', 'rawContentClass', 'templateClusterKey', 'renderStrategy', 'renderNeed', 'renderDecision', 'renderConfidence', 'resultingBrowserRun', 'reason', 'signals', 'budget', 'rawFetchDurationMs', 'browserNavigationDurationMs', 'settlingDurationMs', 'snapshotCount', 'extractionDurationMs', 'persistenceDurationMs', 'totalUrlDurationMs', 'rawHtmlBytes', 'renderProvenanceBytes', 'networkRequestCount', 'failedRequestCount', 'finalSettlingStatus', 'renderStatus', 'measurementError'])}
+    ${simpleTable(renderDecisionRows, ['url', 'pageType', 'rawContentClass', 'templateClusterKey', 'renderStrategy', 'renderNeed', 'renderDecision', 'renderConfidence', 'resultingBrowserRun', 'reason', 'signals', 'negativeSignals', 'renderRecommendationScore', 'renderRecommendationThreshold', 'contributions', 'checkRequirements', 'budget', 'rawFetchDurationMs', 'browserNavigationDurationMs', 'settlingDurationMs', 'snapshotCount', 'extractionDurationMs', 'persistenceDurationMs', 'totalUrlDurationMs', 'rawHtmlBytes', 'renderProvenanceBytes', 'networkRequestCount', 'failedRequestCount', 'finalSettlingStatus', 'renderStatus', 'measurementError'])}
     <h3>Raw / Initial / Settled Document Provenance</h3>
     <p class="muted">Effective metadata uses a stable settled DOM when available. Unstable or failed rendering remains explicitly incomplete and is excluded from rendered-dependent pass/fail claims.</p>
     ${simpleTable(renderProvenanceRows, ['url', 'renderStatus', 'settlingStatus', 'settlingDurationMs', 'renderSnapshotCount', 'rawTitle', 'initialTitle', 'settledTitle', 'effectiveTitle', 'rawWordCount', 'initialWordCount', 'settledWordCount', 'effectiveMainWordCount', 'effectiveCanonical', 'effectiveH1Count', 'metadataProvenanceComplete', 'renderProvenanceVersion', 'settlingPolicyVersion'])}

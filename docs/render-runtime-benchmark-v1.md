@@ -1,5 +1,11 @@
 # Render runtime metrics and deterministic budgets
 
+> Historischer Stand von `deterministic-render-gate-v1`. Die aktuelle
+> Praezisierung von `render_recommended` ist in
+> [render-gate-calibration-v2.md](render-gate-calibration-v2.md) dokumentiert;
+> die hier beschriebenen Runtime-Metriken, Budgets und Settling-Parameter
+> bleiben weiterhin gueltig.
+
 ## Ausgangszustand
 
 Vor diesem Batch wurde Browser-Rendering waehrend des Crawls pro URL, nicht pro Check, ausgefuehrt. Alle spaeteren Checks nutzten denselben persistierten gerenderten Dokumentzustand. `all` renderte jede geeignete HTML-Seite; `sample` reservierte bis zu einem URL-Limit in Verarbeitungsreihenfolge; `off` blieb raw-only. Ein Run teilte sich einen Browser, oeffnete pro URL eine Page und schloss Page und Browser in `finally`-Pfaden.

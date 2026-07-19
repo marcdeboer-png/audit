@@ -10,7 +10,7 @@ import { createHttpStatusError } from './retryPolicy.js';
 import { crawlerDefaults } from './defaults.js';
 import { filterArtifactsForStorage, snapshotHtml } from '../storage/retention.js';
 import { buildEffectiveDocumentState, RENDER_PROVENANCE_VERSION, SETTLING_POLICY_VERSION } from '../extractors/documentState.js';
-import { classifyRenderNeed, RENDER_NEEDS } from '../rendering/renderPlanner.js';
+import { activeRenderCheckIdsForAuditType, classifierForRenderPlanningVersion, RENDER_NEEDS } from '../rendering/renderPlanner.js';
 import { serializedRenderProvenanceBytes } from '../runtime/renderMetrics.js';
 
 const RETRY_STATUS_CODES = new Set(crawlerDefaults.retryStatusCodes);
@@ -72,12 +72,12 @@ export async function processQueueItem(db, run, project, queueItem, browser, rob
   const extractionStartedAt = performance.now();
   const extracted = extractHtml(response.body, normalizedFinalUrl, finalDomain, response.headers);
   const extractionDurationMs = performance.now() - extractionStartedAt;
-  const renderNeed = classifyRenderNeed({
+  const renderNeed = classifierForRenderPlanningVersion(run.renderPlanningVersion)({
     ...extracted.page,
     rawDocumentStateJson: extracted.page.rawDocumentStateJson,
     scriptCount: extracted.resources.filter((resource) => resource.resourceType === 'script').length,
     hydrationBytes: hydrationPayloadBytes(response.body)
-  });
+  }, { activeCheckIds: activeRenderCheckIdsForAuditType(run.auditType) });
   const shouldRender = shouldRenderPage(db, run, browser);
   let budget = { allowed: false, reason: 'not_requested' };
   let renderDurationMs = 0;
@@ -206,6 +206,11 @@ export async function processQueueItem(db, run, project, queueItem, browser, rob
     renderDecision: actualDecision,
     reason: { summary: renderNeed.reason },
     renderSignals: renderNeed.signals,
+    renderNegativeSignals: renderNeed.negativeSignals,
+    renderSignalContributions: renderNeed.signalContributions,
+    renderRecommendationScore: renderNeed.recommendationScore,
+    renderRecommendationThreshold: renderNeed.recommendationThreshold,
+    renderCheckRequirements: renderNeed.checkRequirements,
     renderUnmetPrerequisites: renderNeed.unmetPrerequisites,
     renderConfidence: renderNeed.confidence,
     requestedCheckFamilies: renderNeed.requestedCheckFamilies,

@@ -45,7 +45,7 @@ import { runTemplateSampling } from '../sampling/templateSamplingRunner.js';
 import { normalizeEnterpriseConfig } from '../storage/storageProfiles.js';
 import { storeBenchmarkSummary } from '../analysis/benchmarkSummary.js';
 import { normalizeSettlingConfig } from '../extractors/documentState.js';
-import { normalizeMetricsMode, normalizeOptionalBudget, RENDER_PLANNING_VERSION, RUNTIME_METRICS_VERSION } from '../rendering/renderPlanner.js';
+import { normalizeMetricsMode, normalizeOptionalBudget, normalizeRenderPlanningVersion, RUNTIME_METRICS_VERSION } from '../rendering/renderPlanner.js';
 import { createRuntimeMetricsTracker } from '../runtime/renderMetrics.js';
 import { runDeterministicRenderPlan } from '../rendering/renderPlanRunner.js';
 
@@ -82,7 +82,7 @@ export function normalizeAuditConfig(input) {
     playwrightMode: normalizePlaywrightMode(input.playwrightMode || (usePlaywright ? 'all' : 'off'), usePlaywright),
     playwrightSampleLimit: Math.max(0, Number(input.playwrightSampleLimit || 50)),
     metricsMode: normalizeMetricsMode(input.metricsMode),
-    renderPlanningVersion: RENDER_PLANNING_VERSION,
+    renderPlanningVersion: normalizeRenderPlanningVersion(input.renderPlanningVersion),
     runtimeMetricsVersion: RUNTIME_METRICS_VERSION,
     maxRenderedUrls: normalizeOptionalBudget(input.maxRenderedUrls),
     maxTotalRenderTimeMs: normalizeOptionalBudget(input.maxTotalRenderTimeMs),

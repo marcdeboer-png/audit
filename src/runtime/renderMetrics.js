@@ -141,6 +141,11 @@ export function upsertUrlRuntimeMetric(db, runId, metric = {}) {
     renderDecision: metric.renderDecision || null,
     renderDecisionReasonJson: json(metric.renderDecisionReason || metric.reason || {}),
     renderSignalsJson: json(metric.renderSignals || []),
+    renderNegativeSignalsJson: json(metric.renderNegativeSignals || []),
+    renderSignalContributionsJson: json(metric.renderSignalContributions || []),
+    renderRecommendationScore: finiteNumber(metric.renderRecommendationScore),
+    renderRecommendationThreshold: finiteNumber(metric.renderRecommendationThreshold),
+    renderCheckRequirementsJson: json(metric.renderCheckRequirements || []),
     renderUnmetPrerequisitesJson: json(metric.renderUnmetPrerequisites || []),
     renderConfidence: metric.renderConfidence || null,
     requestedCheckFamiliesJson: json(metric.requestedCheckFamilies || []),
@@ -165,7 +170,8 @@ export function upsertUrlRuntimeMetric(db, runId, metric = {}) {
   db.prepare(`
     INSERT INTO url_runtime_metrics (
       runId,url,pageType,rawContentClass,templateClusterKey,renderStrategy,renderNeed,renderDecision,
-      renderDecisionReasonJson,renderSignalsJson,renderUnmetPrerequisitesJson,
+      renderDecisionReasonJson,renderSignalsJson,renderNegativeSignalsJson,renderSignalContributionsJson,
+      renderRecommendationScore,renderRecommendationThreshold,renderCheckRequirementsJson,renderUnmetPrerequisitesJson,
       renderConfidence,requestedCheckFamiliesJson,budgetStatusJson,resultingBrowserRun,
       rawFetchDurationMs,browserNavigationDurationMs,settlingDurationMs,snapshotCount,
       extractionDurationMs,persistenceDurationMs,totalUrlDurationMs,rawHtmlBytes,
@@ -173,7 +179,8 @@ export function upsertUrlRuntimeMetric(db, runId, metric = {}) {
       renderStatus,measurementError,metricsVersion
     ) VALUES (
       @runId,@url,@pageType,@rawContentClass,@templateClusterKey,@renderStrategy,@renderNeed,@renderDecision,
-      @renderDecisionReasonJson,@renderSignalsJson,@renderUnmetPrerequisitesJson,
+      @renderDecisionReasonJson,@renderSignalsJson,@renderNegativeSignalsJson,@renderSignalContributionsJson,
+      @renderRecommendationScore,@renderRecommendationThreshold,@renderCheckRequirementsJson,@renderUnmetPrerequisitesJson,
       @renderConfidence,@requestedCheckFamiliesJson,@budgetStatusJson,@resultingBrowserRun,
       @rawFetchDurationMs,@browserNavigationDurationMs,@settlingDurationMs,@snapshotCount,
       @extractionDurationMs,@persistenceDurationMs,@totalUrlDurationMs,@rawHtmlBytes,
@@ -184,7 +191,12 @@ export function upsertUrlRuntimeMetric(db, runId, metric = {}) {
       templateClusterKey=COALESCE(excluded.templateClusterKey,url_runtime_metrics.templateClusterKey),
       renderStrategy=excluded.renderStrategy, renderNeed=excluded.renderNeed,
       renderDecision=excluded.renderDecision, renderDecisionReasonJson=excluded.renderDecisionReasonJson,
-      renderSignalsJson=excluded.renderSignalsJson, renderUnmetPrerequisitesJson=excluded.renderUnmetPrerequisitesJson,
+      renderSignalsJson=excluded.renderSignalsJson, renderNegativeSignalsJson=excluded.renderNegativeSignalsJson,
+      renderSignalContributionsJson=excluded.renderSignalContributionsJson,
+      renderRecommendationScore=excluded.renderRecommendationScore,
+      renderRecommendationThreshold=excluded.renderRecommendationThreshold,
+      renderCheckRequirementsJson=excluded.renderCheckRequirementsJson,
+      renderUnmetPrerequisitesJson=excluded.renderUnmetPrerequisitesJson,
       renderConfidence=excluded.renderConfidence, requestedCheckFamiliesJson=excluded.requestedCheckFamiliesJson,
       budgetStatusJson=excluded.budgetStatusJson, resultingBrowserRun=excluded.resultingBrowserRun,
       rawFetchDurationMs=COALESCE(excluded.rawFetchDurationMs,url_runtime_metrics.rawFetchDurationMs),
@@ -357,6 +369,12 @@ function finite(value) {
   if (value === null || value === undefined || value === '') return null;
   const number = Number(value);
   return Number.isFinite(number) ? Math.round(number) : null;
+}
+
+function finiteNumber(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
 }
 
 function json(value) {

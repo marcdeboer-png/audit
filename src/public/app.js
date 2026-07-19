@@ -3266,10 +3266,13 @@ function renderCheckDetail(detail) {
       <h3>Raw / Initial / Settled / Effective</h3>
       <div class="table-wrap">
         <table>
-          <thead><tr>${['URL', 'Entscheidung', 'Grund', 'Status', 'Navigation ms', 'Settling ms', 'Snapshots', 'Provenienz Bytes', 'Raw Title', 'Initial Title', 'Settled Title', 'Effective Title', 'Raw Words', 'Initial Words', 'Settled Words', 'Effective Words'].map((label) => `<th>${label}</th>`).join('')}</tr></thead>
+          <thead><tr>${['URL', 'Entscheidung', 'Grund', 'Signalwert', 'Prüfanforderungen', 'Status', 'Navigation ms', 'Settling ms', 'Snapshots', 'Provenienz Bytes', 'Raw Title', 'Initial Title', 'Settled Title', 'Effective Title', 'Raw Words', 'Initial Words', 'Settled Words', 'Effective Words'].map((label) => `<th>${label}</th>`).join('')}</tr></thead>
           <tbody>${renderProvenanceRows.map((row) => `<tr>
             <td>${escapeHtml(row.url || '')}</td><td>${escapeHtml(row.renderDecision || 'historisch nicht verfügbar')}</td>
-            <td>${escapeHtml(row.renderDecisionReason?.summary || '')}</td><td>${escapeHtml(`${row.renderStatus || ''} / ${row.settlingStatus || ''}`)}</td>
+            <td>${escapeHtml(row.renderDecisionReason?.summary || '')}</td>
+            <td>${escapeHtml(row.renderRecommendationScore === null || row.renderRecommendationScore === undefined ? 'historisch nicht verfügbar' : `${row.renderRecommendationScore} / ${row.renderRecommendationThreshold}`)}</td>
+            <td>${escapeHtml((row.renderCheckRequirements || []).map((item) => `${item.checkId}: ${item.requirement}`).join(', ') || '—')}</td>
+            <td>${escapeHtml(`${row.renderStatus || ''} / ${row.settlingStatus || ''}`)}</td>
             <td>${escapeHtml(formatCell(row.browserNavigationDurationMs))}</td><td>${escapeHtml(formatCell(row.settlingDurationMs))}</td>
             <td>${escapeHtml(formatCell(row.snapshotCount))}</td><td>${escapeHtml(formatCell(row.renderProvenanceBytes))}</td>
             <td>${escapeHtml(formatCell(row.rawTitle))}</td><td>${escapeHtml(formatCell(row.initialTitle))}</td>
