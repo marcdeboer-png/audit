@@ -67,7 +67,16 @@ export function collectCheckDetailCsv(db, runId, checkResultId) {
     { key: 'primaryCheckId', label: 'primaryCheckId' },
     { key: 'deduplicationConfidence', label: 'deduplicationConfidence' },
     { key: 'deduplicationReason', label: 'deduplicationReason' },
-    { key: 'rootCauseMemberships', label: 'rootCauseMemberships' }
+    { key: 'rootCauseMemberships', label: 'rootCauseMemberships' },
+    { key: 'evidenceClass', label: 'evidenceClass' },
+    { key: 'executionStatus', label: 'executionStatus' },
+    { key: 'evidenceStatus', label: 'evidenceStatus' },
+    { key: 'evaluationStatus', label: 'evaluationStatus' },
+    { key: 'coverageStatus', label: 'coverageStatus' },
+    { key: 'coverageUnitKey', label: 'coverageUnitKey' },
+    { key: 'coverageWeight', label: 'coverageWeight' },
+    { key: 'coverageReason', label: 'coverageReason' },
+    { key: 'availabilitySemanticsVersion', label: 'availabilitySemanticsVersion' }
   ];
   const metadataKeys = new Set([...metadataColumns, ...scoringColumns].map((column) => column.key));
   const detailColumns = (detail.columns || []).filter((column) => !metadataKeys.has(column.key));
@@ -88,6 +97,15 @@ export function collectCheckDetailCsv(db, runId, checkResultId) {
     rawPriority: detail.rawPriority || detail.priority,
     rawFindingType: detail.rawFindingType || detail.findingType || '',
     confidence: detail.confidence || '',
+    evidenceClass: detail.evidenceClass || '',
+    executionStatus: detail.executionStatus || '',
+    evidenceStatus: detail.evidenceStatus || '',
+    evaluationStatus: detail.evaluationStatus || detail.evaluationState || '',
+    coverageStatus: detail.coverageStatus || '',
+    coverageUnitKey: detail.coverageUnitKey || '',
+    coverageWeight: detail.coverageWeight ?? '',
+    coverageReason: detail.coverageReason || '',
+    availabilitySemanticsVersion: detail.availabilitySemanticsVersion || '',
     rootCauseId: detail.rootCauseId || '',
     rootCauseKey: detail.rootCauseKey || '',
     rootCauseFamily: detail.rootCauseFamily || '',
@@ -524,9 +542,15 @@ function buildAuditSummary(db, runId, run) {
       scoringVersion: scores.scoringVersion || run.scoringVersion || null,
       deduplicationVersion: scores.deduplicationVersion || run.deduplicationVersion || null,
       coverageModelVersion: scores.coverageModelVersion || run.coverageModelVersion || null,
+      availabilitySemanticsVersion: scores.availabilitySemanticsVersion || run.availabilitySemanticsVersion || null,
       checkLogicVersion: scores.checkLogicVersion || run.checkLogicVersion || null,
       scoreStatus: scores.scoreStatus || run.scoreStatus || 'historical_unknown',
-      weightedCoverage: scores.weightedCoverage ?? null
+      weightedCoverage: scores.weightedCoverage ?? null,
+      primaryCoverage: scores.primaryCoverage ?? null,
+      diagnosticCoverage: scores.diagnosticCoverage ?? null,
+      inventoryCoverage: scores.inventoryCoverage ?? null,
+      renderRequiredCoverage: scores.renderRequiredCoverage ?? null,
+      coverageUnits: scores.breakdown?.coverageUnits || []
     },
     processedUrls: run.processedUrls,
     successfulUrls: run.successfulUrls,
@@ -582,6 +606,8 @@ function buildRunConfig(run) {
     metricsMode: run.runtimeMetricsVersion ? (run.metricsMode || 'off') : null,
     renderPlanningVersion: run.renderPlanningVersion || null,
     runtimeMetricsVersion: run.runtimeMetricsVersion || null,
+    coverageModelVersion: run.coverageModelVersion || null,
+    availabilitySemanticsVersion: run.availabilitySemanticsVersion || null,
     renderBudget: {
       maxRenderedUrls: run.maxRenderedUrls ?? null,
       maxTotalRenderTimeMs: run.maxTotalRenderTimeMs ?? null,
@@ -609,6 +635,7 @@ function buildRunConfig(run) {
       scoringVersion: run.scoringVersion || null,
       deduplicationVersion: run.deduplicationVersion || null,
       coverageModelVersion: run.coverageModelVersion || null,
+      availabilitySemanticsVersion: run.availabilitySemanticsVersion || null,
       checkLogicVersion: run.checkLogicVersion || null,
       scoreStatus: run.scoreStatus || (run.scoringVersion ? null : 'historical_unknown'),
       scoreComputedAt: run.scoreComputedAt || null
@@ -702,6 +729,7 @@ function createExportManifest(db, runId, run) {
       scoringVersion: run.scoringVersion || null,
       deduplicationVersion: run.deduplicationVersion || null,
       coverageModelVersion: run.coverageModelVersion || null,
+      availabilitySemanticsVersion: run.availabilitySemanticsVersion || null,
       checkLogicVersion: run.checkLogicVersion || null,
       scoreStatus: run.scoreStatus || (run.scoringVersion ? null : 'historical_unknown')
     },

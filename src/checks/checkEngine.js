@@ -1,5 +1,5 @@
 import { clearRunArtifacts, getRunWithProject, hydrateInternalLinkHttpFacts, insertCheckResults, logRun, persistRunScores } from '../db/repositories.js';
-import { SCORING_VERSION, computeEvidenceGatedLegacyScores, computeLegacyScores, computeScores, scoreForStatus } from '../utils/scoring.js';
+import { COVERAGE_MODEL_VERSION, SCORING_VERSION, computeEvidenceGatedLegacyScores, computeLegacyScores, computeScores, scoreForStatus } from '../utils/scoring.js';
 import { techChecks } from './tech/index.js';
 import { geoChecks } from './geo/index.js';
 import { applyEffectiveValues } from '../reviews/reviewWorkflow.js';
@@ -7,6 +7,7 @@ import { runLlmChecks } from '../llm/llmCheckRunner.js';
 import { makeResult } from './helpers.js';
 import { assertCheckResultScope, assertRunStorageScope, createRunScope, requireRunId, scopeSafeCheckResult } from '../scope/runScope.js';
 import { buildCheckProvenance } from '../runtime/provenance.js';
+import { applyEvidenceAvailability, createEvidenceAvailabilityContext } from '../coverage/evidenceCoverage.js';
 
 export async function runChecks(db, runId) {
   requireRunId(runId, 'run checks');
@@ -105,11 +106,13 @@ export async function runChecks(db, runId) {
     logRun(db, runId, 'error', 'LLM checks failed without aborting audit', { error: error.message });
   }
 
-  insertCheckResults(db, runId, results);
-  const scores = computeScores(results);
+  const availabilityContext = createEvidenceAvailabilityContext(db, run);
+  const annotatedResults = results.map((result) => applyEvidenceAvailability(result, availabilityContext));
+  insertCheckResults(db, runId, annotatedResults);
+  const scores = computeScores(annotatedResults);
   persistRunScores(db, runId, scores);
-  logRun(db, runId, 'info', 'Checks completed', { checks: results.length, scores });
-  return { results, scores };
+  logRun(db, runId, 'info', 'Checks completed', { checks: annotatedResults.length, scores });
+  return { results: annotatedResults, scores };
 }
 
 function collectedResultsForNonLiveRerun(db, run, checks) {
@@ -172,7 +175,16 @@ function storedCollectedResult(row) {
     affectedUrlCount: row.affectedUrlCount,
     displayedSampleCount: row.displayedSampleCount,
     deduplicationConfidence: row.deduplicationConfidence,
-    deduplicationReason: row.deduplicationReason
+    deduplicationReason: row.deduplicationReason,
+    evidenceClass: row.evidenceClass,
+    executionStatus: row.executionStatus,
+    evidenceStatus: row.evidenceStatus,
+    evaluationStatus: row.evaluationStatus,
+    coverageStatus: row.coverageStatus,
+    coverageUnitKey: row.coverageUnitKey,
+    coverageWeight: row.coverageWeight,
+    coverageReason: row.coverageReason,
+    availabilitySemanticsVersion: row.availabilitySemanticsVersion
   };
 }
 
@@ -279,7 +291,7 @@ export function scoresForStoredRun(run, rows) {
   }
   const stored = safeParse(run.scoreBreakdownJson, null);
   if (stored && stored.scoringVersion === run.scoringVersion) return stored;
-  if (run.scoringVersion === SCORING_VERSION) return computeScores(rows);
+  if (run.scoringVersion === SCORING_VERSION && run.coverageModelVersion === COVERAGE_MODEL_VERSION) return computeScores(rows);
   const fallback = rows.some((row) => row.evaluationState)
     ? computeEvidenceGatedLegacyScores(rows)
     : computeLegacyScores(rows);
@@ -290,7 +302,9 @@ export function scoresForStoredRun(run, rows) {
     breakdown: {
       ...fallback.breakdown,
       scoringModel: run.scoringVersion,
-      unsupportedHistoricalScoringVersion: true
+      unsupportedHistoricalScoringVersion: run.scoringVersion !== SCORING_VERSION,
+      unsupportedHistoricalCoverageVersion: run.coverageModelVersion !== COVERAGE_MODEL_VERSION,
+      historicalCoverageModelVersion: run.coverageModelVersion || null
     }
   };
 }

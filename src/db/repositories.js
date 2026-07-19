@@ -5,6 +5,7 @@ import {
   SCORING_VERSION,
   scoreForStatus
 } from '../utils/scoring.js';
+import { AVAILABILITY_SEMANTICS_VERSION } from '../coverage/evidenceCoverage.js';
 import { crawlerDefaults } from '../crawler/defaults.js';
 import {
   normalizeAutomationCoverage,
@@ -57,7 +58,7 @@ export function createRun(db, projectId, config) {
       enableLlmChecks, llmProvider, llmModel, llmMaxSampleUrls, llmMaxChecks,
       llmMaxTokens, llmDryRun, llmWarningsJson,
       primaryHost, runtimeGitCommit, runtimeBuildVersion, runtimeConfigHash, runtimeProvenanceJson,
-      scoringVersion, deduplicationVersion, coverageModelVersion, checkLogicVersion
+      scoringVersion, deduplicationVersion, coverageModelVersion, availabilitySemanticsVersion, checkLogicVersion
     )
     VALUES (
       @projectId, 'pending', @auditType, @maxUrls, @maxDepth, @concurrency,
@@ -83,7 +84,7 @@ export function createRun(db, projectId, config) {
       @enableLlmChecks, @llmProvider, @llmModel, @llmMaxSampleUrls, @llmMaxChecks,
       @llmMaxTokens, @llmDryRun, @llmWarningsJson,
       @primaryHost, @runtimeGitCommit, @runtimeBuildVersion, @runtimeConfigHash, @runtimeProvenanceJson,
-      @scoringVersion, @deduplicationVersion, @coverageModelVersion, @checkLogicVersion
+      @scoringVersion, @deduplicationVersion, @coverageModelVersion, @availabilitySemanticsVersion, @checkLogicVersion
     )
   `).run({
     projectId,
@@ -168,6 +169,7 @@ export function createRun(db, projectId, config) {
     scoringVersion: SCORING_VERSION,
     deduplicationVersion: DEDUPLICATION_VERSION,
     coverageModelVersion: COVERAGE_MODEL_VERSION,
+    availabilitySemanticsVersion: AVAILABILITY_SEMANTICS_VERSION,
     checkLogicVersion: CHECK_LOGIC_VERSION
   });
   return result.lastInsertRowid;
@@ -1009,7 +1011,9 @@ export function insertCheckResults(db, runId, results) {
       interpretation, limitations, relatedCheckIdsJson, checkVersion, provenanceJson
       , rootCauseId, rootCauseKey, rootCauseFamily, scopeType,
       occurrenceCount, affectedUrlCount, displayedSampleCount, primaryCheckId,
-      deduplicationConfidence, deduplicationReason, rootCauseMembershipsJson
+      deduplicationConfidence, deduplicationReason, rootCauseMembershipsJson,
+      evidenceClass, executionStatus, evidenceStatus, evaluationStatus,
+      coverageStatus, coverageUnitKey, coverageWeight, coverageReason, availabilitySemanticsVersion
     )
     VALUES (
       @runId, @checkId, @category, @checkName, @status, @priority, @effort, @score,
@@ -1021,7 +1025,9 @@ export function insertCheckResults(db, runId, results) {
       @interpretation, @limitations, @relatedCheckIdsJson, @checkVersion, @provenanceJson
       , @rootCauseId, @rootCauseKey, @rootCauseFamily, @scopeType,
       @occurrenceCount, @affectedUrlCount, @displayedSampleCount, @primaryCheckId,
-      @deduplicationConfidence, @deduplicationReason, @rootCauseMembershipsJson
+      @deduplicationConfidence, @deduplicationReason, @rootCauseMembershipsJson,
+      @evidenceClass, @executionStatus, @evidenceStatus, @evaluationStatus,
+      @coverageStatus, @coverageUnitKey, @coverageWeight, @coverageReason, @availabilitySemanticsVersion
     )
   `);
 
@@ -1080,7 +1086,20 @@ export function insertCheckResults(db, runId, results) {
         primaryCheckId: truncateText(storedItem.primaryCheckId || null, 300),
         deduplicationConfidence: normalizeConfidence(storedItem.deduplicationConfidence || 'high'),
         deduplicationReason: truncateText(storedItem.deduplicationReason || null, 2000),
-        rootCauseMembershipsJson: JSON.stringify(Array.isArray(storedItem.rootCauseMemberships) ? storedItem.rootCauseMemberships : [])
+        rootCauseMembershipsJson: JSON.stringify(Array.isArray(storedItem.rootCauseMemberships) ? storedItem.rootCauseMemberships : []),
+        evidenceClass: storedItem.evidenceClass || null,
+        executionStatus: storedItem.executionStatus || null,
+        evidenceStatus: storedItem.evidenceStatus || null,
+        evaluationStatus: storedItem.evaluationStatus || storedItem.evaluationState || null,
+        coverageStatus: storedItem.coverageStatus || null,
+        coverageUnitKey: truncateText(storedItem.coverageUnitKey || null, 500),
+        coverageWeight: storedItem.coverageWeight !== null
+          && storedItem.coverageWeight !== undefined
+          && Number.isFinite(Number(storedItem.coverageWeight))
+          ? Number(storedItem.coverageWeight)
+          : null,
+        coverageReason: truncateText(storedItem.coverageReason || null, 2000),
+        availabilitySemanticsVersion: storedItem.availabilitySemanticsVersion || null
       });
     }
   });
@@ -1136,6 +1155,7 @@ export function persistRunScores(db, runId, scores) {
       SET scoringVersion = @scoringVersion,
           deduplicationVersion = @deduplicationVersion,
           coverageModelVersion = @coverageModelVersion,
+          availabilitySemanticsVersion = @availabilitySemanticsVersion,
           checkLogicVersion = @checkLogicVersion,
           scoreStatus = @scoreStatus,
           overallScore = @overallScore,
@@ -1149,6 +1169,7 @@ export function persistRunScores(db, runId, scores) {
       scoringVersion: scores.scoringVersion,
       deduplicationVersion: scores.deduplicationVersion,
       coverageModelVersion: scores.coverageModelVersion,
+      availabilitySemanticsVersion: scores.availabilitySemanticsVersion,
       checkLogicVersion: scores.checkLogicVersion,
       scoreStatus: scores.scoreStatus,
       overallScore: scores.overallScore,

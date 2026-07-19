@@ -3238,7 +3238,9 @@ function renderCheckDetail(detail) {
       <dt>So wurde geprüft</dt><dd>${escapeHtml(narrative.howChecked || detail.dataSource || 'stored crawl data')}</dd>
       <dt>Das wurde gefunden</dt><dd>${escapeHtml(narrative.found || '')}</dd>
       <dt>Empfehlung</dt><dd>${escapeHtml(narrative.recommendation || '')}</dd>
-      <dt>Availability</dt><dd>${escapeHtml(detail.evaluationState || 'historisch nicht vorhanden')}${detail.scoreEligible ? ' · scorewirksam' : ' · vom Score ausgeschlossen'}</dd>
+      <dt>Availability</dt><dd>${escapeHtml(detail.evaluationStatus || detail.evaluationState || 'historisch nicht vorhanden')}${detail.scoreEligible ? ' · scorewirksam' : ' · vom Score ausgeschlossen'}</dd>
+      <dt>Evidence/Coverage</dt><dd>${escapeHtml(detail.evidenceClass || 'historisch unbekannt')} · ${escapeHtml(detail.executionStatus || 'historisch unbekannt')} · ${escapeHtml(detail.evidenceStatus || 'historisch unbekannt')} · ${escapeHtml(detail.coverageStatus || 'historisch unbekannt')}</dd>
+      <dt>Coverage Unit</dt><dd>${escapeHtml(detail.coverageUnitKey || 'historisch nicht vorhanden')}${detail.coverageWeight === null || detail.coverageWeight === undefined ? '' : ` · Gewicht ${escapeHtml(detail.coverageWeight)}`}${detail.coverageReason ? ` · ${escapeHtml(detail.coverageReason)}` : ''}</dd>
       <dt>Root-Cause-Scoring</dt><dd>${escapeHtml(rootCauseSummary)}</dd>
       <dt>Runtime-Provenienz</dt><dd>${provenanceAvailable
         ? escapeHtml(`Run ${provenance.runId ?? 'n/a'} · Projekt ${provenance.projectId ?? 'n/a'} · ${provenance.collector || provenance.dataSource || 'unbekannte Quelle'} · Check ${provenance.checkId || detail.checkId}@${provenance.checkVersion || detail.checkVersion || 'n/a'} · Commit ${provenance.gitCommit || 'nicht verfügbar'} · Config ${provenance.configHash || 'nicht verfügbar'}`)
@@ -3408,6 +3410,7 @@ function exportLinks(runId) {
     ['Playwright Results CSV', 'playwright-results'],
     ['Render Provenance CSV', 'render-provenance'],
     ['Render Runtime CSV', 'render-runtime'],
+    ['Coverage Units CSV', 'coverage-units'],
     ['Lighthouse Results CSV', 'lighthouse-results'],
     ['Template Performance CSV', 'template-performance'],
     ['Templates CSV', 'templates'],

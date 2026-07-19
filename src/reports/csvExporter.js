@@ -14,6 +14,8 @@ const EXPORTS = {
       'rawStatus', 'rawPriority', 'rawFindingType',
       'confidence', 'reportSection', 'reviewRecommended', 'evidenceJson', 'sampleUrls',
       'evaluationState', 'scoreEligible', 'scoreExclusionReason', 'requirementsJson',
+      'evidenceClass', 'executionStatus', 'evidenceStatus', 'evaluationStatus',
+      'coverageStatus', 'coverageUnitKey', 'coverageWeight', 'coverageReason', 'availabilitySemanticsVersion',
       'factsJson', 'assessmentJson', 'recommendationMetaJson', 'scoreDeduplicationKey',
       'rootCauseId', 'rootCauseKey', 'rootCauseFamily', 'scopeType',
       'occurrenceCount', 'affectedUrlCount', 'displayedSampleCount', 'primaryCheckId',
@@ -50,6 +52,15 @@ const EXPORTS = {
         cr.recommendationMetaJson,
         cr.requirementsJson,
         cr.evaluationState,
+        cr.evidenceClass,
+        cr.executionStatus,
+        cr.evidenceStatus,
+        cr.evaluationStatus,
+        cr.coverageStatus,
+        cr.coverageUnitKey,
+        cr.coverageWeight,
+        cr.coverageReason,
+        cr.availabilitySemanticsVersion,
         cr.scoreEligible,
         cr.scoreExclusionReason,
         cr.scoreDeduplicationKey,
@@ -364,8 +375,9 @@ const EXPORTS = {
   'score-root-causes': {
     filename: (runId) => `run-${runId}-score-root-causes.csv`,
     columns: [
-      'scoringVersion', 'deduplicationVersion', 'coverageModelVersion', 'checkLogicVersion',
-      'scoreStatus', 'score', 'diagnosticScore', 'weightedCoverage',
+      'scoringVersion', 'deduplicationVersion', 'coverageModelVersion', 'availabilitySemanticsVersion', 'checkLogicVersion',
+      'scoreStatus', 'score', 'diagnosticScore', 'weightedCoverage', 'primaryCoverage',
+      'diagnosticCoverage', 'inventoryCoverage', 'renderRequiredCoverage',
       'rawFindingCount', 'scoredFindingCount', 'rootCauseCount', 'deduplicatedFindingCount',
       'rawPenaltyTotal', 'appliedPenaltyTotal', 'capsAppliedJson',
       'rootCauseId', 'rootCauseKey', 'rootCauseFamily', 'category', 'severity', 'confidence',
@@ -374,6 +386,16 @@ const EXPORTS = {
       'basePenalty', 'scopeFactor', 'confidenceFactor', 'rawPenalty', 'appliedPenalty', 'rootCapsAppliedJson'
     ],
     rows: scoreRootCauseRows
+  },
+  'coverage-units': {
+    filename: (runId) => `run-${runId}-coverage-units.csv`,
+    columns: [
+      'coverageModelVersion', 'availabilitySemanticsVersion', 'scoreStatus',
+      'primaryCoverage', 'diagnosticCoverage', 'inventoryCoverage', 'weightedCoverage',
+      'coverageUnitKey', 'evidenceClass', 'category', 'weight', 'coverageStatus',
+      'checkIdsJson', 'reasonsJson'
+    ],
+    rows: coverageUnitRows
   }
 };
 
@@ -447,11 +469,16 @@ function scoreRootCauseRows(db, runId) {
     scoringVersion: scores.scoringVersion || '',
     deduplicationVersion: scores.deduplicationVersion || '',
     coverageModelVersion: scores.coverageModelVersion || '',
+    availabilitySemanticsVersion: scores.availabilitySemanticsVersion || '',
     checkLogicVersion: scores.checkLogicVersion || '',
     scoreStatus: scores.scoreStatus || 'historical_unknown',
     score: scores.overallScore,
     diagnosticScore: scores.diagnosticOverallScore ?? breakdown.diagnosticScore ?? '',
     weightedCoverage: scores.weightedCoverage ?? breakdown.weightedCoverage ?? breakdown.dataCoveragePct ?? '',
+    primaryCoverage: scores.primaryCoverage ?? breakdown.primaryCoverage ?? '',
+    diagnosticCoverage: scores.diagnosticCoverage ?? breakdown.diagnosticCoverage ?? '',
+    inventoryCoverage: scores.inventoryCoverage ?? breakdown.inventoryCoverage ?? '',
+    renderRequiredCoverage: scores.renderRequiredCoverage ?? breakdown.renderRequiredCoverage ?? '',
     rawFindingCount: breakdown.rawFindingCount ?? breakdown.configuredChecks ?? 0,
     scoredFindingCount: breakdown.scoredFindingCount ?? breakdown.eligibleChecks ?? 0,
     rootCauseCount: breakdown.rootCauseCount ?? 0,
@@ -467,6 +494,28 @@ function scoreRootCauseRows(db, runId) {
     ...root,
     relatedCheckIds: JSON.stringify(root.relatedCheckIds || []),
     rootCapsAppliedJson: JSON.stringify(root.capsApplied || [])
+  }));
+}
+
+function coverageUnitRows(db, runId) {
+  const scores = loadResultsWithScores(db, runId).scores;
+  const breakdown = scores.breakdown || {};
+  const common = {
+    coverageModelVersion: scores.coverageModelVersion || '',
+    availabilitySemanticsVersion: scores.availabilitySemanticsVersion || '',
+    scoreStatus: scores.scoreStatus || 'historical_unknown',
+    primaryCoverage: scores.primaryCoverage ?? breakdown.primaryCoverage ?? '',
+    diagnosticCoverage: scores.diagnosticCoverage ?? breakdown.diagnosticCoverage ?? '',
+    inventoryCoverage: scores.inventoryCoverage ?? breakdown.inventoryCoverage ?? '',
+    weightedCoverage: scores.weightedCoverage ?? breakdown.weightedCoverage ?? ''
+  };
+  const units = breakdown.coverageUnits || [];
+  if (!units.length) return [{ ...common }];
+  return units.map((unit) => ({
+    ...common,
+    ...unit,
+    checkIdsJson: JSON.stringify(unit.checkIds || []),
+    reasonsJson: JSON.stringify(unit.reasons || [])
   }));
 }
 

@@ -1,8 +1,12 @@
 import crypto from 'node:crypto';
+import {
+  AVAILABILITY_SEMANTICS_VERSION,
+  normalizeEvidenceAvailability
+} from '../coverage/evidenceCoverage.js';
 
 export const SCORING_VERSION = 'root-cause-scoring-v3';
 export const DEDUPLICATION_VERSION = 'deterministic-root-cause-v1';
-export const COVERAGE_MODEL_VERSION = 'weighted-coverage-v2';
+export const COVERAGE_MODEL_VERSION = 'evidence-class-coverage-v3';
 export const CHECK_LOGIC_VERSION = 'csr-render-provenance-v1';
 
 export const scoringConfig = Object.freeze({
@@ -62,6 +66,7 @@ export function scoringVersions() {
     scoringVersion: SCORING_VERSION,
     deduplicationVersion: DEDUPLICATION_VERSION,
     coverageModelVersion: COVERAGE_MODEL_VERSION,
+    availabilitySemanticsVersion: AVAILABILITY_SEMANTICS_VERSION,
     checkLogicVersion: CHECK_LOGIC_VERSION
   };
 }
@@ -86,9 +91,14 @@ export function computeScores(results = [], options = {}) {
     scoringVersion: SCORING_VERSION,
     deduplicationVersion: DEDUPLICATION_VERSION,
     coverageModelVersion: COVERAGE_MODEL_VERSION,
+    availabilitySemanticsVersion: AVAILABILITY_SEMANTICS_VERSION,
     checkLogicVersion: CHECK_LOGIC_VERSION,
     scoreStatus: overall.scoreStatus,
     weightedCoverage: overall.weightedCoverage,
+    primaryCoverage: overall.primaryCoverage,
+    diagnosticCoverage: overall.diagnosticCoverage,
+    inventoryCoverage: overall.inventoryCoverage,
+    renderRequiredCoverage: overall.renderRequiredCoverage,
     overallScore: overall.score,
     diagnosticOverallScore: overall.diagnosticScore,
     techScore: tech.score,
@@ -122,7 +132,7 @@ function calculateModel(allRows, predicate) {
   const rootCauses = buildRootCauses(rows);
   const capped = applyCaps(rootCauses);
   const diagnosticScore = clamp(Math.round(100 - capped.appliedPenalty), 0, 100);
-  const scoreStatus = coverageStatus(coverage.weightedCoverage);
+  const scoreStatus = coverageHeadlineStatus(coverage);
   const score = scoreStatus === 'insufficient_coverage' ? null : diagnosticScore;
   const failingRows = rows.filter((row) => row.evaluationState === 'fail');
   const scoredFindingIds = new Set(capped.rootCauses.flatMap((root) => root.memberFindingIds));
@@ -138,10 +148,15 @@ function calculateModel(allRows, predicate) {
     diagnosticScore,
     scoreStatus,
     weightedCoverage: coverage.weightedCoverage,
+    primaryCoverage: coverage.primaryCoverage,
+    diagnosticCoverage: coverage.diagnosticCoverage,
+    inventoryCoverage: coverage.inventoryCoverage,
+    renderRequiredCoverage: coverage.renderRequiredCoverage,
     breakdown: {
       scoringVersion: SCORING_VERSION,
       deduplicationVersion: DEDUPLICATION_VERSION,
       coverageModelVersion: COVERAGE_MODEL_VERSION,
+      availabilitySemanticsVersion: AVAILABILITY_SEMANTICS_VERSION,
       checkLogicVersion: CHECK_LOGIC_VERSION,
       scoreStatus,
       score,
@@ -152,10 +167,20 @@ function calculateModel(allRows, predicate) {
       rootCauseCount: capped.rootCauses.length,
       deduplicatedFindingCount,
       weightedCoverage: coverage.weightedCoverage,
+      primaryCoverage: coverage.primaryCoverage,
+      diagnosticCoverage: coverage.diagnosticCoverage,
+      inventoryCoverage: coverage.inventoryCoverage,
+      optionalCoverage: coverage.optionalCoverage,
+      renderRequiredCoverage: coverage.renderRequiredCoverage,
       eligibleWeight: coverage.eligibleWeight,
       evaluatedWeight: coverage.evaluatedWeight,
       excludedWeight: coverage.excludedWeight,
       notApplicableWeight: coverage.notApplicableWeight,
+      coverageUnits: coverage.units,
+      missingPrimaryEvidence: coverage.missingPrimaryEvidence,
+      omittedOptionalDiagnostics: coverage.omittedOptionalDiagnostics,
+      coverageTechnicalErrors: coverage.technicalErrors,
+      coverageBudgetExclusions: coverage.budgetExclusions,
       coverageThresholds: scoringConfig.coverageThresholds,
       scopeFormula: {
         expression: 'min(total_cap, (1 + logarithmic_step * log10(max(1, affected_url_count))) * scope_type_multiplier)',
@@ -216,9 +241,10 @@ function prepareRow(row = {}, index) {
   // Category penalty factors calibrate risk, but must not make a missing
   // category appear better covered merely because its findings carry a lower
   // score penalty.
-  const coverageWeight = round(baseCoverageWeight(row.priority, findingType), 4);
+  const availability = normalizeEvidenceAvailability({ ...row, checkId, evaluationState });
+  const coverageWeight = round(availability.coverageWeight, 4);
   const coverageEvaluated = EVALUATED_STATES.has(evaluationState) && confidence !== 'low';
-  const reliablyEvaluated = scoreEligible && coverageEvaluated;
+  const reliablyEvaluated = scoreEligible && coverageEvaluated && availability.coverageStatus === 'covered';
   const evidence = objectValue(row.evidence, row.evidenceJson);
   const facts = objectValue(row.facts, row.factsJson);
   const sampleUrls = arrayValue(row.sampleUrls, row.sampleUrlsJson);
@@ -238,6 +264,7 @@ function prepareRow(row = {}, index) {
     categoryKey,
     categoryFactor,
     coverageWeight,
+    ...availability,
     evidence,
     facts,
     sampleUrls,
@@ -253,10 +280,17 @@ function prepareRow(row = {}, index) {
 function calculateCoverage(rows) {
   const units = new Map();
   for (const row of rows) {
-    const key = coverageUnitKey(row);
-    const unit = units.get(key) || { key, rows: [], weight: 0, categoryKey: row.categoryKey };
+    const key = row.coverageUnitKey || coverageUnitKey(row);
+    const unit = units.get(key) || {
+      key,
+      rows: [],
+      weight: 0,
+      categoryKey: row.categoryKey,
+      evidenceClass: row.evidenceClass
+    };
     unit.rows.push(row);
     unit.weight = Math.max(unit.weight, row.coverageWeight);
+    unit.evidenceClass = strongerEvidenceClass(unit.evidenceClass, row.evidenceClass);
     units.set(key, unit);
   }
   let configuredWeight = 0;
@@ -264,33 +298,63 @@ function calculateCoverage(rows) {
   let evaluatedWeight = 0;
   let notApplicableWeight = 0;
   const categoryUnits = new Map();
+  const dimensionUnits = new Map();
+  const serializedUnits = [];
   for (const unit of units.values()) {
     configuredWeight += unit.weight;
-    const states = new Set(unit.rows.map((row) => row.evaluationState));
-    const isNotApplicable = [...states].every((state) => state === 'not_applicable');
-    // A deliberately score-free inventory or derived roll-up can still prove
-    // that the required facts were collected. Score eligibility and evidence
-    // coverage are independent dimensions.
-    const evaluated = unit.rows.some((row) => row.coverageEvaluated);
-    if (isNotApplicable) notApplicableWeight += unit.weight;
+    const statuses = new Set(unit.rows.map((row) => row.coverageStatus));
+    const excluded = [...statuses].every((status) => status === 'excluded');
+    const evaluated = unit.rows.some((row) => row.coverageStatus === 'covered');
+    const dimension = coverageDimension(unit.evidenceClass);
+    if (excluded) notApplicableWeight += unit.weight;
     else {
       eligibleWeight += unit.weight;
       if (evaluated) evaluatedWeight += unit.weight;
     }
-    const bucket = categoryUnits.get(unit.categoryKey) || { configuredWeight: 0, eligibleWeight: 0, evaluatedWeight: 0, notApplicableWeight: 0 };
+    const bucket = categoryUnits.get(unit.categoryKey) || coverageBucket();
     bucket.configuredWeight += unit.weight;
-    if (isNotApplicable) bucket.notApplicableWeight += unit.weight;
+    if (excluded) bucket.notApplicableWeight += unit.weight;
     else {
       bucket.eligibleWeight += unit.weight;
       if (evaluated) bucket.evaluatedWeight += unit.weight;
     }
+    addDimension(bucket, dimension, unit.weight, excluded, evaluated);
     categoryUnits.set(unit.categoryKey, bucket);
+    const dimensionBucket = dimensionUnits.get(dimension) || { eligibleWeight: 0, evaluatedWeight: 0 };
+    if (!excluded) {
+      dimensionBucket.eligibleWeight += unit.weight;
+      if (evaluated) dimensionBucket.evaluatedWeight += unit.weight;
+    }
+    dimensionUnits.set(dimension, dimensionBucket);
+    serializedUnits.push({
+      coverageUnitKey: unit.key,
+      evidenceClass: unit.evidenceClass,
+      category: unit.categoryKey,
+      weight: round(unit.weight, 3),
+      coverageStatus: excluded ? 'excluded' : evaluated ? 'covered' : 'uncovered',
+      checkIds: [...new Set(unit.rows.map((row) => row.checkId))].sort(),
+      reasons: [...new Set(unit.rows.map((row) => row.coverageReason).filter(Boolean))]
+    });
   }
   const categories = Object.fromEntries([...categoryUnits.entries()].map(([key, value]) => [key, {
     ...roundObject(value),
     weightedCoverage: percent(value.evaluatedWeight, value.eligibleWeight),
-    scoreStatus: coverageStatus(percent(value.evaluatedWeight, value.eligibleWeight))
+    primaryCoverage: percent(value.primaryEvaluatedWeight, value.primaryEligibleWeight),
+    diagnosticCoverage: percent(value.diagnosticEvaluatedWeight, value.diagnosticEligibleWeight),
+    inventoryCoverage: percent(value.inventoryEvaluatedWeight, value.inventoryEligibleWeight),
+    scoreStatus: value.primaryEligibleWeight > 0
+      ? coverageStatus(percent(value.primaryEvaluatedWeight, value.primaryEligibleWeight))
+      : 'not_applicable'
   }]));
+  const dimensionCoverage = (name) => {
+    const value = dimensionUnits.get(name) || { eligibleWeight: 0, evaluatedWeight: 0 };
+    return percent(value.evaluatedWeight, value.eligibleWeight);
+  };
+  const primaryCoverage = dimensionCoverage('primary');
+  const diagnosticCoverage = dimensionCoverage('diagnostic');
+  const inventoryCoverage = dimensionCoverage('inventory');
+  const optionalCoverage = dimensionCoverage('optional');
+  const primaryRows = rows.filter((row) => ['primary_required', 'primary_conditional'].includes(row.evidenceClass));
   return {
     configuredWeight: round(configuredWeight, 3),
     eligibleWeight: round(eligibleWeight, 3),
@@ -298,8 +362,103 @@ function calculateCoverage(rows) {
     excludedWeight: round(Math.max(0, eligibleWeight - evaluatedWeight), 3),
     notApplicableWeight: round(notApplicableWeight, 3),
     weightedCoverage: percent(evaluatedWeight, eligibleWeight),
+    primaryCoverage,
+    diagnosticCoverage,
+    inventoryCoverage,
+    optionalCoverage,
+    renderRequiredCoverage: renderRequiredCoverage(primaryRows),
+    units: serializedUnits.sort((left, right) => left.coverageUnitKey.localeCompare(right.coverageUnitKey)),
+    missingPrimaryEvidence: missingRows(primaryRows),
+    omittedOptionalDiagnostics: missingRows(rows.filter((row) => ['secondary_diagnostic', 'optional_opportunity'].includes(row.evidenceClass))),
+    technicalErrors: rows.filter((row) => row.executionStatus === 'technical_error').map(coverageException),
+    budgetExclusions: rows.filter((row) => row.executionStatus === 'skipped_by_budget').map(coverageException),
     categories
   };
+}
+
+function coverageBucket() {
+  return {
+    configuredWeight: 0,
+    eligibleWeight: 0,
+    evaluatedWeight: 0,
+    notApplicableWeight: 0,
+    primaryEligibleWeight: 0,
+    primaryEvaluatedWeight: 0,
+    diagnosticEligibleWeight: 0,
+    diagnosticEvaluatedWeight: 0,
+    inventoryEligibleWeight: 0,
+    inventoryEvaluatedWeight: 0,
+    optionalEligibleWeight: 0,
+    optionalEvaluatedWeight: 0
+  };
+}
+
+function addDimension(bucket, dimension, weight, excluded, evaluated) {
+  if (excluded) return;
+  const eligibleKey = `${dimension}EligibleWeight`;
+  const evaluatedKey = `${dimension}EvaluatedWeight`;
+  bucket[eligibleKey] = (bucket[eligibleKey] || 0) + weight;
+  if (evaluated) bucket[evaluatedKey] = (bucket[evaluatedKey] || 0) + weight;
+}
+
+function coverageDimension(evidenceClass) {
+  if (['primary_required', 'primary_conditional'].includes(evidenceClass)) return 'primary';
+  if (evidenceClass === 'secondary_diagnostic') return 'diagnostic';
+  if (evidenceClass === 'inventory') return 'inventory';
+  return 'optional';
+}
+
+function strongerEvidenceClass(left, right) {
+  const rank = {
+    primary_required: 5,
+    primary_conditional: 4,
+    inventory: 3,
+    secondary_diagnostic: 2,
+    optional_opportunity: 1
+  };
+  return (rank[right] || 0) > (rank[left] || 0) ? right : left;
+}
+
+function missingRows(rows) {
+  const missing = rows.filter((row) => !['covered', 'excluded'].includes(row.coverageStatus));
+  const units = groupBy(missing, (row) => row.coverageUnitKey || `check:${row.checkId}`);
+  return [...units.values()].map((members) => ({
+    ...coverageException(members[0]),
+    checkIds: [...new Set(members.map((row) => row.checkId))].sort()
+  }));
+}
+
+function coverageException(row) {
+  return {
+    checkId: row.checkId,
+    evidenceClass: row.evidenceClass,
+    executionStatus: row.executionStatus,
+    evidenceStatus: row.evidenceStatus,
+    coverageStatus: row.coverageStatus,
+    coverageUnitKey: row.coverageUnitKey,
+    reason: row.coverageReason || null
+  };
+}
+
+function renderRequiredCoverage(rows) {
+  const applicable = rows.filter((row) => row.checkId === 'tech.js_dependent_content' && row.evidenceClass === 'primary_conditional');
+  if (!applicable.length) return 100;
+  return percent(
+    applicable.filter((row) => row.coverageStatus === 'covered').length,
+    applicable.filter((row) => row.coverageStatus !== 'excluded').length
+  );
+}
+
+function coverageHeadlineStatus(coverage) {
+  const primaryStatus = coverageStatus(coverage.primaryCoverage);
+  if (primaryStatus !== 'final') return primaryStatus;
+  if (coverage.renderRequiredCoverage < 100) return 'provisional';
+  const criticalCategoryIncomplete = Object.entries(coverage.categories || {}).some(([category, value]) =>
+    ['technical_seo', 'crawling_indexing', 'html_meta', 'structured_data', 'performance'].includes(category)
+      && value.primaryEligibleWeight > 0
+      && value.primaryCoverage < scoringConfig.coverageThresholds.provisional
+  );
+  return criticalCategoryIncomplete ? 'provisional' : 'final';
 }
 
 function buildRootCauses(rows) {
@@ -470,7 +629,7 @@ function categoryBreakdown(rows, rootCauses, coverageCategories) {
     const appliedPenalty = round(sum(roots, 'appliedPenalty'), 3);
     const rawPenalty = round(sum(roots, 'rawPenalty'), 3);
     const diagnosticScore = clamp(Math.round(100 - appliedPenalty), 0, 100);
-    const score = coverage.scoreStatus === 'insufficient_coverage' ? null : diagnosticScore;
+    const score = ['insufficient_coverage', 'not_applicable'].includes(coverage.scoreStatus) ? null : diagnosticScore;
     const categoryName = roots[0]?.category || rows.find((row) => row.categoryKey === categoryKey)?.category || categoryKey;
     return {
       category: categoryName,
@@ -479,6 +638,9 @@ function categoryBreakdown(rows, rootCauses, coverageCategories) {
       diagnosticScore,
       scoreStatus: coverage.scoreStatus,
       weightedCoverage: coverage.weightedCoverage,
+      primaryCoverage: coverage.primaryCoverage ?? 0,
+      diagnosticCoverage: coverage.diagnosticCoverage ?? 0,
+      inventoryCoverage: coverage.inventoryCoverage ?? 0,
       eligibleWeight: coverage.eligibleWeight,
       evaluatedWeight: coverage.evaluatedWeight,
       excludedWeight: round(Math.max(0, coverage.eligibleWeight - coverage.evaluatedWeight), 3),

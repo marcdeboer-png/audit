@@ -206,6 +206,7 @@ test('score calibration prioritizes critical risks, deduplicates root causes and
 
   const restricted = computeScores([
     pass,
+    resultRow('second-primary-pass', 'OK'),
     { ...resultRow('missing-data', 'NA'), score: null, evaluationState: 'insufficient_evidence', scoreEligible: false, scoreExclusionReason: 'missing extractor fact' }
   ]);
   assert.equal(restricted.overallScore, 100);
@@ -215,7 +216,7 @@ test('score calibration prioritizes critical risks, deduplicates root causes and
   assert.ok(restricted.breakdown.dataCoveragePct < 100);
   assert.equal(restricted.breakdown.excluded[0].reason, 'missing extractor fact');
 
-  const complete = computeScores([pass, resultRow('second-pass', 'OK')]);
+  const complete = computeScores([pass, resultRow('second-primary-pass', 'OK'), resultRow('second-pass', 'OK')]);
   assert.equal(complete.overallScore, restricted.overallScore);
   assert.ok(complete.breakdown.dataCoveragePct > restricted.breakdown.dataCoveragePct);
 });

@@ -156,6 +156,7 @@ export function initDatabase(database = getDb()) {
       scoringVersion TEXT,
       deduplicationVersion TEXT,
       coverageModelVersion TEXT,
+      availabilitySemanticsVersion TEXT,
       checkLogicVersion TEXT,
       scoreStatus TEXT,
       overallScore REAL,
@@ -552,6 +553,15 @@ export function initDatabase(database = getDb()) {
       deduplicationConfidence TEXT,
       deduplicationReason TEXT,
       rootCauseMembershipsJson TEXT,
+      evidenceClass TEXT,
+      executionStatus TEXT,
+      evidenceStatus TEXT,
+      evaluationStatus TEXT,
+      coverageStatus TEXT,
+      coverageUnitKey TEXT,
+      coverageWeight REAL,
+      coverageReason TEXT,
+      availabilitySemanticsVersion TEXT,
       createdAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (runId) REFERENCES runs(id)
     );
@@ -1098,6 +1108,7 @@ export function initDatabase(database = getDb()) {
     ['scoringVersion', 'TEXT'],
     ['deduplicationVersion', 'TEXT'],
     ['coverageModelVersion', 'TEXT'],
+    ['availabilitySemanticsVersion', 'TEXT'],
     ['checkLogicVersion', 'TEXT'],
     ['scoreStatus', 'TEXT'],
     ['overallScore', 'REAL'],
@@ -1204,8 +1215,21 @@ export function initDatabase(database = getDb()) {
     ['primaryCheckId', 'TEXT'],
     ['deduplicationConfidence', 'TEXT'],
     ['deduplicationReason', 'TEXT'],
-    ['rootCauseMembershipsJson', 'TEXT']
+    ['rootCauseMembershipsJson', 'TEXT'],
+    ['evidenceClass', 'TEXT'],
+    ['executionStatus', 'TEXT'],
+    ['evidenceStatus', 'TEXT'],
+    ['evaluationStatus', 'TEXT'],
+    ['coverageStatus', 'TEXT'],
+    ['coverageUnitKey', 'TEXT'],
+    ['coverageWeight', 'REAL'],
+    ['coverageReason', 'TEXT'],
+    ['availabilitySemanticsVersion', 'TEXT']
   ]);
+  database.exec(`
+    CREATE INDEX IF NOT EXISTS idx_check_results_run_coverage_unit
+      ON check_results(runId, coverageUnitKey)
+  `);
 
   ensureColumns(database, 'playwright_results', [
     ['pageErrorsCount', 'INTEGER'],

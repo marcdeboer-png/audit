@@ -23,6 +23,7 @@ import { collectCsvExport } from '../src/reports/csvExporter.js';
 import { collectFullAuditJson } from '../src/results/checkExportService.js';
 import { generateReport } from '../src/reports/reportGenerator.js';
 import { getCheckDetail } from '../src/results/checkDetailService.js';
+import { applyEvidenceAvailability } from '../src/coverage/evidenceCoverage.js';
 
 test('severity calibration, score-free states and optional-low budget satisfy invariants', () => {
   const pass = finding('pass', { status: 'OK', severity: 'none' });
@@ -173,10 +174,11 @@ test('weighted coverage controls final, provisional and insufficient headline sc
     finding('tech.complete', { status: 'OK', severity: 'none', category: 'Server & Infrastructure' }),
     finding('geo.missing', { evaluationState: 'technical_error', status: 'NA', scoreEligible: false, auditType: 'geo', category: 'GEO Opportunities' })
   ]);
-  assert.equal(categories.weightedCoverage, 50, 'penalty category factors must not inflate evidence coverage');
+  assert.equal(categories.primaryCoverage, 100, 'an optional GEO diagnostic must not reduce primary evidence coverage');
+  assert.equal(categories.weightedCoverage, 95.2, 'optional evidence remains visible at its reduced diagnostic weight');
   const categoryRows = categories.breakdown.categoryScores;
   assert.equal(categoryRows.find((row) => row.categoryKey === 'technical_seo').scoreStatus, 'final');
-  assert.equal(categoryRows.find((row) => row.categoryKey === 'geo').scoreStatus, 'insufficient_coverage');
+  assert.equal(categoryRows.find((row) => row.categoryKey === 'geo').scoreStatus, 'not_applicable');
   assert.equal(categoryRows.find((row) => row.categoryKey === 'geo').score, null);
 });
 
@@ -233,7 +235,7 @@ test('versioned score snapshot stays consistent across DB, HTML, JSON, CSV and d
       scopeType: 'resource',
       affectedCount: 1000
     }))
-  ];
+  ].map((row) => applyEvidenceAvailability(row));
   insertCheckResults(db, runId, rows);
   const calculated = computeScores(rows);
   persistRunScores(db, runId, calculated);
@@ -252,13 +254,21 @@ test('versioned score snapshot stays consistent across DB, HTML, JSON, CSV and d
   assert.equal(fullJson.scores.breakdown.rootCauseCount, 5);
   assert.equal(fullJson.scores.scoreStatus, calculated.scoreStatus);
   assert.equal(fullJson.scores.weightedCoverage, calculated.weightedCoverage);
+  assert.equal(fullJson.scores.primaryCoverage, calculated.primaryCoverage);
+  assert.equal(fullJson.scores.availabilitySemanticsVersion, calculated.availabilitySemanticsVersion);
+  assert.deepEqual(fullJson.scores.breakdown.coverageUnits, calculated.breakdown.coverageUnits);
   assert.deepEqual(fullJson.scores.breakdown.categoryScores, calculated.breakdown.categoryScores);
   assert.deepEqual(fullJson.scores.breakdown.capsApplied, calculated.breakdown.capsApplied);
   const csv = collectCsvExport(db, runId, 'score-root-causes');
   assert.match(csv, new RegExp(`${SCORING_VERSION}.*shared\.failure`));
   assert.match(csv, /category:media/);
+  const coverageCsv = collectCsvExport(db, runId, 'coverage-units');
+  assert.match(coverageCsv, /evidence-class-coverage-v3/);
+  assert.match(coverageCsv, /primary_required/);
   const resultId = db.prepare("SELECT id FROM check_results WHERE runId=? AND checkId='tech.primary'").get(runId).id;
   const detail = getCheckDetail(db, runId, resultId);
+  assert.equal(detail.evidenceClass, 'primary_required');
+  assert.equal(detail.coverageStatus, 'covered');
   assert.equal(detail.rootCauseMemberships.length, 1);
   assert.equal(detail.rootCauseMemberships[0].appliedPenalty, calculated.breakdown.rootCauses[0].appliedPenalty);
   const reportPath = generateReport(db, runId);
@@ -267,6 +277,8 @@ test('versioned score snapshot stays consistent across DB, HTML, JSON, CSV and d
   assert.match(html, new RegExp(String(calculated.breakdown.appliedPenalty).replace('.', '\\.')));
   assert.match(html, /category:media/);
   assert.match(html, /export\/score-root-causes\.csv/);
+  assert.match(html, /Primary Coverage/);
+  assert.match(html, /export\/coverage-units\.csv/);
   fs.rmSync(reportPath, { force: true });
   db.close();
 });

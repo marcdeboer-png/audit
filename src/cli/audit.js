@@ -148,4 +148,9 @@ console.log(`Domain: ${run.finalDomain || run.inputDomain}`);
 console.log(`Processed: ${run.processedUrls}, success: ${run.successfulUrls}, failed: ${run.failedUrls}, skipped: ${run.skippedUrls}`);
 console.log(`Scores: tech=${scores.techScore ?? 'NA'} geo=${scores.geoScore ?? 'NA'} overall=${scores.overallScore ?? 'NA'}`);
 console.log(`Score status: ${scores.scoreStatus || 'historical_unknown'}; weighted coverage=${scores.weightedCoverage ?? 'unknown'}%`);
+console.log(`Coverage dimensions: primary=${formatCoverage(scores.primaryCoverage)} diagnostic=${formatCoverage(scores.diagnosticCoverage)} inventory=${formatCoverage(scores.inventoryCoverage)}`);
 console.log(`Report: reports/run-${runId}.html`);
+
+function formatCoverage(value) {
+  return value === null || value === undefined ? 'historical_unknown' : `${value}%`;
+}

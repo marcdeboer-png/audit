@@ -648,10 +648,13 @@ function lighthouseSummaryTable(lighthouseResults, samplingSummary) {
 
 function executiveSummary({ run, scores, reportStats, samplingSummary }) {
   const messages = [];
+  const primaryCoverageKnown = scores.primaryCoverage !== null && scores.primaryCoverage !== undefined;
+  const headlineCoverage = primaryCoverageKnown ? scores.primaryCoverage : scores.weightedCoverage ?? 0;
+  const headlineCoverageLabel = primaryCoverageKnown ? 'primary evidence coverage' : 'historical weighted evidence coverage';
   if (scores.scoreStatus === 'insufficient_coverage') {
-    messages.push(`No regular headline score is available because weighted evidence coverage is ${scores.weightedCoverage || 0}%.`);
+    messages.push(`No regular headline score is available because ${headlineCoverageLabel} is ${headlineCoverage}%.`);
   } else if (scores.scoreStatus === 'provisional') {
-    messages.push(`The headline score is provisional at ${scores.weightedCoverage || 0}% weighted evidence coverage.`);
+    messages.push(`The headline score is provisional at ${headlineCoverage}% ${headlineCoverageLabel}.`);
   }
   if (reportStats.highPriorityErrorCount) {
     messages.push(`${reportStats.highPriorityErrorCount} critical issue(s) require review.`);
@@ -680,6 +683,9 @@ function executiveSummary({ run, scores, reportStats, samplingSummary }) {
     ['Overall Score', formatPercentScore(scores.overallScore)],
     ['Score Status', scores.scoreStatus || 'historical_unknown'],
     ['Weighted Coverage', scores.weightedCoverage === null || scores.weightedCoverage === undefined ? 'unknown' : `${scores.weightedCoverage}%`],
+    ['Primary Coverage', scores.primaryCoverage === null || scores.primaryCoverage === undefined ? 'historical unknown' : `${scores.primaryCoverage}%`],
+    ['Diagnostic Coverage', scores.diagnosticCoverage === null || scores.diagnosticCoverage === undefined ? 'historical unknown' : `${scores.diagnosticCoverage}%`],
+    ['Inventory Coverage', scores.inventoryCoverage === null || scores.inventoryCoverage === undefined ? 'historical unknown' : `${scores.inventoryCoverage}%`],
     ['Tech Score', formatPercentScore(scores.techScore)],
     ['GEO Score', formatPercentScore(scores.geoScore)],
     ['Action Items', reportStats.actionItemCount],
@@ -764,14 +770,19 @@ function scoreCard(label, value, status = null) {
 function scoreBreakdownSection(breakdown = {}) {
   if (!breakdown || !breakdown.scoringModel) return '<p class="muted">No score breakdown is available.</p>';
   if (breakdown.scoringVersion) {
+    const hasEvidenceClassCoverage = breakdown.coverageModelVersion === 'evidence-class-coverage-v3';
     const summary = [{
       scoringVersion: breakdown.scoringVersion,
       deduplicationVersion: breakdown.deduplicationVersion,
       coverageModelVersion: breakdown.coverageModelVersion,
+      availabilitySemanticsVersion: breakdown.availabilitySemanticsVersion,
       scoreStatus: breakdown.scoreStatus,
       score: breakdown.score,
       diagnosticScore: breakdown.diagnosticScore,
       weightedCoverage: `${breakdown.weightedCoverage}%`,
+      primaryCoverage: hasEvidenceClassCoverage ? `${breakdown.primaryCoverage ?? 'unknown'}%` : 'historical unknown',
+      diagnosticCoverage: hasEvidenceClassCoverage ? `${breakdown.diagnosticCoverage ?? 'unknown'}%` : 'historical unknown',
+      inventoryCoverage: hasEvidenceClassCoverage ? `${breakdown.inventoryCoverage ?? 'unknown'}%` : 'historical unknown',
       rawFindings: breakdown.rawFindingCount,
       scoredFindings: breakdown.scoredFindingCount,
       rootCauses: breakdown.rootCauseCount,
@@ -779,16 +790,24 @@ function scoreBreakdownSection(breakdown = {}) {
       rawPenalty: breakdown.rawPenalty,
       appliedPenalty: breakdown.appliedPenalty
     }];
-    const notice = breakdown.scoreStatus === 'insufficient_coverage'
-      ? 'Weighted evidence coverage is below 60%. No regular headline score is shown; the diagnostic value explains only the observed penalties.'
+    const notice = !hasEvidenceClassCoverage
+      ? `Historical coverage snapshot ${breakdown.coverageModelVersion || 'unknown'} is preserved; evidence classes and dimensional coverage were not recorded for this run.`
+      : breakdown.scoreStatus === 'insufficient_coverage'
+      ? 'Primary evidence coverage is below 60%. No regular headline score is shown; the diagnostic value explains only the observed penalties.'
       : breakdown.scoreStatus === 'provisional'
-        ? 'Weighted evidence coverage is between 60% and 80%. The score is provisional and may be biased by missing categories or measurements.'
-        : 'Weighted evidence coverage is at least 80%. The score is final for the configured and collected audit scope.';
+        ? 'Primary evidence coverage is between 60% and 80%, or a critical planned category remains materially incomplete. The score is provisional.'
+        : 'Final means that the planned primary evidence is sufficiently complete. It does not mean that every optional diagnostic was executed.';
     return `<section class="summary">
       <div class="notice">${escapeHtml(notice)}</div>
-      ${simpleTable(summary, ['scoringVersion', 'deduplicationVersion', 'coverageModelVersion', 'scoreStatus', 'score', 'diagnosticScore', 'weightedCoverage', 'rawFindings', 'scoredFindings', 'rootCauses', 'deduplicatedFindings', 'rawPenalty', 'appliedPenalty'])}
+      ${simpleTable(summary, ['scoringVersion', 'deduplicationVersion', 'coverageModelVersion', 'availabilitySemanticsVersion', 'scoreStatus', 'score', 'diagnosticScore', 'primaryCoverage', 'diagnosticCoverage', 'inventoryCoverage', 'weightedCoverage', 'rawFindings', 'scoredFindings', 'rootCauses', 'deduplicatedFindings', 'rawPenalty', 'appliedPenalty'])}
       <h3>Category Coverage and Penalties</h3>
-      ${simpleTable((breakdown.categoryScores || []).slice(0, 30), ['category', 'scoreStatus', 'score', 'diagnosticScore', 'weightedCoverage', 'rootCauseCount', 'rawPenalty', 'appliedPenalty'], 'No category scores.')}
+      ${simpleTable((breakdown.categoryScores || []).slice(0, 30), ['category', 'scoreStatus', 'score', 'diagnosticScore', 'primaryCoverage', 'diagnosticCoverage', 'inventoryCoverage', 'weightedCoverage', 'rootCauseCount', 'rawPenalty', 'appliedPenalty'], 'No category scores.')}
+      <h3>Missing Primary Evidence</h3>
+      ${simpleTable((breakdown.missingPrimaryEvidence || []).slice(0, 80), ['checkId', 'evidenceClass', 'executionStatus', 'evidenceStatus', 'coverageStatus', 'coverageUnitKey', 'reason'], 'No planned primary evidence is missing.')}
+      <h3>Optional Diagnostics Not Executed</h3>
+      ${simpleTable((breakdown.omittedOptionalDiagnostics || []).slice(0, 80), ['checkId', 'evidenceClass', 'executionStatus', 'evidenceStatus', 'coverageStatus', 'coverageUnitKey', 'reason'], 'No optional diagnostic omissions.')}
+      <h3>Coverage Units</h3>
+      ${simpleTable((breakdown.coverageUnits || []).slice(0, 120), ['coverageUnitKey', 'evidenceClass', 'category', 'weight', 'coverageStatus', 'checkIds', 'reasons'], 'No coverage units.')}
       <h3>Root-Cause Deductions</h3>
       ${simpleTable((breakdown.rootCauses || []).slice(0, 50), ['rootCauseId', 'rootCauseFamily', 'primaryCheckId', 'severity', 'confidence', 'scopeType', 'affectedUrlCount', 'relatedCheckIds', 'rawPenalty', 'appliedPenalty', 'deduplicationReason'], 'No score deductions.')}
       <h3>Applied Caps</h3>
@@ -877,6 +896,7 @@ function csvExportLinks(runId) {
   const exports = [
     ['Findings CSV', 'findings'],
     ['Score Root Causes CSV', 'score-root-causes'],
+    ['Coverage Units CSV', 'coverage-units'],
     ['URL Inventory CSV', 'pages'],
     ['Links CSV', 'links'],
     ['Images CSV', 'images'],
