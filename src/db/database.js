@@ -75,6 +75,14 @@ export function initDatabase(database = getDb()) {
       usePlaywright INTEGER NOT NULL DEFAULT 0,
       playwrightMode TEXT NOT NULL DEFAULT 'off',
       playwrightSampleLimit INTEGER NOT NULL DEFAULT 50,
+      metricsMode TEXT NOT NULL DEFAULT 'basic',
+      renderPlanningVersion TEXT,
+      runtimeMetricsVersion TEXT,
+      maxRenderedUrls INTEGER,
+      maxTotalRenderTimeMs INTEGER,
+      maxSettlingTimeMsPerUrl INTEGER,
+      maxBrowserFailures INTEGER,
+      maxPersistedRenderBytes INTEGER,
       renderedPagesCount INTEGER NOT NULL DEFAULT 0,
       lockToken TEXT,
       lockedAt TEXT,
@@ -772,6 +780,91 @@ export function initDatabase(database = getDb()) {
       FOREIGN KEY (runId) REFERENCES runs(id)
     );
 
+    CREATE TABLE IF NOT EXISTS run_runtime_metrics (
+      runId INTEGER PRIMARY KEY,
+      metricsMode TEXT NOT NULL,
+      metricsVersion TEXT NOT NULL,
+      runStartedAt TEXT,
+      runFinishedAt TEXT,
+      totalDurationMs INTEGER,
+      rawFetchDurationMs INTEGER NOT NULL DEFAULT 0,
+      renderDurationMs INTEGER NOT NULL DEFAULT 0,
+      checkExecutionDurationMs INTEGER NOT NULL DEFAULT 0,
+      reportGenerationDurationMs INTEGER NOT NULL DEFAULT 0,
+      browserLaunchDurationMs INTEGER NOT NULL DEFAULT 0,
+      renderedUrlCount INTEGER NOT NULL DEFAULT 0,
+      nonRenderedUrlCount INTEGER NOT NULL DEFAULT 0,
+      browserLaunchCount INTEGER NOT NULL DEFAULT 0,
+      browserRestartCount INTEGER NOT NULL DEFAULT 0,
+      browserFailureCount INTEGER NOT NULL DEFAULT 0,
+      settlingTimeoutCount INTEGER NOT NULL DEFAULT 0,
+      renderingUnstableCount INTEGER NOT NULL DEFAULT 0,
+      navigationFailureCount INTEGER NOT NULL DEFAULT 0,
+      processRssBefore INTEGER,
+      processRssPeak INTEGER,
+      processRssAfter INTEGER,
+      heapUsedBefore INTEGER,
+      heapUsedPeak INTEGER,
+      heapUsedAfter INTEGER,
+      browserProcessRss INTEGER,
+      browserChildProcessCount INTEGER,
+      cpuUserMs INTEGER,
+      cpuSystemMs INTEGER,
+      databaseBytesBefore INTEGER,
+      databaseBytesAfter INTEGER,
+      databaseBytesDelta INTEGER,
+      renderProvenanceRecordCount INTEGER NOT NULL DEFAULT 0,
+      renderProvenanceBytesTotal INTEGER NOT NULL DEFAULT 0,
+      renderProvenanceBytesAverage REAL,
+      renderProvenanceBytesMedian REAL,
+      renderProvenanceBytesP90 REAL,
+      renderProvenanceBytesP95 REAL,
+      renderProvenanceBytesMaximum INTEGER,
+      summaryJson TEXT,
+      completionStatus TEXT,
+      createdAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updatedAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (runId) REFERENCES runs(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS url_runtime_metrics (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      runId INTEGER NOT NULL,
+      url TEXT NOT NULL,
+      pageType TEXT NOT NULL DEFAULT 'other',
+      rawContentClass TEXT,
+      templateClusterKey TEXT,
+      renderStrategy TEXT NOT NULL DEFAULT 'raw_only',
+      renderNeed TEXT,
+      renderDecision TEXT,
+      renderDecisionReasonJson TEXT,
+      renderSignalsJson TEXT,
+      renderUnmetPrerequisitesJson TEXT,
+      renderConfidence TEXT,
+      requestedCheckFamiliesJson TEXT,
+      budgetStatusJson TEXT,
+      resultingBrowserRun INTEGER NOT NULL DEFAULT 0,
+      rawFetchDurationMs INTEGER,
+      browserNavigationDurationMs INTEGER,
+      settlingDurationMs INTEGER,
+      snapshotCount INTEGER,
+      extractionDurationMs INTEGER,
+      persistenceDurationMs INTEGER,
+      totalUrlDurationMs INTEGER,
+      rawHtmlBytes INTEGER,
+      renderProvenanceBytes INTEGER,
+      networkRequestCount INTEGER,
+      failedRequestCount INTEGER,
+      finalSettlingStatus TEXT,
+      renderStatus TEXT,
+      measurementError TEXT,
+      metricsVersion TEXT NOT NULL,
+      createdAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updatedAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (runId) REFERENCES runs(id),
+      UNIQUE(runId, url)
+    );
+
     CREATE UNIQUE INDEX IF NOT EXISTS idx_crawl_queue_run_normalized
       ON crawl_queue(runId, normalizedUrl);
     CREATE INDEX IF NOT EXISTS idx_crawl_queue_run_status_priority
@@ -828,6 +921,10 @@ export function initDatabase(database = getDb()) {
       ON targeted_evidence_facts(jobId);
     CREATE INDEX IF NOT EXISTS idx_targeted_evidence_facts_run_type
       ON targeted_evidence_facts(runId, jobType, normalizedUrl);
+    CREATE INDEX IF NOT EXISTS idx_url_runtime_metrics_run_decision
+      ON url_runtime_metrics(runId, renderDecision);
+    CREATE INDEX IF NOT EXISTS idx_url_runtime_metrics_run_page_type
+      ON url_runtime_metrics(runId, pageType);
   `);
 
   ensureColumns(database, 'pages', [
@@ -915,6 +1012,14 @@ export function initDatabase(database = getDb()) {
     ['usePlaywright', 'INTEGER NOT NULL DEFAULT 0'],
     ['playwrightMode', "TEXT NOT NULL DEFAULT 'off'"],
     ['playwrightSampleLimit', 'INTEGER NOT NULL DEFAULT 50'],
+    ['metricsMode', "TEXT NOT NULL DEFAULT 'basic'"],
+    ['renderPlanningVersion', 'TEXT'],
+    ['runtimeMetricsVersion', 'TEXT'],
+    ['maxRenderedUrls', 'INTEGER'],
+    ['maxTotalRenderTimeMs', 'INTEGER'],
+    ['maxSettlingTimeMsPerUrl', 'INTEGER'],
+    ['maxBrowserFailures', 'INTEGER'],
+    ['maxPersistedRenderBytes', 'INTEGER'],
     ['renderedPagesCount', 'INTEGER NOT NULL DEFAULT 0'],
     ['lockToken', 'TEXT'],
     ['lockedAt', 'TEXT'],
@@ -995,6 +1100,9 @@ export function initDatabase(database = getDb()) {
     ['geoScore', 'REAL'],
     ['scoreBreakdownJson', 'TEXT'],
     ['scoreComputedAt', 'TEXT']
+  ]);
+  ensureColumns(database, 'url_runtime_metrics', [
+    ['rawContentClass', 'TEXT']
   ]);
 
   ensureColumns(database, 'scheduled_runs', [

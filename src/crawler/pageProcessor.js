@@ -1,4 +1,5 @@
 import { extractHtml } from '../extractors/htmlExtractor.js';
+import { performance } from 'node:perf_hooks';
 import { renderPage } from '../extractors/renderExtractor.js';
 import { insertPage, logRun, replacePageArtifacts, upsertPageSnapshot } from '../db/repositories.js';
 import { totalCount } from '../queue/sqliteQueue.js';
@@ -9,11 +10,14 @@ import { createHttpStatusError } from './retryPolicy.js';
 import { crawlerDefaults } from './defaults.js';
 import { filterArtifactsForStorage, snapshotHtml } from '../storage/retention.js';
 import { buildEffectiveDocumentState, RENDER_PROVENANCE_VERSION, SETTLING_POLICY_VERSION } from '../extractors/documentState.js';
+import { classifyRenderNeed, RENDER_NEEDS } from '../rendering/renderPlanner.js';
+import { serializedRenderProvenanceBytes } from '../runtime/renderMetrics.js';
 
 const RETRY_STATUS_CODES = new Set(crawlerDefaults.retryStatusCodes);
 const renderSlots = new Map();
 
-export async function processQueueItem(db, run, project, queueItem, browser, robots) {
+export async function processQueueItem(db, run, project, queueItem, browser, robots, runtimeMetrics = null) {
+  const totalStartedAt = performance.now();
   const url = queueItem.url || queueItem.normalizedUrl;
   const finalDomain = project.finalDomain;
 
@@ -21,7 +25,9 @@ export async function processQueueItem(db, run, project, queueItem, browser, rob
     return { status: 'skipped', reason: 'Blocked by robots.txt' };
   }
 
+  const fetchStartedAt = performance.now();
   const response = await fetchWithTimeout(url, { timeoutMs: run.requestTimeoutMs || 15000, maxBytes: 5 * 1024 * 1024, userAgent: run.userAgent });
+  const rawFetchDurationMs = performance.now() - fetchStartedAt;
   if (RETRY_STATUS_CODES.has(Number(response.statusCode))) {
     throw createHttpStatusError(response.statusCode, url);
   }
@@ -31,6 +37,7 @@ export async function processQueueItem(db, run, project, queueItem, browser, rob
   const isHtml = /text\/html|application\/xhtml\+xml/i.test(contentType);
 
   if (!isHtml) {
+    const persistenceStartedAt = performance.now();
     insertPage(db, emptyPageRecord({
       runId: run.id,
       queueItem,
@@ -44,16 +51,45 @@ export async function processQueueItem(db, run, project, queueItem, browser, rob
       loadTimeMs: response.loadTimeMs,
       ttfbMs: response.ttfbMs
     }));
+    runtimeMetrics?.recordUrl({
+      url,
+      pageType: 'other',
+      renderStrategy: renderStrategy(run),
+      renderNeed: RENDER_NEEDS.notRequired,
+      renderDecision: RENDER_NEEDS.notRequired,
+      reason: { summary: 'Non-HTML resources are outside browser document rendering scope.' },
+      renderConfidence: 'high',
+      rawFetchDurationMs,
+      persistenceDurationMs: performance.now() - persistenceStartedAt,
+      totalUrlDurationMs: performance.now() - totalStartedAt,
+      rawHtmlBytes: response.sizeBytes,
+      renderStatus: 'not_applicable',
+      finalSettlingStatus: 'not_applicable'
+    });
     return { status: 'done', reason: 'Non-HTML response recorded' };
   }
 
+  const extractionStartedAt = performance.now();
   const extracted = extractHtml(response.body, normalizedFinalUrl, finalDomain, response.headers);
+  const extractionDurationMs = performance.now() - extractionStartedAt;
+  const renderNeed = classifyRenderNeed({
+    ...extracted.page,
+    rawDocumentStateJson: extracted.page.rawDocumentStateJson,
+    scriptCount: extracted.resources.filter((resource) => resource.resourceType === 'script').length,
+    hydrationBytes: hydrationPayloadBytes(response.body)
+  });
   const shouldRender = shouldRenderPage(db, run, browser);
+  let budget = { allowed: false, reason: 'not_requested' };
+  let renderDurationMs = 0;
   const render = shouldRender
-    ? await withRenderSlot(run.id, run.maxConcurrentRenderedPages || crawlerDefaults.maxConcurrentRenderedPages, () => renderPage(browser, normalizedFinalUrl, finalDomain, run.requestTimeoutMs || 15000, run.userAgent, {
+    ? await withRenderSlot(run.id, run.maxConcurrentRenderedPages || crawlerDefaults.maxConcurrentRenderedPages, async () => {
+        budget = currentRenderBudget(db, run);
+        if (!budget.allowed) return emptyRenderResult({ settlingStatus: 'render_budget_exhausted', renderStatus: 'not_executed' });
+        const renderStartedAt = performance.now();
+        const result = await renderPage(browser, normalizedFinalUrl, finalDomain, run.requestTimeoutMs || 15000, run.userAgent, {
         captureHtml: Boolean(run.storeRenderedHtml),
         settling: {
-          maxDurationMs: run.renderSettlingMaxMs,
+          maxDurationMs: Math.min(run.renderSettlingMaxMs, run.maxSettlingTimeMsPerUrl || run.renderSettlingMaxMs),
           intervalMs: run.renderSettlingIntervalMs,
           maxSnapshots: run.renderSettlingMaxSnapshots,
           stableSnapshots: run.renderSettlingStableSnapshots,
@@ -63,8 +99,12 @@ export async function processQueueItem(db, run, project, queueItem, browser, rob
           const current = db.prepare('SELECT status FROM runs WHERE id = ?').get(run.id);
           return !current || !['running', 'pending'].includes(current.status);
         }
-      }))
+        });
+        renderDurationMs = performance.now() - renderStartedAt;
+        return result;
+      })
     : emptyRenderResult();
+  if (shouldRender && budget.allowed) runtimeMetrics?.recordRenderUsage({ durationMs: renderDurationMs, failure: render.renderStatus === 'technical_error' });
   const resources = dedupeResources([...extracted.resources, ...render.resources]);
 
   const rawDocumentState = safeJson(extracted.page.rawDocumentStateJson);
@@ -72,7 +112,7 @@ export async function processQueueItem(db, run, project, queueItem, browser, rob
   const settledRenderedState = safeJson(render.settledRenderedStateJson);
   const effectiveDocumentState = buildEffectiveDocumentState(rawDocumentState, initialRenderedState, settledRenderedState, render);
   const effective = Object.fromEntries(Object.entries(effectiveDocumentState.fields || {}).map(([key, value]) => [key, value.effective]));
-  const renderedMeasurementComplete = metadataProvenanceIsComplete(run, shouldRender, render);
+  const renderedMeasurementComplete = metadataProvenanceIsComplete(run, shouldRender && budget.allowed, render, renderNeed);
   const pageRecord = {
     runId: run.id,
     url,
@@ -130,6 +170,7 @@ export async function processQueueItem(db, run, project, queueItem, browser, rob
     effectiveSchemaTypesJson: JSON.stringify(effective.structuredData?.types || [])
   };
 
+  const persistenceStartedAt = performance.now();
   insertPage(db, pageRecord);
   replacePageArtifacts(db, run.id, normalizedFinalUrl, filterArtifactsForStorage(run, {
     links: extracted.links.map((link) => ({ ...link, sourceUrl: normalizedFinalUrl })),
@@ -153,6 +194,38 @@ export async function processQueueItem(db, run, project, queueItem, browser, rob
       renderedHtmlTruncated: renderedSnapshot.truncated
     });
   }
+  const persistenceDurationMs = performance.now() - persistenceStartedAt;
+  const actualDecision = shouldRender && !budget.allowed ? 'render_budget_exhausted'
+    : (!browser && run.usePlaywright && ['all', 'sample'].includes(run.playwrightMode) ? 'render_unavailable' : renderNeed.decision);
+  runtimeMetrics?.recordUrl({
+    url,
+    pageType: extracted.page.pageType,
+    rawContentClass: renderNeed.rawClass,
+    renderStrategy: renderStrategy(run),
+    renderNeed: renderNeed.decision,
+    renderDecision: actualDecision,
+    reason: { summary: renderNeed.reason },
+    renderSignals: renderNeed.signals,
+    renderUnmetPrerequisites: renderNeed.unmetPrerequisites,
+    renderConfidence: renderNeed.confidence,
+    requestedCheckFamilies: renderNeed.requestedCheckFamilies,
+    budgetStatus: budget,
+    resultingBrowserRun: shouldRender && budget.allowed,
+    rawFetchDurationMs,
+    browserNavigationDurationMs: render.browserNavigationDurationMs,
+    settlingDurationMs: shouldRender && budget.allowed ? render.settlingDurationMs : null,
+    snapshotCount: shouldRender && budget.allowed ? render.renderSnapshotCount : null,
+    extractionDurationMs,
+    persistenceDurationMs,
+    totalUrlDurationMs: performance.now() - totalStartedAt,
+    rawHtmlBytes: response.sizeBytes,
+    renderProvenanceBytes: shouldRender && budget.allowed ? serializedRenderProvenanceBytes(pageRecord) : null,
+    networkRequestCount: render.networkRequestCount,
+    failedRequestCount: render.failedRequestCount,
+    finalSettlingStatus: render.settlingStatus,
+    renderStatus: render.renderStatus,
+    measurementError: render.navigationError
+  });
 
   if (!['sitemap_only', 'template_sample'].includes(run.crawlMode) && queueItem.depth < run.maxDepth) {
     const currentTotal = totalCount(db, run.id);
@@ -187,9 +260,13 @@ export function shouldRetry(queueItem) {
   return queueItem.attempts < crawlerDefaults.maxAttempts;
 }
 
-export function metadataProvenanceIsComplete(run, renderingExecuted, render = {}) {
+export function metadataProvenanceIsComplete(run, renderingExecuted, render = {}, renderNeed = null) {
   const stableRenderedState = Boolean(renderingExecuted) && ['settled', 'content_remained_empty'].includes(render.settlingStatus);
   if (run?.usePlaywright && run?.playwrightMode === 'all') return stableRenderedState;
+  if (run?.usePlaywright && run?.playwrightMode === 'gate') {
+    if (renderingExecuted) return stableRenderedState;
+    return renderNeed?.decision === RENDER_NEEDS.notRequired;
+  }
   if (renderingExecuted) return stableRenderedState;
   return true;
 }
@@ -294,7 +371,7 @@ function dedupeResources(resources) {
   return output;
 }
 
-function shouldRenderPage(db, run, browser) {
+export function shouldRenderPage(db, run, browser) {
   if (!browser || !run.usePlaywright || run.playwrightMode === 'off') return false;
   if (run.playwrightMode === 'all') return true;
   if (run.playwrightMode !== 'sample') return false;
@@ -307,7 +384,7 @@ function shouldRenderPage(db, run, browser) {
   return result.changes > 0;
 }
 
-function emptyRenderResult() {
+export function emptyRenderResult(overrides = {}) {
   return {
     renderedTextLength: null,
     renderedVisibleTextLength: null,
@@ -331,7 +408,11 @@ function emptyRenderResult() {
     renderProvenanceJson: null,
     browserEventsJson: JSON.stringify([]),
     resources: [],
-    renderedHtml: null
+    renderedHtml: null,
+    browserNavigationDurationMs: null,
+    networkRequestCount: null,
+    failedRequestCount: null,
+    ...overrides
   };
 }
 
@@ -367,4 +448,43 @@ function mergeRenderedTextFacts(textFactsJson, render) {
     ? { length: render.renderedVisibleTextLength, hash: render.renderedVisibleTextHash }
     : null;
   return JSON.stringify(facts);
+}
+
+function renderStrategy(run) {
+  if (!run?.usePlaywright || run.playwrightMode === 'off') return 'raw_only';
+  if (run.playwrightMode === 'all') return 'browser_all';
+  if (run.playwrightMode === 'gate') return 'deterministic_gate';
+  return 'browser_sample';
+}
+
+function currentRenderBudget(db, run) {
+  const usage = db.prepare(`
+    SELECT
+      COUNT(*) AS renderedUrls,
+      COALESCE((SELECT renderDurationMs FROM run_runtime_metrics WHERE runId = ?),
+        SUM(COALESCE(CASE WHEN json_valid(renderProvenanceJson) THEN json_extract(renderProvenanceJson, '$.navigationDurationMs') END, 0) + COALESCE(settlingDurationMs, 0)), 0) AS renderTimeMs,
+      COALESCE(SUM(
+        COALESCE(LENGTH(CAST(renderProvenanceJson AS BLOB)), 0)
+        + COALESCE(LENGTH(CAST(initialRenderedStateJson AS BLOB)), 0)
+        + COALESCE(LENGTH(CAST(settledRenderedStateJson AS BLOB)), 0)
+        + COALESCE(LENGTH(CAST(effectiveDocumentStateJson AS BLOB)), 0)
+        + COALESCE(LENGTH(CAST(browserEventsJson AS BLOB)), 0)
+      ), 0) AS persistedBytes,
+      COALESCE(SUM(CASE WHEN renderStatus = 'technical_error' THEN 1 ELSE 0 END), 0) AS browserFailures
+    FROM pages WHERE runId = ? AND renderStatus IS NOT NULL AND renderStatus <> 'not_executed'
+  `).get(run.id, run.id);
+  const limits = [
+    ['max_rendered_urls', run.maxRenderedUrls, usage.renderedUrls],
+    ['max_total_render_time_ms', run.maxTotalRenderTimeMs, usage.renderTimeMs],
+    ['max_persisted_render_bytes', run.maxPersistedRenderBytes, usage.persistedBytes],
+    ['max_browser_failures', run.maxBrowserFailures, usage.browserFailures]
+  ];
+  const exhausted = limits.find(([name, limit, used]) => limit !== null && limit !== undefined
+    && (name === 'max_browser_failures' ? Number(used) > 0 && Number(used) >= Number(limit) : Number(used) >= Number(limit)));
+  return { allowed: !exhausted, reason: exhausted?.[0] || null, usage, limits: Object.fromEntries(limits.map(([name, limit]) => [name, limit ?? null])) };
+}
+
+function hydrationPayloadBytes(html) {
+  const matches = String(html || '').match(/<script\b[^>]*(?:application\/json|application\/ld\+json|__NEXT_DATA__|__NUXT__|data-hydration)[^>]*>[\s\S]*?<\/script>/gi) || [];
+  return matches.reduce((total, value) => total + Buffer.byteLength(value), 0);
 }

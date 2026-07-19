@@ -33,6 +33,7 @@ export async function renderPage(browser, url, finalDomain, timeoutMs = 15000, u
   const cspViolations = [];
   const resources = [];
   const events = [];
+  let networkRequestCount = 0;
   let phase = 'pre_navigation';
   let navigationError = null;
 
@@ -76,6 +77,7 @@ export async function renderPage(browser, url, finalDomain, timeoutMs = 15000, u
     requestFailures.push(entry);
     observe('request_failed', entry.error, entry);
   });
+  page.on('request', () => { networkRequestCount += 1; });
   page.on('response', async (response) => {
     try {
       const request = response.request();
@@ -135,6 +137,9 @@ export async function renderPage(browser, url, finalDomain, timeoutMs = 15000, u
       cspViolationsJson: JSON.stringify(cspViolations.slice(0, 25)),
       browserEventsJson: JSON.stringify(browserEvents.slice(0, 100)),
       renderProvenanceJson: JSON.stringify(buildRenderProvenance(config, [], 'navigation_failed', 0, navigationAttempt, mainResponse, { requestedUrl: url, finalUrl: finalNavigatedUrl, navigationStartedAt: navigationStartedAtIso, navigationCompletedAt: navigationCompletedAtIso, navigationDurationMs })),
+      browserNavigationDurationMs: navigationDurationMs,
+      networkRequestCount,
+      failedRequestCount: requestFailures.length,
       resources
     };
   }
@@ -166,6 +171,9 @@ export async function renderPage(browser, url, finalDomain, timeoutMs = 15000, u
         navigationCompletedAt: navigationCompletedAtIso,
         navigationDurationMs
       })),
+      browserNavigationDurationMs: navigationDurationMs,
+      networkRequestCount,
+      failedRequestCount: requestFailures.length,
       resources
     };
   }
@@ -203,6 +211,9 @@ export async function renderPage(browser, url, finalDomain, timeoutMs = 15000, u
     initialRenderedStateJson: JSON.stringify(initialState),
     settledRenderedStateJson: JSON.stringify(settledState),
     renderProvenanceJson: JSON.stringify(buildRenderProvenance(config, snapshots, settling.status, settlingDurationMs, navigationAttempt, mainResponse, { requestedUrl: url, finalUrl: finalNavigatedUrl, navigationStartedAt: navigationStartedAtIso, navigationCompletedAt: navigationCompletedAtIso, navigationDurationMs })),
+    browserNavigationDurationMs: navigationDurationMs,
+    networkRequestCount,
+    failedRequestCount: requestFailures.length,
     effectiveRenderedStateJson: JSON.stringify(effective),
     resources,
     renderedHtml
@@ -330,7 +341,10 @@ function emptyRenderResult() {
     renderProvenanceJson: JSON.stringify({ version: RENDER_PROVENANCE_VERSION, settlingPolicyVersion: SETTLING_POLICY_VERSION, settlingStatus: 'not_executed' }),
     effectiveRenderedStateJson: null,
     resources: [],
-    renderedHtml: null
+    renderedHtml: null,
+    browserNavigationDurationMs: null,
+    networkRequestCount: null,
+    failedRequestCount: null
   };
 }
 

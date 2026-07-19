@@ -55,6 +55,8 @@ npm run audit -- --domain example.com --crawlMode hybrid --includePatterns blog,
 
 `crawlMode` kann `hybrid`, `sitemap_only`, `internal_links_only` oder `template_sample` sein. `template_sample` gruppiert Sitemap-URLs vor dem Queuing nach URL-Template und crawlt nur einen kleinen Querschnitt pro Pattern. Playwright ist standardmaessig aus (`usePlaywright false`, `playwrightMode off`), damit Chromium optional bleibt.
 
+Browser-Laufzeitmessung und deterministische Budgets sind in [docs/render-runtime-benchmark-v1.md](docs/render-runtime-benchmark-v1.md) dokumentiert. Fuer einen expliziten zweistufigen Renderplan kann `--usePlaywright true --playwrightMode gate` verwendet werden. `--metricsMode basic` sammelt leichte Laufzeit- und Zaehlerdaten; `profiling` aktiviert zusaetzlich Prozessspeicher-Sampling. Budgetausschluesse bleiben als fehlende Render-Evidenz sichtbar und werden nicht als Pass interpretiert.
+
 Crawler-Identitaet und Geschwindigkeit:
 
 ```bash

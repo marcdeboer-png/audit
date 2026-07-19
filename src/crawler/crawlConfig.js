@@ -1,5 +1,5 @@
 const CRAWL_MODES = new Set(['hybrid', 'sitemap_only', 'internal_links_only', 'template_sample']);
-const PLAYWRIGHT_MODES = new Set(['off', 'all', 'sample']);
+const PLAYWRIGHT_MODES = new Set(['off', 'all', 'sample', 'gate']);
 
 export function parsePatternList(value) {
   if (!value) return [];

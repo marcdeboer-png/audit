@@ -198,6 +198,28 @@ const EXPORTS = {
       ORDER BY id ASC
     `
   },
+  'render-runtime': {
+    filename: (runId) => `run-${runId}-render-runtime.csv`,
+    columns: [
+      'url', 'pageType', 'rawContentClass', 'templateClusterKey', 'renderStrategy', 'renderNeed', 'renderDecision',
+      'renderConfidence', 'resultingBrowserRun', 'rawFetchDurationMs', 'browserNavigationDurationMs',
+      'settlingDurationMs', 'snapshotCount', 'extractionDurationMs', 'persistenceDurationMs',
+      'totalUrlDurationMs', 'rawHtmlBytes', 'renderProvenanceBytes', 'networkRequestCount',
+      'failedRequestCount', 'finalSettlingStatus', 'renderStatus', 'measurementError',
+      'renderDecisionReasonJson', 'renderSignalsJson', 'renderUnmetPrerequisitesJson',
+      'requestedCheckFamiliesJson', 'budgetStatusJson', 'metricsVersion'
+    ],
+    sql: `
+      SELECT url,pageType,rawContentClass,templateClusterKey,renderStrategy,renderNeed,renderDecision,
+        renderConfidence,resultingBrowserRun,rawFetchDurationMs,browserNavigationDurationMs,
+        settlingDurationMs,snapshotCount,extractionDurationMs,persistenceDurationMs,
+        totalUrlDurationMs,rawHtmlBytes,renderProvenanceBytes,networkRequestCount,
+        failedRequestCount,finalSettlingStatus,renderStatus,measurementError,
+        renderDecisionReasonJson,renderSignalsJson,renderUnmetPrerequisitesJson,
+        requestedCheckFamiliesJson,budgetStatusJson,metricsVersion
+      FROM url_runtime_metrics WHERE runId=? ORDER BY url
+    `
+  },
   schemas: {
     filename: (runId) => `run-${runId}-schemas.csv`,
     columns: ['pageUrl', 'schemaType', 'parseStatus', 'parseError'],

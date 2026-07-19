@@ -37,6 +37,22 @@ export function generateReport(db, runId) {
     ORDER BY id
     LIMIT 200
   `).all(runId);
+  const runtimeMetrics = db.prepare('SELECT * FROM run_runtime_metrics WHERE runId=?').get(runId) || null;
+  const runtimeSummary = safeParse(runtimeMetrics?.summaryJson, {});
+  const renderDecisionRows = db.prepare(`
+    SELECT url,pageType,rawContentClass,templateClusterKey,renderStrategy,renderNeed,renderDecision,
+      renderConfidence,resultingBrowserRun,rawFetchDurationMs,browserNavigationDurationMs,
+      settlingDurationMs,snapshotCount,extractionDurationMs,persistenceDurationMs,
+      totalUrlDurationMs,rawHtmlBytes,renderProvenanceBytes,networkRequestCount,
+      failedRequestCount,finalSettlingStatus,renderStatus,measurementError,
+      renderDecisionReasonJson,renderSignalsJson,budgetStatusJson
+    FROM url_runtime_metrics WHERE runId=? ORDER BY url LIMIT 500
+  `).all(runId).map((row) => ({
+    ...row,
+    reason: safeParse(row.renderDecisionReasonJson, {}).summary || '',
+    signals: safeParse(row.renderSignalsJson, []).join(', '),
+    budget: safeParse(row.budgetStatusJson, {}).reason || ''
+  }));
   const statusDistribution = db.prepare(`
     SELECT COALESCE(statusCode, 0) AS statusCode, COUNT(*) AS count
     FROM pages
@@ -198,6 +214,9 @@ export function generateReport(db, runId) {
     results,
     pages,
     renderProvenanceRows,
+    runtimeMetrics,
+    runtimeSummary,
+    renderDecisionRows,
     actionItems,
     reportStats,
     schemaFindings,
@@ -242,6 +261,9 @@ function renderHtml(data) {
     results,
     pages,
     renderProvenanceRows,
+    runtimeMetrics,
+    runtimeSummary,
+    renderDecisionRows,
     actionItems,
     reportStats,
     schemaFindings,
@@ -457,6 +479,8 @@ function renderHtml(data) {
       <tr><th>crawlMode</th><td>${escapeHtml(run.crawlMode || 'hybrid')}</td><th>crawlDelayMs</th><td>${run.crawlDelayMs ?? 0}</td></tr>
       <tr><th>requestTimeoutMs</th><td>${run.requestTimeoutMs ?? 15000}</td><th>playwrightMode</th><td>${escapeHtml(run.playwrightMode || 'off')}</td></tr>
       <tr><th>playwrightSampleLimit</th><td>${run.playwrightSampleLimit ?? 50}</td><th>usePlaywright</th><td>${run.usePlaywright ? 'true' : 'false'}</td></tr>
+      <tr><th>metricsMode</th><td>${escapeHtml(run.runtimeMetricsVersion ? run.metricsMode : 'historical / not recorded')}</td><th>Render planning</th><td>${escapeHtml(run.renderPlanningVersion || 'historical / not recorded')}</td></tr>
+      <tr><th>Render budget (URLs / ms)</th><td>${escapeHtml(`${run.maxRenderedUrls ?? 'unlimited'} / ${run.maxTotalRenderTimeMs ?? 'unlimited'}`)}</td><th>Render budget (bytes / failures)</th><td>${escapeHtml(`${run.maxPersistedRenderBytes ?? 'unlimited'} / ${run.maxBrowserFailures ?? 'unlimited'}`)}</td></tr>
       <tr><th>renderSettlingMaxMs</th><td>${run.renderSettlingMaxMs ?? 6000}</td><th>renderSettlingIntervalMs</th><td>${run.renderSettlingIntervalMs ?? 500}</td></tr>
       <tr><th>renderSettlingMaxSnapshots</th><td>${run.renderSettlingMaxSnapshots ?? 13}</td><th>stableSnapshots / min observation</th><td>${run.renderSettlingStableSnapshots ?? 3} / ${run.renderSettlingMinimumObservationMs ?? 4000} ms</td></tr>
       <tr><th>maxConcurrentRenderedPages</th><td>${run.maxConcurrentRenderedPages ?? 1}</td><th>Settling policy</th><td>bounded semantic snapshots, no networkidle</td></tr>
@@ -481,6 +505,49 @@ function renderHtml(data) {
     <p class="muted">Template sampling measures representative sample URLs from URL clusters. It is not a full measurement of every crawled URL, and Lighthouse results are local lab data rather than CrUX/field data.</p>
     ${simpleTable([samplingSummary || {}], ['enableTemplateSampling', 'enablePlaywrightSampling', 'enableLighthouseSampling', 'renderingStatus', 'lighthouseStatus', 'samplesTotal', 'samplesProcessed', 'sampleRows', 'playwrightSuccessCount', 'playwrightIssueCount', 'lighthouseSuccessCount', 'lighthouseIssueCount', 'sampleErrorCount'])}
     ${samplingStatusNotice(samplingSummary)}
+    <h3>Browser Runtime and Resource Metrics</h3>
+    <p class="muted">Browser process RSS is reported only when a reliable platform-specific measurement exists. A blank value is unavailable, never an invented zero.</p>
+    ${simpleTable(runtimeMetrics ? [{
+      metricsMode: runtimeMetrics.metricsMode,
+      metricsVersion: runtimeMetrics.metricsVersion,
+      renderingStrategy: run.playwrightMode || 'off',
+      avoidedRenderCount: runtimeSummary.avoidedRenderCount ?? null,
+      budgetExcludedCount: runtimeSummary.budgetExcludedCount ?? null,
+      renderUnavailableCount: runtimeSummary.renderUnavailableCount ?? null,
+      totalDurationMs: runtimeMetrics.totalDurationMs,
+      renderDurationMs: runtimeMetrics.renderDurationMs,
+      renderRuntimeSharePct: runtimeMetrics.totalDurationMs ? Number(((runtimeMetrics.renderDurationMs / runtimeMetrics.totalDurationMs) * 100).toFixed(1)) : null,
+      averageSettlingMs: runtimeSummary.settlingDuration?.mean ?? null,
+      p90SettlingMs: runtimeSummary.settlingDuration?.p90 ?? null,
+      renderedUrlCount: runtimeMetrics.renderedUrlCount,
+      nonRenderedUrlCount: runtimeMetrics.nonRenderedUrlCount,
+      browserLaunchCount: runtimeMetrics.browserLaunchCount,
+      browserRestartCount: runtimeMetrics.browserRestartCount,
+      browserFailureCount: runtimeMetrics.browserFailureCount,
+      settlingTimeoutCount: runtimeMetrics.settlingTimeoutCount,
+      renderingUnstableCount: runtimeMetrics.renderingUnstableCount,
+      processRssPeak: runtimeMetrics.processRssPeak,
+      heapUsedPeak: runtimeMetrics.heapUsedPeak,
+      browserProcessRss: runtimeMetrics.browserProcessRss,
+      cpuUserMs: runtimeMetrics.cpuUserMs,
+      cpuSystemMs: runtimeMetrics.cpuSystemMs,
+      renderProvenanceBytesTotal: runtimeMetrics.renderProvenanceBytesTotal,
+      renderProvenanceBytesP90: runtimeMetrics.renderProvenanceBytesP90
+    }] : [], ['metricsMode', 'metricsVersion', 'renderingStrategy', 'renderedUrlCount', 'avoidedRenderCount', 'budgetExcludedCount', 'renderUnavailableCount', 'totalDurationMs', 'renderDurationMs', 'renderRuntimeSharePct', 'averageSettlingMs', 'p90SettlingMs', 'browserLaunchCount', 'browserRestartCount', 'browserFailureCount', 'settlingTimeoutCount', 'renderingUnstableCount', 'processRssPeak', 'heapUsedPeak', 'browserProcessRss', 'cpuUserMs', 'cpuSystemMs', 'renderProvenanceBytesTotal', 'renderProvenanceBytesP90'])}
+    <h4>Observed-cost projection (Concurrency 1)</h4>
+    <p class="muted">These P50/P90 projections extrapolate this run's median raw fetch, observed render share, render costs and persisted bytes. They are planning ranges, not guarantees.</p>
+    ${simpleTable((runtimeSummary.costForecasts || []).map((forecast) => ({
+      urlCount: forecast.assumptions?.urlCount,
+      expectedBrowserRuns: forecast.expectedBrowserRuns,
+      expectedTotalDurationP50Ms: forecast.expectedTotalDurationP50Ms,
+      expectedTotalDurationP90Ms: forecast.expectedTotalDurationP90Ms,
+      expectedRenderDurationP50Ms: forecast.expectedRenderDurationP50Ms,
+      expectedRenderDurationP90Ms: forecast.expectedRenderDurationP90Ms,
+      expectedPersistedRenderBytes: forecast.expectedPersistedRenderBytes,
+      warning: forecast.warning
+    })), ['urlCount', 'expectedBrowserRuns', 'expectedTotalDurationP50Ms', 'expectedTotalDurationP90Ms', 'expectedRenderDurationP50Ms', 'expectedRenderDurationP90Ms', 'expectedPersistedRenderBytes', 'warning'])}
+    <h3>URL Render Decisions and Costs</h3>
+    ${simpleTable(renderDecisionRows, ['url', 'pageType', 'rawContentClass', 'templateClusterKey', 'renderStrategy', 'renderNeed', 'renderDecision', 'renderConfidence', 'resultingBrowserRun', 'reason', 'signals', 'budget', 'rawFetchDurationMs', 'browserNavigationDurationMs', 'settlingDurationMs', 'snapshotCount', 'extractionDurationMs', 'persistenceDurationMs', 'totalUrlDurationMs', 'rawHtmlBytes', 'renderProvenanceBytes', 'networkRequestCount', 'failedRequestCount', 'finalSettlingStatus', 'renderStatus', 'measurementError'])}
     <h3>Raw / Initial / Settled Document Provenance</h3>
     <p class="muted">Effective metadata uses a stable settled DOM when available. Unstable or failed rendering remains explicitly incomplete and is excluded from rendered-dependent pass/fail claims.</p>
     ${simpleTable(renderProvenanceRows, ['url', 'renderStatus', 'settlingStatus', 'settlingDurationMs', 'renderSnapshotCount', 'rawTitle', 'initialTitle', 'settledTitle', 'effectiveTitle', 'rawWordCount', 'initialWordCount', 'settledWordCount', 'effectiveMainWordCount', 'effectiveCanonical', 'effectiveH1Count', 'metadataProvenanceComplete', 'renderProvenanceVersion', 'settlingPolicyVersion'])}
@@ -815,6 +882,7 @@ function csvExportLinks(runId) {
     ['Samples CSV', 'samples'],
     ['Playwright Results CSV', 'playwright-results'],
     ['Render Provenance CSV', 'render-provenance'],
+    ['Render Runtime CSV', 'render-runtime'],
     ['Lighthouse Results CSV', 'lighthouse-results'],
     ['Template Performance CSV', 'template-performance'],
     ['Templates CSV', 'templates'],

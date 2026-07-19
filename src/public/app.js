@@ -145,6 +145,7 @@ async function renderHome() {
               <option value="off">off</option>
               <option value="all">all</option>
               <option value="sample">sample</option>
+              <option value="gate">gate</option>
             </select>
           </label>
         </div>
@@ -568,7 +569,13 @@ function advancedFieldMarkup(form) {
     <label>Include Patterns<input name="includePatterns" value="${value('includePatterns')}"></label>
     <label>Exclude Patterns<input name="excludePatterns" value="${value('excludePatterns')}"></label>
     <label>Use Playwright<select name="usePlaywright">${option('false', 'false', value('usePlaywright'))}${option('true', 'true', value('usePlaywright'))}</select></label>
-    <label>Playwright Mode<select name="playwrightMode">${option('off', 'off', value('playwrightMode'))}${option('sample', 'sample', value('playwrightMode'))}${option('all', 'all', value('playwrightMode'))}</select></label>
+    <label>Playwright Mode<select name="playwrightMode">${option('off', 'off', value('playwrightMode'))}${option('sample', 'sample', value('playwrightMode'))}${option('all', 'all', value('playwrightMode'))}${option('gate', 'deterministic gate', value('playwrightMode'))}</select></label>
+    <label>Runtime Metrics<select name="metricsMode">${option('basic', 'basic', value('metricsMode'))}${option('profiling', 'profiling', value('metricsMode'))}${option('off', 'off', value('metricsMode'))}</select></label>
+    <label>Max Rendered URLs<input name="maxRenderedUrls" type="number" min="0" value="${value('maxRenderedUrls')}"></label>
+    <label>Max Total Render Time ms<input name="maxTotalRenderTimeMs" type="number" min="0" value="${value('maxTotalRenderTimeMs')}"></label>
+    <label>Max Settling / URL ms<input name="maxSettlingTimeMsPerUrl" type="number" min="250" value="${value('maxSettlingTimeMsPerUrl') || '6000'}"></label>
+    <label>Max Browser Failures<input name="maxBrowserFailures" type="number" min="0" value="${value('maxBrowserFailures')}"></label>
+    <label>Max Render Provenance Bytes<input name="maxPersistedRenderBytes" type="number" min="0" value="${value('maxPersistedRenderBytes')}"></label>
     <label>Template Sampling<select name="enableTemplateSampling">${option('true', 'enabled', value('enableTemplateSampling'))}${option('false', 'disabled', value('enableTemplateSampling'))}</select></label>
     <label>Lighthouse Sampling<select name="enableLighthouseSampling">${option('false', 'disabled', value('enableLighthouseSampling'))}${option('true', 'enabled', value('enableLighthouseSampling'))}</select></label>
     <label>Playwright Sampling<select name="enablePlaywrightSampling">${option('false', 'disabled', value('enablePlaywrightSampling'))}${option('true', 'enabled', value('enablePlaywrightSampling'))}</select></label>
@@ -3259,9 +3266,12 @@ function renderCheckDetail(detail) {
       <h3>Raw / Initial / Settled / Effective</h3>
       <div class="table-wrap">
         <table>
-          <thead><tr>${['URL', 'Status', 'Raw Title', 'Initial Title', 'Settled Title', 'Effective Title', 'Raw Words', 'Initial Words', 'Settled Words', 'Effective Words'].map((label) => `<th>${label}</th>`).join('')}</tr></thead>
+          <thead><tr>${['URL', 'Entscheidung', 'Grund', 'Status', 'Navigation ms', 'Settling ms', 'Snapshots', 'Provenienz Bytes', 'Raw Title', 'Initial Title', 'Settled Title', 'Effective Title', 'Raw Words', 'Initial Words', 'Settled Words', 'Effective Words'].map((label) => `<th>${label}</th>`).join('')}</tr></thead>
           <tbody>${renderProvenanceRows.map((row) => `<tr>
-            <td>${escapeHtml(row.url || '')}</td><td>${escapeHtml(`${row.renderStatus || ''} / ${row.settlingStatus || ''}`)}</td>
+            <td>${escapeHtml(row.url || '')}</td><td>${escapeHtml(row.renderDecision || 'historisch nicht verfügbar')}</td>
+            <td>${escapeHtml(row.renderDecisionReason?.summary || '')}</td><td>${escapeHtml(`${row.renderStatus || ''} / ${row.settlingStatus || ''}`)}</td>
+            <td>${escapeHtml(formatCell(row.browserNavigationDurationMs))}</td><td>${escapeHtml(formatCell(row.settlingDurationMs))}</td>
+            <td>${escapeHtml(formatCell(row.snapshotCount))}</td><td>${escapeHtml(formatCell(row.renderProvenanceBytes))}</td>
             <td>${escapeHtml(formatCell(row.rawTitle))}</td><td>${escapeHtml(formatCell(row.initialTitle))}</td>
             <td>${escapeHtml(formatCell(row.settledTitle))}</td><td>${escapeHtml(formatCell(row.effectiveTitle))}</td>
             <td>${escapeHtml(formatCell(row.rawWordCount))}</td><td>${escapeHtml(formatCell(row.initialWordCount))}</td>
@@ -3393,6 +3403,8 @@ function exportLinks(runId) {
     ['Reviews CSV', 'reviews'],
     ['Samples CSV', 'samples'],
     ['Playwright Results CSV', 'playwright-results'],
+    ['Render Provenance CSV', 'render-provenance'],
+    ['Render Runtime CSV', 'render-runtime'],
     ['Lighthouse Results CSV', 'lighthouse-results'],
     ['Template Performance CSV', 'template-performance'],
     ['Templates CSV', 'templates'],

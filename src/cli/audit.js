@@ -51,8 +51,14 @@ program
   .option('--collectScreenshots <boolean>', 'Store Playwright sample screenshots', 'false')
   .option('--sampleOnlyIndexable <boolean>', 'Sample only indexable pages from template clusters', 'true')
   .option('--usePlaywright <boolean>', 'Enable Playwright rendering', 'false')
-  .option('--playwrightMode <mode>', 'off, all, or sample', 'off')
+  .option('--playwrightMode <mode>', 'off, all, sample, or gate', 'off')
   .option('--playwrightSampleLimit <number>', 'Maximum pages to render in sample mode', '50')
+  .option('--metricsMode <mode>', 'off, basic, or profiling runtime metrics', 'basic')
+  .option('--maxRenderedUrls <number>', 'Optional run-wide browser-render URL budget')
+  .option('--maxTotalRenderTimeMs <number>', 'Optional run-wide browser-render time budget')
+  .option('--maxSettlingTimeMsPerUrl <number>', 'Optional per-URL settling budget', String(crawlerDefaults.maxSettlingTimeMsPerUrl))
+  .option('--maxBrowserFailures <number>', 'Optional browser-failure budget')
+  .option('--maxPersistedRenderBytes <number>', 'Optional persisted render-provenance byte budget')
   .option('--storageProfile <profile>', 'lean, standard, or debug', 'standard')
   .option('--storeRawHtml <boolean>', 'Store capped raw HTML snapshots', 'false')
   .option('--storeRenderedHtml <boolean>', 'Store capped rendered HTML snapshots', 'false')
@@ -114,6 +120,12 @@ const { runId } = await startAudit({
   usePlaywright: options.usePlaywright === 'true',
   playwrightMode: options.playwrightMode,
   playwrightSampleLimit: Number(options.playwrightSampleLimit),
+  metricsMode: options.metricsMode,
+  maxRenderedUrls: options.maxRenderedUrls === undefined ? null : Number(options.maxRenderedUrls),
+  maxTotalRenderTimeMs: options.maxTotalRenderTimeMs === undefined ? null : Number(options.maxTotalRenderTimeMs),
+  maxSettlingTimeMsPerUrl: Number(options.maxSettlingTimeMsPerUrl),
+  maxBrowserFailures: options.maxBrowserFailures === undefined ? null : Number(options.maxBrowserFailures),
+  maxPersistedRenderBytes: options.maxPersistedRenderBytes === undefined ? null : Number(options.maxPersistedRenderBytes),
   storageProfile: options.storageProfile,
   storeRawHtml: options.storeRawHtml === 'true',
   storeRenderedHtml: options.storeRenderedHtml === 'true',

@@ -1027,15 +1027,21 @@ function pageRenderProvenanceForRows(db, runId, rows) {
   if (!urls.length) return [];
   const placeholders = urls.map(() => '?').join(',');
   return db.prepare(`
-    SELECT url, renderStatus, settlingStatus, metadataProvenanceComplete,
-      title AS rawTitle, metaDescription AS rawMetaDescription, canonical AS rawCanonical, htmlLang AS rawHtmlLang,
-      initialRenderedStateJson, settledRenderedStateJson,
-      effectiveTitle, effectiveMetaDescription, effectiveCanonical, effectiveHtmlLang,
-      wordCountRaw, effectiveWordCount, h1Count AS rawH1Count, effectiveH1Count,
-      renderProvenanceVersion, settlingPolicyVersion
-    FROM pages
-    WHERE runId = ? AND url IN (${placeholders})
-    ORDER BY id ASC
+    SELECT p.url, p.renderStatus, p.settlingStatus, p.metadataProvenanceComplete,
+      p.title AS rawTitle, p.metaDescription AS rawMetaDescription, p.canonical AS rawCanonical, p.htmlLang AS rawHtmlLang,
+      p.initialRenderedStateJson, p.settledRenderedStateJson,
+      p.effectiveTitle, p.effectiveMetaDescription, p.effectiveCanonical, p.effectiveHtmlLang,
+      p.wordCountRaw, p.effectiveWordCount, p.h1Count AS rawH1Count, p.effectiveH1Count,
+      p.renderProvenanceVersion, p.settlingPolicyVersion,
+      urm.rawContentClass, urm.renderStrategy, urm.renderNeed, urm.renderDecision, urm.renderConfidence,
+      urm.renderDecisionReasonJson, urm.renderSignalsJson, urm.budgetStatusJson,
+      urm.resultingBrowserRun, urm.browserNavigationDurationMs, urm.settlingDurationMs AS measuredSettlingDurationMs,
+      urm.snapshotCount, urm.totalUrlDurationMs, urm.renderProvenanceBytes, urm.networkRequestCount,
+      urm.failedRequestCount, urm.measurementError, urm.metricsVersion
+    FROM pages p
+    LEFT JOIN url_runtime_metrics urm ON urm.runId=p.runId AND urm.url=p.url
+    WHERE p.runId = ? AND p.url IN (${placeholders})
+    ORDER BY p.id ASC
   `).all(runId, ...urls).map((row) => {
     const initial = safeJson(row.initialRenderedStateJson, {});
     const settled = safeJson(row.settledRenderedStateJson, {});
@@ -1065,7 +1071,25 @@ function pageRenderProvenanceForRows(db, runId, rows) {
       settledH1Count: settled.h1?.length ?? null,
       effectiveH1Count: row.effectiveH1Count,
       renderProvenanceVersion: row.renderProvenanceVersion,
-      settlingPolicyVersion: row.settlingPolicyVersion
+      settlingPolicyVersion: row.settlingPolicyVersion,
+      renderStrategy: row.renderStrategy,
+      rawContentClass: row.rawContentClass,
+      renderNeed: row.renderNeed,
+      renderDecision: row.renderDecision,
+      renderConfidence: row.renderConfidence,
+      renderDecisionReason: safeJson(row.renderDecisionReasonJson, {}),
+      renderSignals: safeJson(row.renderSignalsJson, []),
+      budgetStatus: safeJson(row.budgetStatusJson, {}),
+      resultingBrowserRun: Boolean(row.resultingBrowserRun),
+      browserNavigationDurationMs: row.browserNavigationDurationMs,
+      settlingDurationMs: row.measuredSettlingDurationMs,
+      snapshotCount: row.snapshotCount,
+      totalUrlDurationMs: row.totalUrlDurationMs,
+      renderProvenanceBytes: row.renderProvenanceBytes,
+      networkRequestCount: row.networkRequestCount,
+      failedRequestCount: row.failedRequestCount,
+      measurementError: row.measurementError,
+      metricsVersion: row.metricsVersion
     };
   });
 }

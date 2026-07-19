@@ -32,6 +32,12 @@ export const crawlerDefaults = Object.freeze({
   renderSettlingStableSnapshots: 3,
   renderSettlingMinimumObservationMs: 4000,
   maxConcurrentRenderedPages: 1,
+  metricsMode: 'basic',
+  maxRenderedUrls: null,
+  maxTotalRenderTimeMs: null,
+  maxSettlingTimeMsPerUrl: 6000,
+  maxBrowserFailures: null,
+  maxPersistedRenderBytes: null,
   collectScreenshots: false,
   sampleOnlyIndexable: true,
   shardCount: 32

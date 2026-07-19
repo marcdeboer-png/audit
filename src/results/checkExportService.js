@@ -349,6 +349,8 @@ export function collectFullAuditJson(db, runId, exportTypes) {
       schemas: tableRows(db, 'schemas', runId, manifest.tableLimits.schemas).map(normalizeJsonFields),
       resources: tableRows(db, 'resources', runId, manifest.tableLimits.resources).map(normalizeJsonFields),
       httpTimingMeasurements: tableRows(db, 'http_timing_measurements', runId, manifest.tableLimits.http_timing_measurements).map(normalizeJsonFields),
+      runtimeMetrics: runtimeMetricsForExport(db, runId),
+      renderDecisions: tableRows(db, 'url_runtime_metrics', runId).map(normalizeJsonFields),
       reviews: tableRows(db, 'finding_reviews', runId),
       warnings,
       files,
@@ -421,6 +423,8 @@ function workingDataEntries(db, runId, run, checkDetails) {
     { path: 'data/images.json', data: () => tableRows(db, 'page_images', runId, manifest.tableLimits.page_images) },
     { path: 'data/resources.json', data: () => tableRows(db, 'resources', runId, manifest.tableLimits.resources).map(normalizeJsonFields) },
     { path: 'data/http-timing-measurements.json', data: () => tableRows(db, 'http_timing_measurements', runId, manifest.tableLimits.http_timing_measurements).map(normalizeJsonFields) },
+    { path: 'data/render-runtime.json', data: () => tableRows(db, 'url_runtime_metrics', runId).map(normalizeJsonFields) },
+    { path: 'summary/runtime-metrics.json', data: () => runtimeMetricsForExport(db, runId) },
     { path: 'data/schemas.json', data: () => tableRows(db, 'schemas', runId, manifest.tableLimits.schemas).map(normalizeJsonFields) },
     { path: 'data/geo-signals.json', data: () => tableRows(db, 'domain_assets', runId).map(normalizeJsonFields) },
     { path: 'data/reviews.json', data: () => tableRows(db, 'finding_reviews', runId) },
@@ -499,6 +503,7 @@ function buildAuditSummary(db, runId, run) {
     GROUP BY status
     ORDER BY status ASC
   `).all(runId);
+  const runtimeMetrics = db.prepare('SELECT * FROM run_runtime_metrics WHERE runId=?').get(runId) || null;
   return {
     runId,
     projectId: run.projectId || null,
@@ -546,6 +551,7 @@ function buildAuditSummary(db, runId, run) {
       total: results.length,
       byStatus: findingCounts
     },
+    runtimeMetrics: runtimeMetrics ? normalizeJsonFields(runtimeMetrics) : null,
     enterpriseSummary: buildEnterpriseSummary(db, runId, run),
     storage: {
       profile: run.storageProfile || 'standard',
@@ -573,6 +579,16 @@ function buildRunConfig(run) {
     excludePatternsJson: run.excludePatternsJson,
     usePlaywright: Boolean(run.usePlaywright),
     playwrightMode: run.playwrightMode,
+    metricsMode: run.runtimeMetricsVersion ? (run.metricsMode || 'off') : null,
+    renderPlanningVersion: run.renderPlanningVersion || null,
+    runtimeMetricsVersion: run.runtimeMetricsVersion || null,
+    renderBudget: {
+      maxRenderedUrls: run.maxRenderedUrls ?? null,
+      maxTotalRenderTimeMs: run.maxTotalRenderTimeMs ?? null,
+      maxSettlingTimeMsPerUrl: run.maxSettlingTimeMsPerUrl ?? null,
+      maxBrowserFailures: run.maxBrowserFailures ?? null,
+      maxPersistedRenderBytes: run.maxPersistedRenderBytes ?? null
+    },
     enableTemplateSampling: Boolean(run.enableTemplateSampling),
     enablePlaywrightSampling: Boolean(run.enablePlaywrightSampling),
     enableLighthouseSampling: Boolean(run.enableLighthouseSampling),
@@ -649,8 +665,13 @@ function tableRows(db, table, runId, limit = null) {
   return db.prepare(`SELECT * FROM ${table} WHERE runId = ? ORDER BY id ASC LIMIT ?`).all(runId, limit);
 }
 
+function runtimeMetricsForExport(db, runId) {
+  const row = db.prepare('SELECT * FROM run_runtime_metrics WHERE runId=?').get(runId);
+  return row ? normalizeJsonFields(row) : null;
+}
+
 function createExportManifest(db, runId, run) {
-  const tables = ['pages', 'page_links', 'page_images', 'resources', 'http_timing_measurements', 'schemas', 'domain_assets', 'template_clusters', 'check_results'];
+  const tables = ['pages', 'page_links', 'page_images', 'resources', 'http_timing_measurements', 'schemas', 'domain_assets', 'template_clusters', 'check_results', 'run_runtime_metrics', 'url_runtime_metrics'];
   const tableLimits = exportTableLimits(run);
   const tableStats = {};
   for (const table of tables) {

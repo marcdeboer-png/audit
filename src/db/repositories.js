@@ -39,6 +39,8 @@ export function createRun(db, projectId, config) {
       crawlMode, includePatternsJson, excludePatternsJson,
       userAgent, robotsUserAgent, targetPagesPerSecond, crawlDelayMs,
       requestTimeoutMs, usePlaywright, playwrightMode, playwrightSampleLimit,
+      metricsMode, renderPlanningVersion, runtimeMetricsVersion,
+      maxRenderedUrls, maxTotalRenderTimeMs, maxSettlingTimeMsPerUrl, maxBrowserFailures, maxPersistedRenderBytes,
       maxAttempts, maxConcurrentPerHost, retryBaseDelayMs, retryMaxDelayMs,
       maxSitemapUrls, maxSitemaps, sitemapBatchSize,
       enableTemplateSampling, enablePlaywrightSampling, enableLighthouseSampling,
@@ -63,6 +65,8 @@ export function createRun(db, projectId, config) {
       @crawlMode, @includePatternsJson, @excludePatternsJson,
       @userAgent, @robotsUserAgent, @targetPagesPerSecond, @crawlDelayMs,
       @requestTimeoutMs, @usePlaywright, @playwrightMode, @playwrightSampleLimit,
+      @metricsMode, @renderPlanningVersion, @runtimeMetricsVersion,
+      @maxRenderedUrls, @maxTotalRenderTimeMs, @maxSettlingTimeMsPerUrl, @maxBrowserFailures, @maxPersistedRenderBytes,
       @maxAttempts, @maxConcurrentPerHost, @retryBaseDelayMs, @retryMaxDelayMs,
       @maxSitemapUrls, @maxSitemaps, @sitemapBatchSize,
       @enableTemplateSampling, @enablePlaywrightSampling, @enableLighthouseSampling,
@@ -99,6 +103,14 @@ export function createRun(db, projectId, config) {
     usePlaywright: config.usePlaywright ? 1 : 0,
     playwrightMode: config.playwrightMode,
     playwrightSampleLimit: config.playwrightSampleLimit,
+    metricsMode: config.metricsMode || crawlerDefaults.metricsMode,
+    renderPlanningVersion: config.renderPlanningVersion || null,
+    runtimeMetricsVersion: config.runtimeMetricsVersion || null,
+    maxRenderedUrls: config.maxRenderedUrls ?? null,
+    maxTotalRenderTimeMs: config.maxTotalRenderTimeMs ?? null,
+    maxSettlingTimeMsPerUrl: config.maxSettlingTimeMsPerUrl ?? crawlerDefaults.maxSettlingTimeMsPerUrl,
+    maxBrowserFailures: config.maxBrowserFailures ?? null,
+    maxPersistedRenderBytes: config.maxPersistedRenderBytes ?? null,
     maxAttempts: config.maxAttempts,
     maxConcurrentPerHost: config.maxConcurrentPerHost,
     retryBaseDelayMs: config.retryBaseDelayMs,
@@ -1964,6 +1976,8 @@ export function deleteRun(db, runId) {
     db.prepare('DELETE FROM targeted_evidence_facts WHERE runId = ?').run(runId);
     db.prepare('DELETE FROM evidence_jobs WHERE runId = ?').run(runId);
     db.prepare('DELETE FROM validation_reports WHERE runId = ?').run(runId);
+    db.prepare('DELETE FROM url_runtime_metrics WHERE runId = ?').run(runId);
+    db.prepare('DELETE FROM run_runtime_metrics WHERE runId = ?').run(runId);
     db.prepare('DELETE FROM run_comparisons WHERE baseRunId = ? OR compareRunId = ?').run(runId, runId);
     db.prepare('DELETE FROM check_results WHERE runId = ?').run(runId);
     db.prepare('DELETE FROM run_logs WHERE runId = ?').run(runId);

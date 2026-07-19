@@ -1,5 +1,6 @@
 import { detectDomain } from './domainDetector.js';
 import crypto from 'node:crypto';
+import { performance } from 'node:perf_hooks';
 import { discoverDomainAssets, fetchTextAsset } from './sitemap.js';
 import { processQueueItem } from './pageProcessor.js';
 import { runChecks } from '../checks/checkEngine.js';
@@ -44,6 +45,9 @@ import { runTemplateSampling } from '../sampling/templateSamplingRunner.js';
 import { normalizeEnterpriseConfig } from '../storage/storageProfiles.js';
 import { storeBenchmarkSummary } from '../analysis/benchmarkSummary.js';
 import { normalizeSettlingConfig } from '../extractors/documentState.js';
+import { normalizeMetricsMode, normalizeOptionalBudget, RENDER_PLANNING_VERSION, RUNTIME_METRICS_VERSION } from '../rendering/renderPlanner.js';
+import { createRuntimeMetricsTracker } from '../runtime/renderMetrics.js';
+import { runDeterministicRenderPlan } from '../rendering/renderPlanRunner.js';
 
 const activeRuns = new Map();
 
@@ -77,6 +81,14 @@ export function normalizeAuditConfig(input) {
     usePlaywright,
     playwrightMode: normalizePlaywrightMode(input.playwrightMode || (usePlaywright ? 'all' : 'off'), usePlaywright),
     playwrightSampleLimit: Math.max(0, Number(input.playwrightSampleLimit || 50)),
+    metricsMode: normalizeMetricsMode(input.metricsMode),
+    renderPlanningVersion: RENDER_PLANNING_VERSION,
+    runtimeMetricsVersion: RUNTIME_METRICS_VERSION,
+    maxRenderedUrls: normalizeOptionalBudget(input.maxRenderedUrls),
+    maxTotalRenderTimeMs: normalizeOptionalBudget(input.maxTotalRenderTimeMs),
+    maxSettlingTimeMsPerUrl: normalizeOptionalBudget(input.maxSettlingTimeMsPerUrl ?? settling.maxDurationMs, { minimum: 250 }),
+    maxBrowserFailures: normalizeOptionalBudget(input.maxBrowserFailures),
+    maxPersistedRenderBytes: normalizeOptionalBudget(input.maxPersistedRenderBytes),
     maxAttempts: Math.max(1, Number(input.maxAttempts || crawlerDefaults.maxAttempts)),
     maxConcurrentPerHost: Math.max(1, Number(input.maxConcurrentPerHost || crawlerDefaults.maxConcurrentPerHost)),
     retryBaseDelayMs: Math.max(0, Number(input.retryBaseDelayMs || crawlerDefaults.retryBaseDelayMs)),
@@ -100,7 +112,8 @@ export function normalizeAuditConfig(input) {
     renderSettlingMaxSnapshots: settling.maxSnapshots,
     renderSettlingStableSnapshots: settling.stableSnapshots,
     renderSettlingMinimumObservationMs: settling.minimumObservationMs,
-    maxConcurrentRenderedPages: Math.max(1, Math.min(4, Number(input.maxConcurrentRenderedPages || crawlerDefaults.maxConcurrentRenderedPages))),
+    // Browser concurrency stays at one until profiling demonstrates a safe higher value.
+    maxConcurrentRenderedPages: 1,
     collectScreenshots: input.collectScreenshots === true || input.collectScreenshots === 'true',
     sampleOnlyIndexable: input.sampleOnlyIndexable === false || input.sampleOnlyIndexable === 'false' ? false : crawlerDefaults.sampleOnlyIndexable,
     sourceType: normalizeSourceType(input.sourceType),
@@ -249,6 +262,8 @@ async function executeAudit(runId) {
     heartbeatRun(db, runId, lockToken);
   }, crawlerDefaults.heartbeatIntervalMs);
   heartbeatRun(db, runId, lockToken, 0);
+  let runtimeMetrics = null;
+  let metricsFinished = false;
 
   try {
     updateRun(db, runId, {
@@ -260,6 +275,7 @@ async function executeAudit(runId) {
     });
 
     run = getRunWithProject(db, runId);
+    runtimeMetrics = createRuntimeMetricsTracker(db, run);
     let robots = null;
 
     if (!run.finalDomain) {
@@ -272,10 +288,15 @@ async function executeAudit(runId) {
     robots = loadRobotsParser(db, run);
 
     updateRun(db, runId, { currentPhase: 'crawling' });
-    const shouldUsePlaywright = Boolean(run.usePlaywright) && run.playwrightMode !== 'off';
-    const browser = shouldUsePlaywright
+    const shouldUsePlaywrightDuringCrawl = Boolean(run.usePlaywright) && ['all', 'sample'].includes(run.playwrightMode);
+    if (shouldUsePlaywrightDuringCrawl) runtimeMetrics.startPhase('browser_launch');
+    const browser = shouldUsePlaywrightDuringCrawl
       ? await launchBrowser((level, message, data) => logRun(db, runId, level, message, data))
       : null;
+    if (shouldUsePlaywrightDuringCrawl) {
+      runtimeMetrics.endPhase('browser_launch');
+      runtimeMetrics.recordBrowserLaunch({ success: Boolean(browser) });
+    }
     const hostLimiter = new HostRateLimiter({
       maxConcurrentPerHost: run.maxConcurrentPerHost || crawlerDefaults.maxConcurrentPerHost,
       crawlDelayMs: run.crawlDelayMs || crawlerDefaults.crawlDelayMs,
@@ -284,7 +305,7 @@ async function executeAudit(runId) {
     });
 
     try {
-      const workers = Array.from({ length: run.concurrency }, (_, index) => workerLoop(db, runId, index + 1, lockToken, browser, robots, hostLimiter));
+      const workers = Array.from({ length: run.concurrency }, (_, index) => workerLoop(db, runId, index + 1, lockToken, browser, robots, hostLimiter, runtimeMetrics));
       heartbeatRun(db, runId, lockToken, workers.length);
       await Promise.all(workers);
     } finally {
@@ -311,10 +332,23 @@ async function executeAudit(runId) {
     });
     logRun(db, runId, 'info', 'Template clusters built', clusterSummary);
 
-    await runTemplateSampling(db, runId);
+    if (run.usePlaywright && run.playwrightMode === 'gate') {
+      updateRun(db, runId, { currentPhase: 'render_planning' });
+      const renderPlanSummary = await runDeterministicRenderPlan(db, run, runtimeMetrics);
+      logRun(db, runId, 'info', 'Deterministic render plan completed', {
+        plannedRenderedUrls: renderPlanSummary.plannedRenderedUrls || 0,
+        renderedUrls: renderPlanSummary.renderedUrls || 0,
+        budgetExcludedUrls: renderPlanSummary.budgetExcludedUrls || 0,
+        unavailableUrls: renderPlanSummary.unavailableUrls || 0
+      });
+    }
+
+    await runTemplateSampling(db, runId, runtimeMetrics);
 
     updateRun(db, runId, { currentPhase: 'checking', currentUrl: null, currentSampleUrl: null, workerCount: 0 });
+    runtimeMetrics.startPhase('checks');
     await runChecks(db, runId);
+    runtimeMetrics.endPhase('checks');
 
     syncRunCounters(db, runId);
     updateRun(db, runId, {
@@ -326,10 +360,21 @@ async function executeAudit(runId) {
       finishedAt: nowIso()
     });
     storeBenchmarkSummary(db, runId);
-    const reportPath = generateReport(db, runId);
+    runtimeMetrics.startPhase('report');
+    let reportPath = generateReport(db, runId);
+    runtimeMetrics.endPhase('report');
+    runtimeMetrics.finish({ status: 'completed' });
+    metricsFinished = true;
+    // Regenerate once so the report includes final runtime totals. This second write is
+    // intentionally outside the measured report phase and is documented as such.
+    reportPath = generateReport(db, runId);
     logRun(db, runId, 'info', 'Report generated', { reportPath });
     logRun(db, runId, 'info', 'Run completed');
   } finally {
+    if (runtimeMetrics && !metricsFinished) {
+      const current = getRunWithProject(db, runId);
+      runtimeMetrics.finish({ status: current?.status || 'aborted' });
+    }
     clearInterval(heartbeatTimer);
     releaseRunLock(db, runId, lockToken);
     logRun(db, runId, 'info', 'Run lock released', { lockToken });
@@ -412,7 +457,7 @@ function llmWarningsFor(config) {
   return warnings;
 }
 
-async function workerLoop(db, runId, workerId, lockToken, browser, robots, hostLimiter) {
+async function workerLoop(db, runId, workerId, lockToken, browser, robots, hostLimiter, runtimeMetrics = null) {
   logRun(db, runId, 'info', 'Worker started', { workerId });
   while (true) {
     const run = getRunWithProject(db, runId);
@@ -440,8 +485,9 @@ async function workerLoop(db, runId, workerId, lockToken, browser, robots, hostL
 
     updateRun(db, runId, { currentPhase: 'extracting', currentUrl: item.normalizedUrl });
 
+    const urlStartedAt = performance.now();
     try {
-      const outcome = await processQueueItem(db, run, run, item, browser, robots);
+      const outcome = await processQueueItem(db, run, run, item, browser, robots, runtimeMetrics);
       if (outcome.status === 'skipped') {
         skipUrl(db, item.id, outcome.reason);
       } else {
@@ -450,6 +496,14 @@ async function workerLoop(db, runId, workerId, lockToken, browser, robots, hostL
       syncRunCounters(db, runId);
       updateRun(db, runId, { currentPhase: 'crawling', currentUrl: null });
     } catch (error) {
+      runtimeMetrics?.recordUrl({
+        url: item.url || item.normalizedUrl,
+        pageType: 'other',
+        renderStrategy: !run.usePlaywright || run.playwrightMode === 'off' ? 'raw_only' : run.playwrightMode === 'gate' ? 'deterministic_gate' : run.playwrightMode === 'all' ? 'browser_all' : 'browser_sample',
+        totalUrlDurationMs: performance.now() - urlStartedAt,
+        renderStatus: 'technical_error',
+        measurementError: error.message
+      });
       const classification = classifyError(error);
       if (shouldRetryError(item, run, error)) {
         const nextAttemptAt = nextRetryAt(item, run);

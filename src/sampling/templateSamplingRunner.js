@@ -5,7 +5,7 @@ import { createPlaywrightSampler } from './playwrightSampler.js';
 import { createLighthouseSampler } from './lighthouseSampler.js';
 import { aggregateTemplatePerformance } from './templatePerformanceAggregator.js';
 
-export async function runTemplateSampling(db, runId) {
+export async function runTemplateSampling(db, runId, runtimeMetrics = null) {
   const run = getRunWithProject(db, runId);
   if (!run) throw new Error(`Run ${runId} not found`);
 
@@ -39,8 +39,10 @@ export async function runTemplateSampling(db, runId) {
   let playwrightSampler = null;
   let lighthouseSampler = null;
   try {
-    if (run.enablePlaywrightSampling) {
+    const needsPlaywrightBrowser = run.enablePlaywrightSampling && samples.some((sample) => !hasReusableRenderedEvidence(sample));
+    if (needsPlaywrightBrowser) {
       updateRun(db, runId, { currentPhase: 'playwright_sampling' });
+      runtimeMetrics?.startPhase('browser_launch');
       playwrightSampler = await createPlaywrightSampler({
         finalDomain: run.finalDomain,
         timeoutMs: run.playwrightTimeoutMs || crawlerDefaults.playwrightTimeoutMs,
@@ -56,6 +58,8 @@ export async function runTemplateSampling(db, runId) {
         screenshotDir: path.join(process.cwd(), 'reports', 'screenshots', `run-${runId}`),
         log: (level, message, data) => logRun(db, runId, level, message, data)
       });
+      runtimeMetrics?.endPhase('browser_launch');
+      runtimeMetrics?.recordBrowserLaunch({ success: Boolean(playwrightSampler.available) });
     }
     if (run.enableLighthouseSampling) {
       updateRun(db, runId, { currentPhase: 'lighthouse_sampling' });
@@ -81,7 +85,9 @@ export async function runTemplateSampling(db, runId) {
 
       if (run.enablePlaywrightSampling) {
         updateRun(db, runId, { currentPhase: 'playwright_sampling', currentSampleUrl: sample.url });
-        const result = await playwrightSampler.sample(sample);
+        const result = hasReusableRenderedEvidence(sample)
+          ? reusablePlaywrightResult(sample)
+          : await playwrightSampler.sample(sample);
         insertPlaywrightResult(db, runId, sample, result);
         updateSampleStatus(db, sampleResultId, { playwrightStatus: result.status });
         if (result.status !== 'success') errors.push(`Playwright: ${errorFromPlaywright(result, playwrightSampler.unavailableReason)}`);
@@ -134,7 +140,12 @@ export function loadTemplateSamples(db, runId, {
   const seen = new Set();
   const findPage = db.prepare(`
     SELECT id, url, finalUrl, normalizedUrl, indexable, title, h1Count, wordCountRaw,
-      internalLinksCount, externalLinksCount
+      internalLinksCount, externalLinksCount, renderStatus, settlingStatus,
+      settlingDurationMs, renderSnapshotCount, renderFingerprint,
+      initialRenderedStateJson, settledRenderedStateJson, renderProvenanceJson,
+      browserEventsJson, renderProvenanceVersion, settlingPolicyVersion,
+      wordCountRendered, renderedH1Count, renderedLinksCount, consoleErrorsJson,
+      pageErrorsJson, requestFailuresJson, cspViolationsJson, navigationError
     FROM pages
     WHERE runId = ? AND (url = ? OR finalUrl = ? OR normalizedUrl = ?)
     ORDER BY id ASC
@@ -161,6 +172,55 @@ export function loadTemplateSamples(db, runId, {
   }
 
   return output;
+}
+
+function hasReusableRenderedEvidence(sample) {
+  return sample?.renderStatus === 'success'
+    && ['settled', 'content_remained_empty'].includes(sample?.settlingStatus)
+    && Boolean(sample?.settledRenderedStateJson)
+    && Boolean(sample?.renderProvenanceJson);
+}
+
+function reusablePlaywrightResult(sample) {
+  const settled = safeJson(sample.settledRenderedStateJson, {});
+  const initial = safeJson(sample.initialRenderedStateJson, {});
+  const consoleErrors = safeJson(sample.consoleErrorsJson, []);
+  const pageErrors = safeJson(sample.pageErrorsJson, []);
+  const networkErrors = safeJson(sample.requestFailuresJson, []);
+  return {
+    status: 'success',
+    finalUrl: sample.finalUrl || sample.url,
+    title: settled.title || sample.title || null,
+    h1Count: sample.renderedH1Count ?? settled.h1?.length ?? 0,
+    renderedWordCount: sample.wordCountRendered ?? settled.visibleText?.wordCount ?? null,
+    renderedLinksCount: sample.renderedLinksCount ?? settled.internalLinks?.length ?? null,
+    rawRenderedWordDelta: sample.wordCountRendered === null || sample.wordCountRendered === undefined
+      ? null
+      : Number(sample.wordCountRendered) - Number(sample.wordCountRaw || 0),
+    consoleErrorsCount: consoleErrors.length,
+    consoleErrorsJson: sample.consoleErrorsJson || JSON.stringify([]),
+    pageErrorsCount: pageErrors.length,
+    pageErrorsJson: sample.pageErrorsJson || JSON.stringify([]),
+    cspViolationsJson: sample.cspViolationsJson || JSON.stringify([]),
+    networkErrorsCount: networkErrors.length,
+    networkErrorsJson: sample.requestFailuresJson || JSON.stringify([]),
+    navigationError: sample.navigationError || null,
+    textNormalizationVersion: settled.visibleText?.normalizationVersion || initial.visibleText?.normalizationVersion || null,
+    jsRequiredLikely: Number(sample.wordCountRaw || 0) < 100 && Number(sample.wordCountRendered || 0) > 200 ? 1 : 0,
+    screenshotPath: null,
+    loadTimeMs: null,
+    domContentLoadedMs: null,
+    settlingStatus: sample.settlingStatus,
+    settlingDurationMs: sample.settlingDurationMs,
+    renderSnapshotCount: sample.renderSnapshotCount,
+    renderFingerprint: sample.renderFingerprint,
+    initialRenderedStateJson: sample.initialRenderedStateJson,
+    settledRenderedStateJson: sample.settledRenderedStateJson,
+    renderProvenanceJson: sample.renderProvenanceJson,
+    browserEventsJson: sample.browserEventsJson || JSON.stringify([]),
+    renderProvenanceVersion: sample.renderProvenanceVersion,
+    settlingPolicyVersion: sample.settlingPolicyVersion
+  };
 }
 
 function insertSampleResult(db, runId, sample, statuses) {
