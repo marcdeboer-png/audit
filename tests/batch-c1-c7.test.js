@@ -113,7 +113,7 @@ test('synthetic 404 classifier covers pass, soft-404, homepage redirect, 5xx and
     ['real 410', probeFact(410, '<title>Gone</title>', 'https://example.com/gone'), 'pass', 'http_410'],
     ['custom 404 page', probeFact(404, '<title>Custom missing page</title><h1>Not found</h1>', 'https://example.com/custom'), 'pass', 'http_404'],
     ['soft 404', probeFact(200, '<title>Missing</title><h1>No result</h1>', 'https://example.com/soft'), 'fail', 'soft_404_http_200'],
-    ['server error', probeFact(500, '<title>Error</title>', 'https://example.com/broken'), 'fail', 'server_error_500'],
+    ['server error', { ...probeFact(500, '<title>Error</title>', 'https://example.com/broken'), measurementStability: 'confirmed' }, 'fail', 'server_error_500'],
     ['network error', { ...probeFact(null, '', 'https://example.com/network'), technicalError: 'ECONNRESET', technicalErrorType: 'network_error' }, 'technical_error', 'network_error']
   ];
   for (const [label, probe, outcome, reason] of matrix) {

@@ -12,6 +12,7 @@ import { filterArtifactsForStorage, snapshotHtml } from '../storage/retention.js
 import { buildEffectiveDocumentState, RENDER_PROVENANCE_VERSION, SETTLING_POLICY_VERSION } from '../extractors/documentState.js';
 import { activeRenderCheckIdsForAuditType, classifierForRenderPlanningVersion, RENDER_NEEDS } from '../rendering/renderPlanner.js';
 import { serializedRenderProvenanceBytes } from '../runtime/renderMetrics.js';
+import { appendHttpAttemptHistory, compactHttpAttempt } from '../utils/httpStatus.js';
 
 const RETRY_STATUS_CODES = new Set(crawlerDefaults.retryStatusCodes);
 const renderSlots = new Map();
@@ -28,12 +29,40 @@ export async function processQueueItem(db, run, project, queueItem, browser, rob
   const fetchStartedAt = performance.now();
   const response = await fetchWithTimeout(url, { timeoutMs: run.requestTimeoutMs || 15000, maxBytes: 5 * 1024 * 1024, userAgent: run.userAgent });
   const rawFetchDurationMs = performance.now() - fetchStartedAt;
-  if (RETRY_STATUS_CODES.has(Number(response.statusCode))) {
-    throw createHttpStatusError(response.statusCode, url);
-  }
   const normalizedFinalUrl = normalizeUrl(response.url) || url;
   const responseHeadersJson = run.storeResponseHeaders ? JSON.stringify(selectedHeaders(response.headers)).slice(0, 20000) : null;
   const contentType = response.contentType || '';
+  const httpAttempt = compactHttpAttempt({
+    attempt: queueItem.attempts,
+    method: 'GET',
+    requestedUrl: url,
+    initialStatusCode: response.initialStatusCode,
+    redirectChain: response.redirectChain,
+    statusCode: response.statusCode,
+    finalUrl: normalizedFinalUrl,
+    contentType,
+    loadTimeMs: response.loadTimeMs
+  });
+  const httpAttemptHistoryJson = appendHttpAttemptHistory(queueItem.httpAttemptHistoryJson, httpAttempt);
+  if (RETRY_STATUS_CODES.has(Number(response.statusCode))) {
+    insertPage(db, emptyPageRecord({
+      runId: run.id,
+      queueItem,
+      finalUrl: normalizedFinalUrl,
+      statusCode: response.statusCode,
+      initialStatusCode: response.initialStatusCode,
+      redirectChainJson: JSON.stringify(response.redirectChain || []),
+      httpAttemptHistoryJson,
+      contentType,
+      responseHeadersJson,
+      rawHtmlSize: response.sizeBytes,
+      loadTimeMs: response.loadTimeMs,
+      ttfbMs: response.ttfbMs
+    }));
+    const error = createHttpStatusError(response.statusCode, url);
+    error.httpAttempt = httpAttempt;
+    throw error;
+  }
   const isHtml = /text\/html|application\/xhtml\+xml/i.test(contentType);
 
   if (!isHtml) {
@@ -45,6 +74,7 @@ export async function processQueueItem(db, run, project, queueItem, browser, rob
       statusCode: response.statusCode,
       initialStatusCode: response.initialStatusCode,
       redirectChainJson: JSON.stringify(response.redirectChain || []),
+      httpAttemptHistoryJson,
       contentType,
       responseHeadersJson,
       rawHtmlSize: response.sizeBytes,
@@ -66,7 +96,7 @@ export async function processQueueItem(db, run, project, queueItem, browser, rob
       renderStatus: 'not_applicable',
       finalSettlingStatus: 'not_applicable'
     });
-    return { status: 'done', reason: 'Non-HTML response recorded' };
+    return { status: 'done', reason: 'Non-HTML response recorded', httpAttempt };
   }
 
   const extractionStartedAt = performance.now();
@@ -123,6 +153,7 @@ export async function processQueueItem(db, run, project, queueItem, browser, rob
     statusCode: response.statusCode,
     initialStatusCode: response.initialStatusCode,
     redirectChainJson: JSON.stringify(response.redirectChain || []),
+    httpAttemptHistoryJson,
     contentType,
     rawHtmlSize: response.sizeBytes,
     loadTimeMs: response.loadTimeMs,
@@ -258,7 +289,7 @@ export async function processQueueItem(db, run, project, queueItem, browser, rob
     }
   }
 
-  return { status: 'done', reason: 'HTML page crawled' };
+  return { status: 'done', reason: 'HTML page crawled', httpAttempt };
 }
 
 export function shouldRetry(queueItem) {
@@ -287,6 +318,7 @@ function emptyPageRecord(values) {
     statusCode: values.statusCode,
     initialStatusCode: values.initialStatusCode ?? values.statusCode,
     redirectChainJson: values.redirectChainJson || JSON.stringify([]),
+    httpAttemptHistoryJson: values.httpAttemptHistoryJson || JSON.stringify([]),
     contentType: values.contentType,
     indexable: 0,
     noindex: 0,

@@ -1,12 +1,13 @@
 import { followRedirectChain } from '../utils/http.js';
 import { normalizeUrl, originCandidates, stripWww, urlOrigin } from '../utils/url.js';
+import { classifyHostRelation, RETRY_SENSITIVE_HTTP_STATUSES } from '../utils/httpStatus.js';
 
 export async function detectDomain(inputDomain, options = {}) {
   const candidates = originCandidates(inputDomain);
   const results = [];
 
   for (const candidate of candidates) {
-    const result = await followRedirectChain(candidate, { timeoutMs: 8000, userAgent: options.userAgent });
+    const result = await probeCandidate(candidate, options);
     results.push(result);
   }
 
@@ -45,26 +46,64 @@ function candidateRank(result) {
 }
 
 function summarizeProtocol(results) {
-  return results.map((result) => ({
+  return results.map((result) => candidateEvidence(result, {
+    redirectsToHttps: Boolean(result.finalUrl && new URL(result.finalUrl).protocol === 'https:')
+  }));
+}
+
+function candidateEvidence(result, extra = {}) {
+  const start = new URL(result.startUrl);
+  const final = result.finalUrl ? new URL(result.finalUrl) : null;
+  const initialStatusCode = result.chain?.[0]?.statusCode ?? null;
+  const redirectStatuses = (result.chain || []).filter((entry) => entry.statusCode >= 300 && entry.statusCode < 400).map((entry) => entry.statusCode);
+  return {
     startUrl: result.startUrl,
     finalUrl: result.finalUrl,
     statusCode: result.statusCode,
-    redirectsToHttps: Boolean(result.finalUrl && new URL(result.finalUrl).protocol === 'https:'),
+    initialStatusCode,
+    finalStatusCode: result.statusCode,
+    redirectChain: result.chain || [],
     chainLength: result.chain.length,
-    error: result.error || null
-  }));
+    redirectStatuses,
+    permanentRedirect: redirectStatuses.length > 0 && redirectStatuses.every((status) => [301, 308].includes(status)),
+    pathPreserved: Boolean(final && start.pathname === final.pathname),
+    queryPreserved: Boolean(final && start.search === final.search),
+    finalProtocol: final?.protocol || null,
+    finalHost: final?.hostname || null,
+    hostRelation: final ? classifyHostRelation(start.hostname, final.hostname) : null,
+    method: 'GET',
+    attempts: result.attempts || [],
+    error: result.error || null,
+    ...extra
+  };
 }
 
 function summarizeWww(results, finalHost) {
   return {
     selectedHost: finalHost,
     selectedHostWithoutWww: stripWww(finalHost),
-    candidates: results.map((result) => ({
+    candidates: results.map((result) => candidateEvidence(result, {
       startHost: new URL(result.startUrl).hostname,
-      finalHost: result.finalUrl ? new URL(result.finalUrl).hostname : null,
-      finalHostWithoutWww: result.finalUrl ? stripWww(new URL(result.finalUrl).hostname) : null,
-      statusCode: result.statusCode,
-      error: result.error || null
+      finalHostWithoutWww: result.finalUrl ? stripWww(new URL(result.finalUrl).hostname) : null
     }))
   };
+}
+
+async function probeCandidate(candidate, options) {
+  const attempts = [];
+  const maximum = 2;
+  let result;
+  for (let attempt = 1; attempt <= maximum; attempt += 1) {
+    result = await followRedirectChain(candidate, { timeoutMs: 8000, userAgent: options.userAgent });
+    attempts.push({
+      attempt,
+      method: 'GET',
+      initialStatusCode: result.chain?.[0]?.statusCode ?? null,
+      finalStatusCode: result.statusCode,
+      finalUrl: result.finalUrl,
+      error: result.error || null
+    });
+    if (!result.error && !RETRY_SENSITIVE_HTTP_STATUSES.has(Number(result.statusCode))) break;
+  }
+  return { ...result, attempts };
 }

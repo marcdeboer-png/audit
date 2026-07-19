@@ -16,7 +16,7 @@ test('every active audit check has one valid registry entry', () => {
   const summary = summarizeCheckValidationRegistry(registry);
   assert.equal(summary.activeChecks, activeChecks.length);
   assert.equal(summary.totalChecks, registry.checks.length);
-  assert.equal(summary.statusCounts.cross_domain_validated, 2);
+  assert.equal(summary.statusCounts.cross_domain_validated, 4);
 });
 
 test('registry validation fails closed for a new unregistered check', () => {
@@ -74,4 +74,29 @@ test('canonical family records automation limits without inflating trust', () =>
     assert.equal(byId.get(id).score_effect, 'score_free', id);
     assert.ok(byId.get(id).manual_review_reason.length > 20, id);
   }
+});
+
+test('HTTP family records retry, host and inventory trust limits conservatively', () => {
+  const registry = loadCheckValidationRegistry();
+  const byId = new Map(registry.checks.map((entry) => [entry.check_id, entry]));
+  const allowedTrustActions = new Set([
+    'fully_automated', 'automated_with_limits', 'manual_review_required',
+    'diagnostic_only', 'temporarily_score_free', 'invalid_disabled'
+  ]);
+  const httpIds = [
+    'tech.https_reachable', 'tech.http_to_https_redirect', 'tech.www_non_www_consistency',
+    'tech.synthetic_not_found_handling', 'tech.status_code_distribution', 'tech.4xx_pages',
+    'tech.5xx_pages', 'tech.redirect_pages', 'tech.sitemap_urls_non_200',
+    'tech.internal_links_to_3xx', 'tech.internal_links_to_4xx_5xx'
+  ];
+  for (const id of httpIds) assert.ok(allowedTrustActions.has(byId.get(id).recommended_trust_action), id);
+  assert.equal(byId.get('tech.4xx_pages').validation_status, 'cross_domain_validated');
+  assert.equal(byId.get('tech.5xx_pages').validation_status, 'fixture_validated');
+  assert.match(byId.get('tech.5xx_pages').validation_gap.missing_evidence.join(' '), /real positive case/);
+  assert.equal(byId.get('tech.https_reachable').validation_status, 'validated_with_limits');
+  assert.equal(byId.get('tech.http_to_https_redirect').validation_status, 'validated_with_limits');
+  assert.equal(byId.get('tech.www_non_www_consistency').validation_status, 'validated_with_limits');
+  assert.equal(byId.get('tech.redirect_pages').validation_status, 'cross_domain_validated');
+  assert.equal(byId.get('tech.redirect_pages').score_effect, 'score_free');
+  assert.equal(byId.get('tech.internal_links_to_4xx_5xx').validation_status, 'single_domain_validated');
 });

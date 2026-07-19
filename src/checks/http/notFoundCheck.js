@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import * as cheerio from 'cheerio';
 import { fetchWithTimeout, selectedHeaders } from '../../utils/http.js';
 import { makeResult } from '../helpers.js';
+import { RETRY_SENSITIVE_HTTP_STATUSES } from '../../utils/httpStatus.js';
 
 const MAX_REDIRECTS = 6;
 const SAFE_PREFIX = '__seo-audit-not-found';
@@ -138,6 +139,23 @@ export function syntheticNotFoundCheck(options = {}) {
 }
 
 export async function probeUrl(startUrl, request = fetchWithTimeout, run = {}, checkedAt = new Date().toISOString()) {
+  const attempts = [];
+  let result;
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
+    result = await probeUrlOnce(startUrl, request, run, checkedAt);
+    attempts.push({ attempt, statusCode: result.statusCode ?? null, finalUrl: result.finalUrl, technicalErrorType: result.technicalErrorType, technicalError: result.technicalError });
+    const retrySensitive = RETRY_SENSITIVE_HTTP_STATUSES.has(Number(result.statusCode)) || ['network_error', 'timeout', 'connection_reset'].includes(result.technicalErrorType);
+    if (!retrySensitive) break;
+  }
+  const statuses = [...new Set(attempts.map((item) => item.statusCode).filter((value) => value !== null))];
+  return {
+    ...result,
+    measurementAttempts: attempts,
+    measurementStability: attempts.length > 1 && statuses.length === 1 && !result.technicalError ? 'confirmed' : attempts.length > 1 && statuses.length > 1 ? 'transient' : result.technicalError ? 'technical_error' : 'confirmed'
+  };
+}
+
+async function probeUrlOnce(startUrl, request = fetchWithTimeout, run = {}, checkedAt = new Date().toISOString()) {
   let currentUrl = startUrl;
   const redirectChain = [];
   const seen = new Set();
@@ -203,7 +221,10 @@ export function classifyProbe(probe, homepage, origin) {
   const originPath = safePath(new URL('/', origin).toString());
   const redirected = probe.redirectChain.length > 1;
   if (status === 404 || status === 410) return { outcome: 'pass', severity: 'none', reason: `http_${status}`, homepageSimilarity };
-  if (status >= 500 && status <= 599) return { outcome: 'fail', severity: 'critical', reason: `server_error_${status}`, homepageSimilarity };
+  if (status >= 500 && status <= 599) {
+    if (probe.measurementStability !== 'confirmed') return { outcome: 'technical_error', severity: 'none', reason: `unconfirmed_server_error_${status}`, homepageSimilarity };
+    return { outcome: 'fail', severity: 'critical', reason: `server_error_${status}`, homepageSimilarity };
+  }
   if (status === 200) {
     const homeLike = homepageSimilarity !== null && homepageSimilarity >= 0.85;
     const redirectedToHome = redirected && finalPath === originPath;
@@ -262,6 +283,7 @@ function compactProbeFact(probe) {
     bodyLength: probe.bodyLength,
     title: probe.title,
     homepageSimilarity: probe.homepageSimilarity,
+    measurementStability: probe.measurementStability,
     outcome: probe.outcome,
     reason: probe.reason
   };
@@ -276,6 +298,8 @@ function compactProbeEvidence(probe) {
     checkedAt: probe.checkedAt,
     bodySha256: probe.fingerprint?.bodySha256 || null,
     excerpt: probe.fingerprint?.excerpt || null,
+    measurementAttempts: probe.measurementAttempts || [],
+    measurementStability: probe.measurementStability,
     technicalError: probe.technicalError
   };
 }

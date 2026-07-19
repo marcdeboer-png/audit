@@ -1,5 +1,6 @@
 import { normalizeRequestUrl, normalizeUrl, isLikelyHtmlPage } from '../utils/url.js';
 import { crawlerDefaults } from '../crawler/defaults.js';
+import { appendHttpAttemptHistory } from '../utils/httpStatus.js';
 
 export function enqueueUrl(db, {
   runId,
@@ -143,6 +144,15 @@ export function completeUrl(db, queueId) {
         lockToken = NULL
     WHERE id = ?
   `).run(queueId);
+}
+
+export function appendHttpAttempt(db, queueId, attempt) {
+  const row = db.prepare('SELECT runId, normalizedUrl, httpAttemptHistoryJson FROM crawl_queue WHERE id = ?').get(queueId);
+  if (!row) throw new Error(`Cannot append HTTP attempt: queue row ${queueId} does not exist`);
+  const history = appendHttpAttemptHistory(row.httpAttemptHistoryJson, attempt);
+  db.prepare('UPDATE crawl_queue SET httpAttemptHistoryJson = ? WHERE id = ?').run(history, queueId);
+  db.prepare('UPDATE pages SET httpAttemptHistoryJson = ? WHERE runId = ? AND normalizedUrl = ?').run(history, row.runId, row.normalizedUrl);
+  return history;
 }
 
 export function scheduleRetry(db, queueId, { errorMessage, nextAttemptAt, statusCode = null, errorType = 'retryable', failedReason = null }) {

@@ -16,7 +16,8 @@ import {
 } from '../helpers.js';
 import { syntheticNotFoundCheck } from '../http/notFoundCheck.js';
 import { classifyInternalSearchPage } from '../searchPageClassifier.js';
-import { stripWww } from '../../utils/url.js';
+import { isLikelyHtmlPage } from '../../utils/url.js';
+import { classifyHostRelation, classifyHttpStability, HTTP_STATUS_VALIDATION_VERSION, RETRY_SENSITIVE_HTTP_STATUSES } from '../../utils/httpStatus.js';
 import { thresholdBytes, thresholds } from '../config/thresholds.js';
 import { templatePatternChecks } from '../../analysis/templatePatternChecks.js';
 import { hasArticleSchema } from '../../extractors/pageType.js';
@@ -91,9 +92,9 @@ export function techChecks() {
     wwwConsistency(),
     syntheticNotFoundCheck(),
     statusCodeDistribution(),
-    pageStatusCheck('4xx_pages', 'Server & Infrastructure', '4xx pages present', 'statusCode >= 400 AND statusCode < 500', 'Warning'),
-    pageStatusCheck('5xx_pages', 'Server & Infrastructure', '5xx pages present', 'statusCode >= 500', 'Error', 'High'),
-    pageStatusCheck('redirect_pages', 'Server & Infrastructure', 'Redirect pages present', '(initialStatusCode >= 300 AND initialStatusCode < 400) OR (initialStatusCode IS NULL AND finalUrl <> url)', 'Warning'),
+    http4xxPages(),
+    http5xxPages(),
+    redirectPagesInventory(),
     headerPresence('compression_header', 'Server/Performance Best Practice', 'Compression header present', 'content-encoding', 'Low', {
       findingType: 'best_practice',
       missingFinding: (affected, total) => `${affected}/${total} HTML page(s) have no detected Content-Encoding header.`,
@@ -229,17 +230,28 @@ function domainHttpsReachable() {
       evidence: { httpsCandidates: [], protocolMeasurementsAvailable: false },
       requirements: { requiredFacts: ['httpsCandidateResponse'], missingFacts: ['httpsCandidateResponse'], minimumCoverage: 1, canCollectWithTargetedRun: true }
     });
-    if (httpsCandidates.every((item) => !item.statusCode)) return availabilityResult(this, 'technical_error', {
+    if (httpsCandidates.every((item) => !httpStatusKnown(item))) return availabilityResult(this, 'technical_error', {
       finding: 'All HTTPS candidate measurements failed technically; no website failure was inferred.',
       evidence: { httpsCandidates, technicalErrors: httpsCandidates.map((item) => item.error).filter(Boolean) },
       requirements: { requiredFacts: ['httpsCandidateResponse'], missingFacts: ['stableHttpsResponse'], minimumCoverage: 1, canCollectWithTargetedRun: true }
     });
-    const reachable = httpsCandidates.filter((item) => item.statusCode && item.statusCode < 500);
+    const responded = httpsCandidates.filter(httpStatusKnown);
+    const reachable = responded.filter((item) => {
+      const final = safeUrl(item.finalUrl);
+      return final?.protocol === 'https:';
+    });
     return makeResult(this, reachable.length ? 'OK' : 'Error', {
       affectedCount: reachable.length ? 0 : 1,
       finding: reachable.length ? 'At least one HTTPS candidate was reachable.' : 'No HTTPS candidate was reachable.',
       recommendation: 'Serve the canonical site via HTTPS.',
-      evidence: { httpsCandidates }
+      evidence: {
+        logicVersion: HTTP_STATUS_VALIDATION_VERSION,
+        tlsConnectionSuccessful: responded.length > 0,
+        httpsHttpResponseObtained: responded.length > 0,
+        finalHttpsSiteReachable: reachable.length > 0,
+        httpsCandidates
+      },
+      requirements: { requiredFacts: ['httpsGetResponse', 'finalHttpsUrl'], optionalFacts: ['certificateDetails'], missingFacts: [], minimumCoverage: 1, canCollectWithTargetedRun: true }
     });
   }, { priority: 'High', effort: 'M' });
 }
@@ -247,19 +259,40 @@ function domainHttpsReachable() {
 function httpToHttpsRedirect() {
   return tech('http_to_https_redirect', 'Server & Infrastructure', 'HTTP to HTTPS redirect', function run(ctx) {
     const candidates = parseProjectJson(ctx.project, 'protocolBehaviorJson', []);
-    const http = candidates.filter((item) => item.startUrl?.startsWith('http://') && item.statusCode);
-    const notRedirecting = http.filter((item) => !item.redirectsToHttps);
-    const status = !http.length ? 'NA' : notRedirecting.length ? 'Warning' : 'OK';
+    const http = candidates.filter((item) => item.startUrl?.startsWith('http://') && httpStatusKnown(item));
+    const unavailable = http.filter(candidateBlocksRedirectEvaluation);
+    const stableHttp = http.filter((item) => !candidateBlocksRedirectEvaluation(item));
+    if (!stableHttp.length && unavailable.length) return availabilityResult(this, 'technical_error', {
+      finding: `${unavailable.length} HTTP candidate(s) were rate-limited, timed out or returned a server failure; redirect behavior was not inferred.`,
+      evidence: { logicVersion: HTTP_STATUS_VALIDATION_VERSION, httpCandidates: http, unavailableCandidates: unavailable },
+      requirements: { requiredFacts: ['httpGetResponse', 'initialStatus', 'redirectChain', 'finalUrl'], missingFacts: ['stableHttpRedirectResponse'], minimumCoverage: 1, canCollectWithTargetedRun: true }
+    });
+    const incomplete = stableHttp.filter((item) => item.initialStatusCode === null || item.initialStatusCode === undefined || !Array.isArray(item.redirectChain) || typeof item.pathPreserved !== 'boolean' || typeof item.queryPreserved !== 'boolean');
+    if (incomplete.length) return availabilityResult(this, 'insufficient_evidence', {
+      finding: `${incomplete.length} HTTP candidate measurement(s) predate complete initial-status and redirect provenance.`,
+      details: 'No HTTP-to-HTTPS defect was inferred from final-only historical facts.',
+      evidence: { logicVersion: HTTP_STATUS_VALIDATION_VERSION, httpCandidates: http, incompleteMeasurements: incomplete.length },
+      requirements: { requiredFacts: ['httpGetResponse', 'initialStatus', 'redirectChain', 'finalUrl'], missingFacts: ['completeRedirectProvenance'], minimumCoverage: 1, canCollectWithTargetedRun: true }
+    });
+    const notRedirecting = stableHttp.filter((item) => !item.redirectsToHttps || !hasRedirect(item));
+    const temporary = stableHttp.filter((item) => item.redirectsToHttps && hasRedirect(item) && !isPermanentRedirectChain(item));
+    const pathOrQueryLoss = stableHttp.filter((item) => item.redirectsToHttps && (item.pathPreserved === false || item.queryPreserved === false));
+    const affected = [...new Set([...notRedirecting, ...temporary, ...pathOrQueryLoss])];
+    const status = !http.length ? 'NA' : affected.length ? 'Warning' : 'OK';
     if (!http.length) return availabilityResult(this, 'insufficient_evidence', {
       finding: 'HTTP-to-HTTPS behavior was not evaluated because no HTTP candidate response is available.',
       evidence: { httpCandidates: [] },
       requirements: { requiredFacts: ['httpCandidateResponse'], missingFacts: ['httpCandidateResponse'], minimumCoverage: 1, canCollectWithTargetedRun: true }
     });
     return makeResult(this, status, {
-      affectedCount: notRedirecting.length,
-      finding: status === 'OK' ? 'Reachable HTTP candidates redirect to HTTPS.' : `${notRedirecting.length} HTTP candidate(s) did not end on HTTPS.`,
-      recommendation: 'Redirect all HTTP variants to the canonical HTTPS URL.',
-      evidence: { httpCandidates: http }
+      affectedCount: affected.length,
+      finding: status === 'OK' ? 'Reachable HTTP candidates permanently redirect to HTTPS.' : `${affected.length} HTTP candidate(s) lack a permanent, path-preserving HTTPS redirect.`,
+      recommendation: 'Use a permanent 301/308 redirect from relevant HTTP variants to the matching canonical HTTPS URL.',
+      evidence: { logicVersion: HTTP_STATUS_VALIDATION_VERSION, httpCandidates: http, temporaryRedirects: temporary.length, nonHttpsOrNoRedirect: notRedirecting.length, pathOrQueryLoss: pathOrQueryLoss.length, unavailableCandidates: unavailable.length },
+      facts: { measuredCandidates: http.length, stableCandidates: stableHttp.length, affectedCandidates: affected.length },
+      confidence: unavailable.length || temporary.length ? 'medium' : 'high',
+      limitations: 'Root-candidate domain detection proves root-path behavior. Deep path/query preservation requires a targeted host-consistency probe.',
+      requirements: { requiredFacts: ['httpGetResponse', 'initialStatus', 'redirectChain', 'finalUrl'], optionalFacts: ['deepPathQueryProbe'], missingFacts: unavailable.length ? ['completeStableHttpCandidateCoverage'] : [], minimumCoverage: 1, canCollectWithTargetedRun: true }
     });
   });
 }
@@ -267,36 +300,217 @@ function httpToHttpsRedirect() {
 function wwwConsistency() {
   return tech('www_non_www_consistency', 'Server & Infrastructure', 'www/non-www consistency', function run(ctx) {
     const data = parseProjectJson(ctx.project, 'wwwBehaviorJson', { candidates: [] });
-    const reachableHosts = [...new Set((data.candidates || [])
-      .filter((item) => item.statusCode && item.statusCode < 500 && item.finalHost)
-      .map((item) => item.finalHost))];
-    const hostVariants = [...new Set(reachableHosts.map((host) => stripWww(host)))];
-    const mixedWww = reachableHosts.some((host) => host.startsWith('www.')) && reachableHosts.some((host) => !host.startsWith('www.'));
-    const status = hostVariants.length > 1 || mixedWww ? 'Warning' : 'OK';
+    const candidates = data.candidates || [];
+    const relevant = candidates.filter((item) => ['same', 'www_variant'].includes(item.hostRelation || classifyHostRelation(item.startHost, data.selectedHost)));
+    const startHosts = [...new Set(relevant.map((item) => item.startHost).filter(Boolean))];
+    if (startHosts.length < 2) return availabilityResult(this, 'not_applicable', {
+      finding: 'No meaningful Apex/www pair exists for this audited host.',
+      evidence: { logicVersion: HTTP_STATUS_VALIDATION_VERSION, selectedHost: data.selectedHost, candidates: relevant },
+      requirements: { requiredFacts: ['registrableApexHost'], missingFacts: [], minimumCoverage: 1, canCollectWithTargetedRun: false }
+    });
+    const measured = relevant.filter(httpStatusKnown);
+    if (measured.length < startHosts.length) return availabilityResult(this, 'technical_error', {
+      finding: 'Apex/www consistency could not be evaluated because at least one host variant produced no HTTP response.',
+      evidence: { logicVersion: HTTP_STATUS_VALIDATION_VERSION, selectedHost: data.selectedHost, candidates: relevant },
+      requirements: { requiredFacts: ['getResponseForBothHostVariants'], missingFacts: ['stableHostVariantResponse'], minimumCoverage: 2, canCollectWithTargetedRun: true }
+    });
+    const unavailable = measured.filter(candidateBlocksRedirectEvaluation);
+    if (unavailable.length) return availabilityResult(this, 'technical_error', {
+      finding: `${unavailable.length} Apex/www candidate(s) were rate-limited, timed out or returned a server failure; host consistency was not inferred.`,
+      evidence: { logicVersion: HTTP_STATUS_VALIDATION_VERSION, selectedHost: data.selectedHost, candidates: relevant, unavailableCandidates: unavailable },
+      requirements: { requiredFacts: ['getResponseForBothHostVariants'], missingFacts: ['stableHostVariantResponse'], minimumCoverage: 2, canCollectWithTargetedRun: true }
+    });
+    const incomplete = measured.filter((item) => item.initialStatusCode === null || item.initialStatusCode === undefined || !Array.isArray(item.redirectChain) || typeof item.pathPreserved !== 'boolean' || typeof item.queryPreserved !== 'boolean');
+    if (incomplete.length) return availabilityResult(this, 'insufficient_evidence', {
+      finding: `${incomplete.length} host-variant measurement(s) predate complete initial-status and redirect provenance.`,
+      details: 'No Apex/www inconsistency was inferred from final-host-only historical facts.',
+      evidence: { logicVersion: HTTP_STATUS_VALIDATION_VERSION, selectedHost: data.selectedHost, candidates: relevant, incompleteMeasurements: incomplete.length },
+      requirements: { requiredFacts: ['getResponseForBothHostVariants', 'initialStatus', 'redirectChain', 'finalHost'], missingFacts: ['completeHostRedirectProvenance'], minimumCoverage: 2, canCollectWithTargetedRun: true }
+    });
+    const issues = measured.filter((item) => {
+      if (item.finalHost !== data.selectedHost) return true;
+      if (item.startHost !== data.selectedHost && (!hasRedirect(item) || !isPermanentRedirectChain(item))) return true;
+      return item.pathPreserved === false || item.queryPreserved === false;
+    });
+    const status = issues.length ? 'Warning' : 'OK';
     return makeResult(this, status, {
-      affectedCount: status === 'OK' ? 0 : reachableHosts.length,
+      affectedCount: issues.length,
       finding: status === 'OK' ? 'Reachable variants converge consistently.' : 'Reachable variants do not converge to one host form.',
-      recommendation: 'Choose one canonical host variant and redirect alternates to it.',
-      evidence: { reachableHosts, selectedHost: data.selectedHost }
+      recommendation: 'Keep either Apex or www as canonical and permanently redirect the alternative while preserving path and query.',
+      evidence: { logicVersion: HTTP_STATUS_VALIDATION_VERSION, selectedHost: data.selectedHost, candidates: relevant, issueCandidates: issues },
+      facts: { checkedHostVariants: startHosts, issueCount: issues.length },
+      confidence: 'high',
+      reviewRecommended: issues.length > 0,
+      limitations: 'An intentionally unprovisioned alternate host or migration window can require operational context.',
+      requirements: { requiredFacts: ['getResponseForBothHostVariants', 'initialStatus', 'redirectChain', 'finalHost'], optionalFacts: ['sitemapAndCanonicalHostAgreement'], missingFacts: [], minimumCoverage: 2, canCollectWithTargetedRun: true }
     });
   });
 }
 
 function statusCodeDistribution() {
   return tech('status_code_distribution', 'Server & Infrastructure', 'Status code distribution', function run(ctx) {
-    const rows = all(ctx.db, `
-      SELECT COALESCE(statusCode, 0) AS statusCode, COUNT(*) AS count
+    const finalRows = all(ctx.db, `
+      SELECT statusCode, COUNT(*) AS count
       FROM pages
-      WHERE runId = ?
-      GROUP BY COALESCE(statusCode, 0)
+      WHERE runId = ? AND statusCode IS NOT NULL
+      GROUP BY statusCode
       ORDER BY statusCode
     `, [ctx.run.id]);
-    return makeResult(this, rows.length ? 'OK' : 'NA', {
-      finding: rows.length ? 'Status code distribution calculated from crawled pages.' : 'No page responses stored.',
-      details: rows.map((row) => `${row.statusCode}: ${row.count}`).join(', '),
-      evidence: { distribution: rows }
+    const initialRows = all(ctx.db, `
+      SELECT COALESCE(initialStatusCode, statusCode) AS statusCode, COUNT(*) AS count
+      FROM pages
+      WHERE runId = ? AND COALESCE(initialStatusCode, statusCode) IS NOT NULL
+      GROUP BY COALESCE(initialStatusCode, statusCode)
+      ORDER BY statusCode
+    `, [ctx.run.id]);
+    const technicalFailures = count(ctx.db, "SELECT COUNT(*) AS count FROM crawl_queue WHERE runId = ? AND status = 'failed' AND lastStatusCode IS NULL", [ctx.run.id]);
+    const missingInitialStatuses = count(ctx.db, 'SELECT COUNT(*) AS count FROM pages WHERE runId = ? AND statusCode IS NOT NULL AND initialStatusCode IS NULL', [ctx.run.id]);
+    return makeResult(this, finalRows.length ? 'OK' : 'NA', {
+      finding: finalRows.length ? (missingInitialStatuses ? 'Final status distribution is available; historical initial-status coverage is incomplete.' : 'Initial and final status distributions were calculated from measured page GETs.') : 'No page responses stored.',
+      details: finalRows.map((row) => `${row.statusCode}: ${row.count}`).join(', '),
+      evidence: { logicVersion: HTTP_STATUS_VALIDATION_VERSION, initialDistribution: initialRows, finalDistribution: finalRows, technicalFailures, missingInitialStatuses },
+      facts: { measuredResponses: finalRows.reduce((sum, row) => sum + row.count, 0), technicalFailures, missingInitialStatuses },
+      findingType: 'info',
+      scoreEligible: false,
+      requirements: { requiredFacts: ['pageGetStatuses'], optionalFacts: ['technicalFailureInventory', 'initialStatusDistribution'], missingFacts: missingInitialStatuses ? ['completeInitialStatusDistribution'] : [], minimumCoverage: 1, canCollectWithTargetedRun: true }
     });
   }, { priority: 'Low', effort: 'S' });
+}
+
+function http4xxPages() {
+  return tech('4xx_pages', 'Server & Infrastructure', '4xx pages present', function run(ctx) {
+    const rows = httpStatusRows(ctx, 'p.statusCode >= 400 AND p.statusCode < 500');
+    const reportable = rows.filter((row) => ![408, 429].includes(Number(row.statusCode)));
+    const uncertain = rows.filter((row) => [408, 429].includes(Number(row.statusCode)));
+    if (!reportable.length && uncertain.length) return httpStatusAvailability(this, uncertain, 'Transient or rate-limited 4xx responses were not confirmed as stable website responses.');
+    return makeResult(this, reportable.length ? 'Warning' : 'OK', {
+      affectedCount: reportable.length,
+      sampleUrls: reportable.map((row) => row.url),
+      finding: reportable.length ? `${reportable.length} crawled URL(s) returned a stable 4xx response.` : 'No stable 4xx page response was measured.',
+      recommendation: 'Remove unintended 4xx URLs from internal discovery paths or restore the intended resource.',
+      evidence: { logicVersion: HTTP_STATUS_VALIDATION_VERSION, samples: reportable.slice(0, 10).map(httpStatusSample), transientOrUncertain: uncertain.length },
+      requirements: { ...httpStatusRequirements(), missingFacts: uncertain.length ? ['nonRateLimitedGetCoverage'] : [] },
+      confidence: uncertain.length || reportable.some((row) => [401, 403].includes(Number(row.statusCode))) ? 'medium' : 'high',
+      reviewRecommended: reportable.some((row) => [401, 403].includes(Number(row.statusCode))),
+      limitations: '401/403 may represent intentional access control or a WAF and require context.'
+    });
+  });
+}
+
+function http5xxPages() {
+  return tech('5xx_pages', 'Server & Infrastructure', '5xx pages present', function run(ctx) {
+    const rows = httpStatusRows(ctx, 'p.statusCode >= 500 AND p.statusCode < 600');
+    const unpersistedFailures = all(ctx.db, `SELECT url, lastStatusCode, lastErrorType, failedReason FROM crawl_queue WHERE runId = ? AND status = 'failed' AND (lastStatusCode >= 500 OR lastStatusCode IS NULL) ORDER BY id LIMIT 10`, [ctx.run.id]);
+    const confirmed = rows.filter((row) => row.stability.status === 'confirmed');
+    const incomplete = rows.filter((row) => row.stability.status !== 'confirmed');
+    if (!confirmed.length && !incomplete.length && unpersistedFailures.length) return availabilityResult(this, 'technical_error', {
+      finding: `${unpersistedFailures.length} failed request(s) lack a complete persisted 5xx response measurement; no pass was inferred.`,
+      evidence: { logicVersion: HTTP_STATUS_VALIDATION_VERSION, unpersistedFailures },
+      requirements: { ...httpStatusRequirements(), missingFacts: ['stableFinalGetResponse'] }
+    });
+    if (!confirmed.length && incomplete.length) return httpStatusAvailability(this, incomplete, 'Server-error responses were not reproduced enough to confirm a website defect.');
+    return makeResult(this, confirmed.length ? 'Error' : 'OK', {
+      affectedCount: confirmed.length,
+      sampleUrls: confirmed.map((row) => row.url),
+      finding: confirmed.length ? `${confirmed.length} URL(s) returned a reproducible final 5xx response.` : 'No reproducible final 5xx response was measured.',
+      recommendation: 'Investigate the reproducible server/CDN failure and restore a stable non-5xx response.',
+      evidence: { logicVersion: HTTP_STATUS_VALIDATION_VERSION, confirmed: confirmed.slice(0, 10).map(httpStatusSample), incompleteOrTransient: incomplete.slice(0, 10).map(httpStatusSample) },
+      facts: { confirmedUrls: confirmed.length, incompleteOrTransientUrls: incomplete.length },
+      requirements: httpStatusRequirements(),
+      confidence: 'high',
+      reviewRecommended: confirmed.length > 0,
+      reviewReason: confirmed.length ? 'Confirm business impact and whether a CDN/WAF or origin emitted the response.' : null
+    });
+  }, { priority: 'High' });
+}
+
+function redirectPagesInventory() {
+  return tech('redirect_pages', 'Server & Infrastructure', 'Redirect pages present', function run(ctx) {
+    const rows = all(ctx.db, `SELECT url, initialStatusCode, statusCode, finalUrl, redirectChainJson FROM pages WHERE runId = ? AND initialStatusCode >= 300 AND initialStatusCode < 400 ORDER BY id`, [ctx.run.id]);
+    const legacyRedirectSignals = count(ctx.db, "SELECT COUNT(*) AS count FROM pages WHERE runId = ? AND initialStatusCode IS NULL AND finalUrl IS NOT NULL AND finalUrl <> url", [ctx.run.id]);
+    if (!rows.length && legacyRedirectSignals) return availabilityResult(this, 'insufficient_evidence', {
+      finding: `${legacyRedirectSignals} historical final-URL difference(s) exist without retained initial redirect status.`,
+      details: 'Final URL differences alone are not reinterpreted as confirmed redirects.',
+      evidence: { logicVersion: HTTP_STATUS_VALIDATION_VERSION, legacyRedirectSignals },
+      requirements: { requiredFacts: ['initialGetStatus', 'redirectChain', 'finalStatus'], missingFacts: ['initialRedirectStatus'], minimumCoverage: 1, canCollectWithTargetedRun: true }
+    });
+    return makeResult(this, 'OK', {
+      affectedCount: rows.length,
+      sampleUrls: rows.map((row) => row.url),
+      finding: rows.length ? `${rows.length} requested URL(s) returned an initial redirect.` : 'No initial page redirects were recorded.',
+      recommendation: 'Use this inventory to review redirect chains; a redirect is not automatically a defect.',
+      evidence: { logicVersion: HTTP_STATUS_VALIDATION_VERSION, totalRedirectUrls: rows.length, displayedSamples: Math.min(rows.length, 10), samples: rows.slice(0, 10) },
+      findingType: 'info',
+      scoreEligible: false,
+      confidence: 'high',
+      reviewRecommended: false,
+      requirements: { requiredFacts: ['initialGetStatus', 'redirectChain', 'finalStatus'], optionalFacts: [], missingFacts: [], minimumCoverage: 1, canCollectWithTargetedRun: true }
+    });
+  });
+}
+
+function httpStatusRows(ctx, where) {
+  return all(ctx.db, `
+    SELECT p.url, p.normalizedUrl, p.statusCode, p.initialStatusCode, p.finalUrl,
+           p.contentType, p.redirectChainJson, p.httpAttemptHistoryJson,
+           q.attempts AS queueAttempts, q.status AS queueStatus, q.lastErrorType
+    FROM pages p
+    LEFT JOIN crawl_queue q ON q.runId = p.runId AND q.normalizedUrl = p.normalizedUrl
+    WHERE p.runId = ? AND (${where})
+    ORDER BY p.id
+  `, [ctx.run.id]).map((row) => ({ ...row, stability: classifyHttpStability(row.httpAttemptHistoryJson) }));
+}
+
+function httpStatusSample(row) {
+  return {
+    url: row.url,
+    initialStatus: row.initialStatusCode,
+    redirectChain: safeJson(row.redirectChainJson, []),
+    finalStatus: row.statusCode,
+    finalUrl: row.finalUrl,
+    contentType: row.contentType,
+    stability: row.stability.status,
+    measurementAttempts: row.stability.attempts
+  };
+}
+
+function httpStatusAvailability(check, rows, finding) {
+  return availabilityResult(check, rows.some((row) => row.stability.status === 'technical_error') ? 'technical_error' : 'insufficient_evidence', {
+    finding,
+    evidence: { logicVersion: HTTP_STATUS_VALIDATION_VERSION, samples: rows.slice(0, 10).map(httpStatusSample) },
+    requirements: { ...httpStatusRequirements(), missingFacts: ['stableOrRepeatedGetResponse'] }
+  });
+}
+
+function httpStatusRequirements() {
+  return { requiredFacts: ['httpGetResponse', 'initialStatus', 'finalStatus', 'measurementStability'], optionalFacts: ['responseHeaders'], missingFacts: [], minimumCoverage: 1, canCollectWithTargetedRun: true };
+}
+
+function httpStatusKnown(item) {
+  return Number.isInteger(Number(item?.finalStatusCode ?? item?.statusCode)) && Number(item?.finalStatusCode ?? item?.statusCode) >= 100;
+}
+
+function candidateBlocksRedirectEvaluation(item) {
+  const status = Number(item?.finalStatusCode ?? item?.statusCode);
+  if (status === 408 || status === 429 || status >= 500) return true;
+  if (!Array.isArray(item?.attempts) || !item.attempts.length) return false;
+  return ['technical_error', 'transient', 'insufficient_evidence'].includes(classifyHttpStability(item.attempts).status);
+}
+
+function hasRedirect(item) {
+  const initial = Number(item?.initialStatusCode ?? item?.redirectChain?.[0]?.statusCode ?? 0);
+  return initial >= 300 && initial < 400;
+}
+
+function isPermanentRedirectChain(item) {
+  const statuses = Array.isArray(item?.redirectStatuses) && item.redirectStatuses.length
+    ? item.redirectStatuses
+    : (item?.redirectChain || []).map((entry) => Number(entry?.statusCode)).filter((status) => status >= 300 && status < 400);
+  return statuses.length > 0 && statuses.every((status) => [301, 308].includes(Number(status)));
+}
+
+function safeUrl(value) {
+  try { return new URL(value); } catch { return null; }
 }
 
 function pageStatusCheck(id, category, name, where, status = 'Warning', priority = 'Medium', scopeWhere = null) {
@@ -677,25 +891,39 @@ function sitemapInRobots() {
 function sitemapUrlsNon200() {
   return tech('sitemap_urls_non_200', 'Crawling & Indexing', 'Sitemap URLs with non-200 status', function run(ctx) {
     const rows = all(ctx.db, `
-      SELECT p.url, p.statusCode
-      FROM pages p
-      JOIN crawl_queue q ON q.runId = p.runId AND q.normalizedUrl = p.normalizedUrl
-      WHERE p.runId = ? AND q.sourceType IN ('sitemap', 'robots_sitemap') AND COALESCE(p.statusCode, 0) <> 200
-      ORDER BY p.id
-      LIMIT 10
+      SELECT q.url, q.normalizedUrl, q.status AS queueStatus, q.lastErrorType,
+             p.initialStatusCode, p.statusCode AS finalStatusCode, p.finalUrl,
+             p.redirectChainJson, p.httpAttemptHistoryJson
+      FROM crawl_queue q
+      LEFT JOIN pages p ON p.runId = q.runId AND p.normalizedUrl = q.normalizedUrl
+      WHERE q.runId = ? AND q.sourceType IN ('sitemap', 'robots_sitemap')
+      ORDER BY q.id
     `, [ctx.run.id]);
-    const affectedCount = count(ctx.db, `
-      SELECT COUNT(*) AS count
-      FROM pages p
-      JOIN crawl_queue q ON q.runId = p.runId AND q.normalizedUrl = p.normalizedUrl
-      WHERE p.runId = ? AND q.sourceType IN ('sitemap', 'robots_sitemap') AND COALESCE(p.statusCode, 0) <> 200
-    `, [ctx.run.id]);
-    return makeResult(this, affectedCount ? 'Warning' : 'OK', {
-      affectedCount,
-      sampleUrls: rows.map((row) => row.url),
-      finding: affectedCount ? `${affectedCount} sitemap URL(s) did not return 200.` : 'Crawled sitemap URLs returned 200.',
+    if (!rows.length) return availabilityResult(this, 'not_applicable', {
+      finding: 'No sitemap URL units were planned for this run.',
+      evidence: { logicVersion: HTTP_STATUS_VALIDATION_VERSION, sitemapUrlCount: 0 },
+      requirements: { requiredFacts: ['sitemapUrlUnits'], missingFacts: [], minimumCoverage: 1, canCollectWithTargetedRun: true }
+    });
+    const inconclusive = rows.filter((row) => {
+      const status = Number(row.finalStatusCode);
+      if ([408, 429].includes(status)) return true;
+      return status >= 500 && classifyHttpStability(row.httpAttemptHistoryJson).status !== 'confirmed';
+    });
+    const inconclusiveUrls = new Set(inconclusive.map((row) => row.url));
+    const missing = rows.filter((row) => row.initialStatusCode === null || row.initialStatusCode === undefined || row.finalStatusCode === null || row.finalStatusCode === undefined || inconclusiveUrls.has(row.url));
+    const affected = rows.filter((row) => !inconclusiveUrls.has(row.url) && (Number(row.initialStatusCode ?? row.finalStatusCode) !== 200 || Number(row.finalStatusCode) !== 200));
+    if (missing.length && !affected.length) return availabilityResult(this, missing.some((row) => row.queueStatus === 'failed') ? 'technical_error' : 'insufficient_evidence', {
+      finding: `${missing.length} sitemap URL(s) lack a complete GET status measurement; no pass was inferred.`,
+      evidence: { logicVersion: HTTP_STATUS_VALIDATION_VERSION, missing: missing.slice(0, 10) },
+      requirements: { requiredFacts: ['initialAndFinalGetStatusForEverySitemapUrl'], missingFacts: ['completeSitemapUrlStatusCoverage'], minimumCoverage: 1, canCollectWithTargetedRun: true }
+    });
+    return makeResult(this, affected.length ? 'Warning' : 'OK', {
+      affectedCount: affected.length,
+      sampleUrls: affected.map((row) => row.url),
+      finding: affected.length ? `${affected.length} sitemap URL(s) did not return a direct 200 response.` : 'Crawled sitemap URLs returned a direct 200 response.',
       recommendation: 'Remove or fix sitemap URLs that do not return 200.',
-      evidence: { affectedCount, samples: rows }
+      evidence: { logicVersion: HTTP_STATUS_VALIDATION_VERSION, affectedCount: affected.length, displayedSamples: Math.min(affected.length, 10), samples: affected.slice(0, 10), incompleteMeasurements: missing.length, inconclusiveMeasurements: inconclusive.length },
+      requirements: { requiredFacts: ['initialAndFinalGetStatusForEverySitemapUrl'], optionalFacts: [], missingFacts: missing.length ? ['completeSitemapUrlStatusCoverage'] : [], minimumCoverage: 1, canCollectWithTargetedRun: true }
     });
   });
 }
@@ -1576,42 +1804,58 @@ function internalLinksToStatus(id, name, targetWhere, status = 'Warning', priori
     if (gate) return gate;
     const rows = all(ctx.db, `
       SELECT l.sourceUrl AS url, l.sourceUrl, COALESCE(l.linkedUrl, l.targetUrl) AS linkedUrl,
-        l.initialStatusCode, l.redirectChainJson, l.finalUrl,
-        COALESCE(l.finalStatusCode, p.statusCode) AS finalStatus
+        l.normalizedTargetUrl, l.initialStatusCode, l.redirectChainJson, l.finalUrl,
+        COALESCE(l.finalStatusCode, p.statusCode) AS finalStatus, p.contentType,
+        p.httpAttemptHistoryJson, q.status AS queueStatus, q.lastErrorType
       FROM page_links l
-      JOIN pages p ON p.runId = l.runId AND p.normalizedUrl = l.normalizedTargetUrl
-      WHERE l.runId = ? AND l.linkType = 'internal' AND ${targetWhere}
+      LEFT JOIN pages p ON p.runId = l.runId AND p.normalizedUrl = l.normalizedTargetUrl
+      LEFT JOIN crawl_queue q ON q.runId = l.runId AND q.normalizedUrl = l.normalizedTargetUrl
+      WHERE l.runId = ? AND l.linkType = 'internal'
       ORDER BY l.id
-      LIMIT 10
     `, [ctx.run.id]);
-    const affectedCount = count(ctx.db, `
-      SELECT COUNT(*) AS count
-      FROM page_links l
-      JOIN pages p ON p.runId = l.runId AND p.normalizedUrl = l.normalizedTargetUrl
-      WHERE l.runId = ? AND l.linkType = 'internal' AND ${targetWhere}
-    `, [ctx.run.id]);
-    const evidenceRows = rows.map((row) => ({
+    const eligible = rows.filter((row) => isLikelyHtmlPage(row.normalizedTargetUrl || row.linkedUrl));
+    const measured = eligible.map((row) => ({ ...row, stability: classifyHttpStability(row.httpAttemptHistoryJson) }));
+    const affected = measured.filter((row) => {
+      if (id === 'internal_links_to_3xx') return Number(row.initialStatusCode) >= 300 && Number(row.initialStatusCode) < 400;
+      const finalStatus = Number(row.finalStatus);
+      if (!(finalStatus >= 400 && finalStatus < 600) || [408, 429].includes(finalStatus)) return false;
+      if (finalStatus >= 500 && row.stability.status !== 'confirmed') return false;
+      return true;
+    });
+    const missing = measured.filter((row) => id === 'internal_links_to_3xx'
+      ? row.initialStatusCode === null || row.initialStatusCode === undefined
+      : row.finalStatus === null || row.finalStatus === undefined || [408, 429].includes(Number(row.finalStatus)) || (Number(row.finalStatus) >= 500 && row.stability.status !== 'confirmed'));
+    if (!affected.length && missing.length) return availabilityResult(this, missing.some((row) => row.queueStatus === 'failed') ? 'technical_error' : 'insufficient_evidence', {
+      finding: `${missing.length} internal page-link target occurrence(s) lack a stable final GET status; no pass was inferred.`,
+      evidence: { logicVersion: HTTP_STATUS_VALIDATION_VERSION, missingTargetMeasurements: missing.slice(0, 10) },
+      requirements: { requiredFacts: ['normalizedInternalLinkRows', 'initialTargetStatus', 'redirectChain', 'stableFinalTargetStatus'], missingFacts: ['stableFinalTargetStatus'], minimumCoverage: 1, canCollectWithTargetedRun: true }
+    });
+    const evidenceRows = affected.slice(0, 10).map((row) => ({
       source_url: row.sourceUrl,
       linked_url: row.linkedUrl,
+      normalized_target: row.normalizedTargetUrl,
       initial_status: row.initialStatusCode,
       redirect_chain: safeJson(row.redirectChainJson, []),
       final_url: row.finalUrl,
-      final_status: row.finalStatus
+      final_status: row.finalStatus,
+      content_type: row.contentType,
+      measurement_attempts: row.stability.attempts,
+      link_occurrence_count: measured.filter((item) => item.sourceUrl === row.sourceUrl && item.normalizedTargetUrl === row.normalizedTargetUrl).length
     }));
-    const uniqueTargets = count(ctx.db, `
-      SELECT COUNT(DISTINCT l.normalizedTargetUrl) AS count
-      FROM page_links l
-      JOIN pages p ON p.runId = l.runId AND p.normalizedUrl = l.normalizedTargetUrl
-      WHERE l.runId = ? AND l.linkType = 'internal' AND ${targetWhere}
-    `, [ctx.run.id]);
-    return makeResult(this, affectedCount ? status : 'OK', {
-      affectedCount,
-      sampleUrls: rows.map((row) => row.url),
-      finding: affectedCount ? `${affectedCount} internal link occurrence(s) point to ${uniqueTargets} unique matching target(s).` : 'No matching internal link targets found among crawled pages.',
+    const uniqueTargets = new Set(affected.map((row) => row.normalizedTargetUrl)).size;
+    const resultPriority = id === 'internal_links_to_4xx_5xx' && affected.length > 0
+      ? (uniqueTargets >= 3 || affected.length >= 10 ? 'High' : 'Medium')
+      : priority;
+    return makeResult(this, affected.length ? status : 'OK', {
+      priority: resultPriority,
+      affectedCount: affected.length,
+      sampleUrls: affected.map((row) => row.url),
+      finding: affected.length ? `${affected.length} internal link occurrence(s) point to ${uniqueTargets} unique matching target(s).` : 'No matching internal page-link targets found among measured URLs.',
       recommendation: 'Update internal links to point directly to 200 destinations.',
-      evidence: { totalOccurrences: affectedCount, uniqueTargets, displayedSamples: evidenceRows.length, samples: evidenceRows },
-      facts: { totalOccurrences: affectedCount, uniqueTargets },
-      requirements: { requiredFacts: ['normalizedInternalLinkRows', 'initialTargetStatus', 'redirectChain', 'finalTargetStatus'], optionalFacts: [], missingFacts: [], minimumCoverage: 1, canCollectWithTargetedRun: true }
+      evidence: { logicVersion: HTTP_STATUS_VALIDATION_VERSION, totalOccurrences: affected.length, uniqueTargets, displayedSamples: evidenceRows.length, excludedNonPageTargets: rows.length - eligible.length, incompleteTargetMeasurements: missing.length, samples: evidenceRows },
+      facts: { totalOccurrences: affected.length, uniqueTargets },
+      requirements: { requiredFacts: ['normalizedInternalLinkRows', 'initialTargetStatus', 'redirectChain', 'stableFinalTargetStatus'], optionalFacts: ['contentType'], missingFacts: missing.length ? ['completeTargetMeasurementCoverage'] : [], minimumCoverage: 1, canCollectWithTargetedRun: true },
+      confidence: missing.length ? 'medium' : 'high'
     });
   }, { priority });
 }

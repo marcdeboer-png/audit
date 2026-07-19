@@ -1,4 +1,4 @@
-# Audit check validation registry v2
+# Audit check validation registry v3
 
 Stand: 19. Juli 2026. Die maschinenlesbare Registry liegt in
 [`check-validation-registry.json`](check-validation-registry.json). Sie ist
@@ -21,26 +21,28 @@ benoetigte Fakten, Datenquellen, Scope, Root-Cause-Familie, Validierungsstatus,
 Evidenzreferenzen, Fehlerhistorie, bekannte Grenzen und eine konkrete
 Vertrauensempfehlung. Wo ein Check seine Requirements in einem leeren Lauf
 nicht zentral deklariert, bleibt `required_facts` bewusst leer und
-`missing_central_requirement_definition` wird ausgewiesen. Das betrifft 54
-Checks und ist selbst eine priorisierte Architekturluecke; es wurde keine
+`missing_central_requirement_definition` wird ausgewiesen. Das betrifft 45
+Checks und ist selbst eine
+priorisierte Architekturluecke; es wurde keine
 Anforderung erfunden.
 
 Validierung wurde nur dann als reale Validierung gewertet, wenn eine
 unabhaengige manuelle Gegenpruefung nachvollziehbar belegt war. Blosse
-Ausfuehrung in historischen Runs ist keine Validierung. Die Run-77-Domain ist
-in der Registry anonymisiert; die Nutzungshaeufigkeit beruht nur auf
+Ausfuehrung in historischen Runs ist keine Validierung. Kundendomains bleiben
+anonymisiert; die vom Nutzer selbst benannte oeffentliche Run-77-Domain ist nur
+in der HTTP-Validierungsfamilie genannt. Die Nutzungshaeufigkeit beruht nur auf
 aggregierten Ergebniszaehlern ohne Domain- oder Inhaltsdaten.
 
 ## Aktueller Stand
 
 | Status | Aktive Checks |
 | --- | ---: |
-| `cross_domain_validated` | 2 |
-| `validated_with_limits` | 5 |
+| `cross_domain_validated` | 4 |
+| `validated_with_limits` | 8 |
 | `manual_review_required` | 90 |
-| `single_domain_validated` | 15 |
-| `fixture_validated` | 12 |
-| `unvalidated` | 13 |
+| `single_domain_validated` | 16 |
+| `fixture_validated` | 9 |
+| `unvalidated` | 10 |
 | `invalid` | 0 |
 | `deprecated` | 0 |
 
@@ -48,14 +50,15 @@ Alle 137 aktiven Checks besitzen damit einen dokumentierten Status
 (`status_assignment_coverage`: 100 %). Die strengere
 `check_validation_coverage` zaehlt nur `cross_domain_validated`,
 `validated_with_limits` und dauerhaft `manual_review_required` und liegt bei
-70,80 %. Weitere Kennzahlen:
+74,45 %. Weitere Kennzahlen:
 
-- scoregewichtete Validierungsabdeckung: 23,91 %;
-- Critical-/High-Abdeckung: 22,22 % (es gibt aktuell keine als Critical
+- scoregewichtete Validierungsabdeckung: 34,44 %;
+- Critical-/High-Abdeckung: 33,33 % (es gibt aktuell keine als Critical
   registrierte Default-Severity und neun High-Checks);
-- Primary-Evidence-Abdeckung: 42,19 %;
-- nach historischer Ausfuehrungshaeufigkeit gewichtete Abdeckung: 69,27 %;
-- 46 `score_capable`, 79 konditionale und zwoelf scorefreie Checks.
+- Primary-Evidence-Abdeckung: 49,21 %;
+- nach historischer Ausfuehrungshaeufigkeit gewichtete Abdeckung: 73,91 %;
+- 45 `score_capable`; `tech.redirect_pages` ist nach der HTTP-Validierung ein
+  scorefreies Inventar und kein eigenstaendiger Defekt.
 
 Die scoregewichtete Registry-Kennzahl ist kein Audit-Score. Sie verwendet nur
 die bestehenden Severity-Gewichte als Priorisierungsfaktor, gewichtet
@@ -86,18 +89,20 @@ Zuverlaessigkeit.
 
 Die hoechsten offenen Risiken sind die verbleibenden High-Checks:
 
-- `tech.5xx_pages`, `tech.https_reachable`,
-  `tech.internal_links_to_4xx_5xx`, `tech.json_ld_parse_errors` und
+- `tech.5xx_pages`, `tech.internal_links_to_4xx_5xx`,
+  `tech.json_ld_parse_errors` und
   `template.noindex_pattern` sind nur fixture-validiert;
 - `template.high_lcp` und `template.low_lighthouse_performance` sind erst auf
   einer realen Domain unabhaengig validiert.
 
 Danach folgen die unvalidierten Medium-Checks
-`tech.www_non_www_consistency`, `tech.robots_txt_present`,
-`tech.sitemap_present`, `tech.sitemap_urls_non_200`,
+`tech.robots_txt_present`, `tech.sitemap_present`,
 `tech.viewport_missing`, `template.high_tbt`,
 `template.js_required_content` und `template.low_lighthouse_seo` sowie der
-Low-Inventarcheck `tech.status_code_distribution`. Die vollstaendige Gap-Liste
+verbleibenden unvalidierten Checks. Die HTTP-Familie ist in
+[`http-status-check-validation-v1.md`](http-status-check-validation-v1.md)
+dokumentiert; insbesondere bleibt `tech.5xx_pages` ohne organischen realen
+Positivfall konservativ fixture-validiert. Die vollstaendige Gap-Liste
 steht je Check in `validation_gap` und nennt fehlende Positiv-/Negativfaelle,
 Archetypen, Fixture, unabhaengige Methode, Aufwand und Risiko.
 

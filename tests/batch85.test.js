@@ -110,7 +110,7 @@ test('SEO issue fixture triggers exact URL counts, details, CSV and full exports
   assertCheck(results, 'tech.noindex_pages', 'NA', 0, []);
   assertCheck(results, 'tech.4xx_pages', 'Warning', 1, [`${origin}/not-found`]);
   assertCheck(results, 'tech.internal_links_to_4xx_5xx', 'Error', 1, [`${origin}/broken-link-source`]);
-  assertCheck(results, 'tech.redirect_pages', 'Warning', 1, [`${origin}/redirect-me`]);
+  assertCheck(results, 'tech.redirect_pages', 'OK', 1, [`${origin}/redirect-me`]);
 
   const noindexEvidence = result(results, 'tech.noindex_pages').evidence;
   assert.equal(noindexEvidence.contentNoindexCount, 1);
@@ -317,7 +317,13 @@ test('seeded status, TTFB and security cases provide detail rows for non-crawlab
     loadTimeMs: thresholds.highTtfbMs + 250,
     responseHeadersJson: JSON.stringify({ 'content-type': 'text/html; charset=utf-8' })
   });
-  insertSeedPage(db, runId, 'https://fixture.local/server-error', { statusCode: 500 });
+  insertSeedPage(db, runId, 'https://fixture.local/server-error', {
+    statusCode: 500,
+    httpAttemptHistoryJson: JSON.stringify([
+      { attempt: 1, method: 'GET', requestedUrl: 'https://fixture.local/server-error', initialStatus: 500, finalStatus: 500, finalUrl: 'https://fixture.local/server-error' },
+      { attempt: 2, method: 'GET', requestedUrl: 'https://fixture.local/server-error', initialStatus: 500, finalStatus: 500, finalUrl: 'https://fixture.local/server-error' }
+    ])
+  });
   insertSeedPage(db, runId, 'https://fixture.local/redirect', {
     statusCode: 200,
     initialStatusCode: 302,
@@ -354,7 +360,7 @@ test('seeded status, TTFB and security cases provide detail rows for non-crawlab
   assertCheck(results, 'tech.5xx_pages', 'Error', 1, ['https://fixture.local/server-error']);
   assertCheck(results, 'tech.internal_links_to_4xx_5xx', 'Error', 1, ['https://fixture.local/source']);
   assertCheck(results, 'tech.internal_links_to_3xx', 'Warning', 1, ['https://fixture.local/source']);
-  assertCheck(results, 'tech.redirect_pages', 'Warning', 1, ['https://fixture.local/redirect']);
+  assertCheck(results, 'tech.redirect_pages', 'OK', 1, ['https://fixture.local/redirect']);
 
   assert.equal(detail(db, runId, 'tech.high_ttfb').rows[0].ttfbMs, thresholds.highTtfbMs + 200);
   assert.equal(detail(db, runId, 'tech.content_security_policy').rows[0].missingHeader, 'content-security-policy');
@@ -520,6 +526,7 @@ function insertSeedPage(db, runId, url, overrides = {}) {
     statusCode: overrides.statusCode ?? 200,
     initialStatusCode: overrides.initialStatusCode ?? overrides.statusCode ?? 200,
     redirectChainJson: overrides.redirectChainJson || null,
+    httpAttemptHistoryJson: overrides.httpAttemptHistoryJson || JSON.stringify([]),
     contentType: overrides.contentType || 'text/html; charset=utf-8',
     indexable: overrides.indexable ?? 1,
     title,

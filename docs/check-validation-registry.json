@@ -1,8 +1,9 @@
 {
-  "registry_version": "check-validation-registry-v2",
-  "generated_at": "2026-07-19T16:45:00.000Z",
-  "source_commit": "43ea99ad781b84ba69b79018b639c28cda80dc5b",
+  "registry_version": "check-validation-registry-v3",
+  "generated_at": "2026-07-19T20:30:00.000Z",
+  "source_commit": "901a096a43169a8fa5fd21ec6682da30507f5a9d",
   "check_logic_version": "csr-render-provenance-v1",
+  "http_status_validation_version": "http-status-validation-v1",
   "status_values": [
     "unvalidated",
     "fixture_validated",
@@ -27,14 +28,14 @@
     "total_checks": 137,
     "total_active_checks": 137,
     "historical_checks": 0,
-    "validated_active_checks": 97,
+    "validated_active_checks": 102,
     "status_assignment_coverage": 100,
     "status_counts": {
-      "unvalidated": 13,
-      "fixture_validated": 12,
-      "single_domain_validated": 15,
-      "cross_domain_validated": 2,
-      "validated_with_limits": 5,
+      "unvalidated": 10,
+      "fixture_validated": 9,
+      "single_domain_validated": 16,
+      "cross_domain_validated": 4,
+      "validated_with_limits": 8,
       "manual_review_required": 90,
       "invalid": 0,
       "deprecated": 0
@@ -72,19 +73,19 @@
       "Medium": 38
     },
     "evidence_class_counts": {
-      "inventory": 9,
+      "inventory": 10,
       "optional_opportunity": 54,
       "primary_conditional": 19,
-      "primary_required": 45,
+      "primary_required": 44,
       "secondary_diagnostic": 10
     },
-    "score_capable_checks": 46,
-    "checks_without_central_requirement_definition": 51,
-    "check_validation_coverage": 70.8,
-    "score_weighted_validation_coverage": 23.91,
-    "critical_high_validation_coverage": 22.22,
-    "primary_evidence_validation_coverage": 42.19,
-    "usage_weighted_validation_coverage": 69.27,
+    "score_capable_checks": 45,
+    "checks_without_central_requirement_definition": 45,
+    "check_validation_coverage": 74.45,
+    "score_weighted_validation_coverage": 34.44,
+    "critical_high_validation_coverage": 33.33,
+    "primary_evidence_validation_coverage": 49.21,
+    "usage_weighted_validation_coverage": 73.91,
     "historical_usage_snapshot": {
       "result_observations": 6895,
       "distinct_runs_with_results": 64,
@@ -1717,62 +1718,71 @@
       "score_effect": "score_capable",
       "evidence_class": "primary_required",
       "coverage_unit": "check:tech.4xx_pages",
-      "required_facts": [],
-      "requirement_definition_status": "missing",
-      "inventory_issues": [
-        "missing_central_requirement_definition"
+      "required_facts": [
+        "httpGetResponse",
+        "initialStatus",
+        "finalStatus",
+        "measurementStability"
       ],
+      "requirement_definition_status": "declared",
+      "inventory_issues": [],
       "data_sources": [
         "pages",
         "extracted_html_facts"
       ],
       "scope": "site_aggregate",
       "root_cause_family": "tech.4xx",
-      "current_validation_status": "fixture_validated",
-      "validation_status": "fixture_validated",
-      "validation_confidence": "medium",
-      "tested_domains": [],
-      "tested_archetypes": [],
-      "positive_cases": 0,
-      "negative_cases": 0,
-      "fixture_tests": [
-        "tests/batch85.test.js"
+      "current_validation_status": "cross_domain_validated",
+      "validation_status": "cross_domain_validated",
+      "validation_confidence": "high",
+      "tested_domains": [
+        "marcdeboer.de",
+        "trinkgut-zierles.de",
+        "react.dev",
+        "web.dev",
+        "developer.mozilla.org",
+        "www.ikea.com",
+        "app.uniswap.org",
+        "nextjs.org"
       ],
-      "real_world_runs": [],
+      "tested_archetypes": [
+        "small_static_expert",
+        "local_commerce_dynamic",
+        "ssr_documentation",
+        "large_ecommerce",
+        "csr_application"
+      ],
+      "positive_cases": 6,
+      "negative_cases": 16,
+      "fixture_tests": [
+        "tests/batch85.test.js",
+        "tests/http-status-validation.test.js"
+      ],
+      "real_world_runs": [
+        "http-status-validation-v1-2026-07-19",
+        "run-77-forensic-validation"
+      ],
       "false_positives": 0,
       "false_negatives": 0,
       "severity_errors": 0,
       "scope_errors": 0,
-      "stability_runs": 0,
-      "known_limits": [],
+      "stability_runs": 3,
+      "known_limits": [
+        "401 and 403 can represent intentional access control or WAF behavior and remain reviewable context.",
+        "429, 408 and pure client/network failures are excluded from deterministic 4xx website findings."
+      ],
       "manual_review_reason": "",
       "last_validated_at": "2026-07-19",
-      "last_validated_commit": "020e13c8fc2cc16c689ec01eed415c4e0b2950ad",
+      "last_validated_commit": "901a096a43169a8fa5fd21ec6682da30507f5a9d",
       "evidence_references": [
-        "tests/batch85.test.js"
+        "tests/batch85.test.js",
+        "tests/http-status-validation.test.js",
+        "docs/http-status-check-validation-v1.md"
       ],
-      "recommended_trust_action": "diagnostic_with_disclosure_until_real_validation",
+      "recommended_trust_action": "automated_with_limits",
       "historical_observations": 64,
       "historical_run_count": 44,
-      "validation_gap": {
-        "missing_evidence": [
-          "independent real-domain validation",
-          "real positive case",
-          "real negative case",
-          "severity and scope review",
-          "repeatability confirmation"
-        ],
-        "needed_real_positive_cases": 1,
-        "needed_real_negative_cases": 1,
-        "suitable_archetypes": [
-          "small_static_site",
-          "large_dynamic_site"
-        ],
-        "needed_fixture": "",
-        "manual_method": "Parse delivered HTML independently and verify scope, positive/negative facts, severity, and repeatability.",
-        "expected_effort": "M",
-        "risk_if_unchanged": "Medium: a primary-evidence conclusion remains insufficiently demonstrated on real implementations."
-      }
+      "validation_gap": null
     },
     {
       "check_id": "tech.5xx_pages",
@@ -1784,11 +1794,14 @@
       "score_effect": "score_capable",
       "evidence_class": "primary_required",
       "coverage_unit": "check:tech.5xx_pages",
-      "required_facts": [],
-      "requirement_definition_status": "missing",
-      "inventory_issues": [
-        "missing_central_requirement_definition"
+      "required_facts": [
+        "httpGetResponse",
+        "initialStatus",
+        "finalStatus",
+        "measurementStability"
       ],
+      "requirement_definition_status": "declared",
+      "inventory_issues": [],
       "data_sources": [
         "pages",
         "extracted_html_facts"
@@ -1798,45 +1811,66 @@
       "current_validation_status": "fixture_validated",
       "validation_status": "fixture_validated",
       "validation_confidence": "medium",
-      "tested_domains": [],
-      "tested_archetypes": [],
-      "positive_cases": 0,
-      "negative_cases": 0,
-      "fixture_tests": [
-        "tests/batch85.test.js"
+      "tested_domains": [
+        "marcdeboer.de",
+        "trinkgut-zierles.de",
+        "react.dev",
+        "web.dev",
+        "developer.mozilla.org",
+        "www.ikea.com",
+        "app.uniswap.org",
+        "nextjs.org"
       ],
-      "real_world_runs": [],
+      "tested_archetypes": [
+        "small_static_expert",
+        "local_commerce_dynamic",
+        "ssr_documentation",
+        "large_ecommerce",
+        "csr_application"
+      ],
+      "positive_cases": 7,
+      "negative_cases": 16,
+      "fixture_tests": [
+        "tests/batch85.test.js",
+        "tests/http-status-validation.test.js"
+      ],
+      "real_world_runs": [
+        "http-status-validation-v1-2026-07-19",
+        "run-77-forensic-validation"
+      ],
       "false_positives": 0,
       "false_negatives": 0,
       "severity_errors": 0,
       "scope_errors": 0,
-      "stability_runs": 0,
-      "known_limits": [],
-      "manual_review_reason": "",
-      "last_validated_at": "2026-07-19",
-      "last_validated_commit": "020e13c8fc2cc16c689ec01eed415c4e0b2950ad",
-      "evidence_references": [
-        "tests/batch85.test.js"
+      "stability_runs": 3,
+      "known_limits": [
+        "No naturally occurring real-domain 5xx positive case was available; positive 500/502/503/504 and transient cases are controlled fixtures.",
+        "A CDN or WAF can emit a confirmed 5xx even when the origin is healthy, so impact attribution remains reviewable."
       ],
-      "recommended_trust_action": "diagnostic_with_disclosure_until_real_validation",
+      "manual_review_reason": "A confirmed CDN or WAF 5xx proves the client response but not the failing infrastructure component or business impact.",
+      "last_validated_at": "2026-07-19",
+      "last_validated_commit": "901a096a43169a8fa5fd21ec6682da30507f5a9d",
+      "evidence_references": [
+        "tests/batch85.test.js",
+        "tests/http-status-validation.test.js",
+        "docs/http-status-check-validation-v1.md"
+      ],
+      "recommended_trust_action": "manual_review_required",
       "historical_observations": 64,
       "historical_run_count": 44,
       "validation_gap": {
         "missing_evidence": [
-          "independent real-domain validation",
           "real positive case",
-          "real negative case",
-          "severity and scope review",
-          "repeatability confirmation"
+          "independent confirmation of a naturally occurring server failure"
         ],
         "needed_real_positive_cases": 1,
-        "needed_real_negative_cases": 1,
+        "needed_real_negative_cases": 0,
         "suitable_archetypes": [
           "small_static_site",
           "large_dynamic_site"
         ],
-        "needed_fixture": "",
-        "manual_method": "Parse delivered HTML independently and verify scope, positive/negative facts, severity, and repeatability.",
+        "needed_fixture": "Positive fixture coverage exists for persistent and transient 500/502/503/504 outcomes.",
+        "manual_method": "Confirm an organic 5xx with two or three low-rate GET attempts and distinguish CDN/WAF from origin behavior.",
         "expected_effort": "M",
         "risk_if_unchanged": "High: an unconfirmed high-impact conclusion can materially distort audit prioritization."
       }
@@ -3681,7 +3715,10 @@
       "evidence_class": "primary_required",
       "coverage_unit": "check:tech.http_to_https_redirect",
       "required_facts": [
-        "httpCandidateResponse"
+        "httpGetResponse",
+        "initialStatus",
+        "redirectChain",
+        "finalUrl"
       ],
       "requirement_definition_status": "declared",
       "inventory_issues": [],
@@ -3692,51 +3729,57 @@
       ],
       "scope": "site",
       "root_cause_family": "tech.http_to_https_redirect",
-      "current_validation_status": "fixture_validated",
-      "validation_status": "fixture_validated",
-      "validation_confidence": "medium",
-      "tested_domains": [],
-      "tested_archetypes": [],
-      "positive_cases": 0,
-      "negative_cases": 0,
-      "fixture_tests": [
-        "tests/calibration-v2.test.js"
+      "current_validation_status": "validated_with_limits",
+      "validation_status": "validated_with_limits",
+      "validation_confidence": "high",
+      "tested_domains": [
+        "marcdeboer.de",
+        "trinkgut-zierles.de",
+        "react.dev",
+        "web.dev",
+        "developer.mozilla.org",
+        "www.ikea.com",
+        "app.uniswap.org",
+        "nextjs.org"
       ],
-      "real_world_runs": [],
+      "tested_archetypes": [
+        "small_static_expert",
+        "local_commerce_dynamic",
+        "ssr_documentation",
+        "large_ecommerce",
+        "csr_application"
+      ],
+      "positive_cases": 2,
+      "negative_cases": 18,
+      "fixture_tests": [
+        "tests/calibration-v2.test.js",
+        "tests/http-status-validation.test.js"
+      ],
+      "real_world_runs": [
+        "http-status-validation-v1-2026-07-19",
+        "run-77-forensic-validation"
+      ],
       "false_positives": 0,
       "false_negatives": 0,
       "severity_errors": 0,
       "scope_errors": 0,
-      "stability_runs": 0,
-      "known_limits": [],
+      "stability_runs": 3,
+      "known_limits": [
+        "Root-candidate detection does not by itself prove deep-path and query preservation; the validation batch used separate deep probes.",
+        "Temporary 302/307 HTTPS redirects are reported as a warning rather than an outage."
+      ],
       "manual_review_reason": "",
       "last_validated_at": "2026-07-19",
-      "last_validated_commit": "020e13c8fc2cc16c689ec01eed415c4e0b2950ad",
+      "last_validated_commit": "901a096a43169a8fa5fd21ec6682da30507f5a9d",
       "evidence_references": [
-        "tests/calibration-v2.test.js"
+        "tests/calibration-v2.test.js",
+        "tests/http-status-validation.test.js",
+        "docs/http-status-check-validation-v1.md"
       ],
-      "recommended_trust_action": "diagnostic_with_disclosure_until_real_validation",
+      "recommended_trust_action": "automated_with_limits",
       "historical_observations": 64,
       "historical_run_count": 44,
-      "validation_gap": {
-        "missing_evidence": [
-          "independent real-domain validation",
-          "real positive case",
-          "real negative case",
-          "severity and scope review",
-          "repeatability confirmation"
-        ],
-        "needed_real_positive_cases": 1,
-        "needed_real_negative_cases": 1,
-        "suitable_archetypes": [
-          "small_static_site",
-          "large_dynamic_site"
-        ],
-        "needed_fixture": "",
-        "manual_method": "Independent curl GET/redirect/header validation with body spot-checks.",
-        "expected_effort": "M",
-        "risk_if_unchanged": "Medium: a primary-evidence conclusion remains insufficiently demonstrated on real implementations."
-      }
+      "validation_gap": null
     },
     {
       "check_id": "tech.http_version_support",
@@ -3805,7 +3848,8 @@
       "evidence_class": "primary_required",
       "coverage_unit": "check:tech.https_reachable",
       "required_facts": [
-        "httpsCandidateResponse"
+        "httpsGetResponse",
+        "finalHttpsUrl"
       ],
       "requirement_definition_status": "declared",
       "inventory_issues": [],
@@ -3816,61 +3860,67 @@
       ],
       "scope": "site",
       "root_cause_family": "tech.https_reachable",
-      "current_validation_status": "fixture_validated",
-      "validation_status": "fixture_validated",
+      "current_validation_status": "validated_with_limits",
+      "validation_status": "validated_with_limits",
       "validation_confidence": "medium",
-      "tested_domains": [],
-      "tested_archetypes": [],
-      "positive_cases": 0,
-      "negative_cases": 0,
+      "tested_domains": [
+        "marcdeboer.de",
+        "trinkgut-zierles.de",
+        "react.dev",
+        "web.dev",
+        "developer.mozilla.org",
+        "www.ikea.com",
+        "app.uniswap.org",
+        "nextjs.org"
+      ],
+      "tested_archetypes": [
+        "small_static_expert",
+        "local_commerce_dynamic",
+        "ssr_documentation",
+        "large_ecommerce",
+        "csr_application"
+      ],
+      "positive_cases": 5,
+      "negative_cases": 16,
       "fixture_tests": [
         "tests/batch110.test.js",
         "tests/batch82.test.js",
         "tests/batch91.test.js",
         "tests/batch92.test.js",
         "tests/batch93.test.js",
-        "tests/calibration-v2.test.js"
+        "tests/calibration-v2.test.js",
+        "tests/http-status-validation.test.js"
       ],
-      "real_world_runs": [],
+      "real_world_runs": [
+        "http-status-validation-v1-2026-07-19",
+        "run-77-forensic-validation"
+      ],
       "false_positives": 0,
       "false_negatives": 0,
       "severity_errors": 0,
       "scope_errors": 0,
-      "stability_runs": 0,
-      "known_limits": [],
+      "stability_runs": 3,
+      "known_limits": [
+        "Organic validation covers reachable HTTPS sites; certificate mismatch, expiry, DNS and TLS failures use controlled technical fixtures because inaccessible sites cannot provide a normal live audit run.",
+        "An HTTPS 4xx or 5xx proves transport reachability but not page health; separate status checks evaluate the HTTP response."
+      ],
       "manual_review_reason": "",
       "last_validated_at": "2026-07-19",
-      "last_validated_commit": "020e13c8fc2cc16c689ec01eed415c4e0b2950ad",
+      "last_validated_commit": "901a096a43169a8fa5fd21ec6682da30507f5a9d",
       "evidence_references": [
         "tests/batch110.test.js",
         "tests/batch82.test.js",
         "tests/batch91.test.js",
         "tests/batch92.test.js",
         "tests/batch93.test.js",
-        "tests/calibration-v2.test.js"
+        "tests/calibration-v2.test.js",
+        "tests/http-status-validation.test.js",
+        "docs/http-status-check-validation-v1.md"
       ],
-      "recommended_trust_action": "diagnostic_with_disclosure_until_real_validation",
+      "recommended_trust_action": "automated_with_limits",
       "historical_observations": 64,
       "historical_run_count": 44,
-      "validation_gap": {
-        "missing_evidence": [
-          "independent real-domain validation",
-          "real positive case",
-          "real negative case",
-          "severity and scope review",
-          "repeatability confirmation"
-        ],
-        "needed_real_positive_cases": 1,
-        "needed_real_negative_cases": 1,
-        "suitable_archetypes": [
-          "small_static_site",
-          "large_dynamic_site"
-        ],
-        "needed_fixture": "",
-        "manual_method": "Independent curl GET/redirect/header validation with body spot-checks.",
-        "expected_effort": "M",
-        "risk_if_unchanged": "High: an unconfirmed high-impact conclusion can materially distort audit prioritization."
-      }
+      "validation_gap": null
     },
     {
       "check_id": "tech.images_without_alt",
@@ -4149,7 +4199,7 @@
         "normalizedInternalLinkRows",
         "initialTargetStatus",
         "redirectChain",
-        "finalTargetStatus"
+        "stableFinalTargetStatus"
       ],
       "requirement_definition_status": "declared",
       "inventory_issues": [],
@@ -4163,16 +4213,17 @@
       "validation_status": "single_domain_validated",
       "validation_confidence": "medium",
       "tested_domains": [
-        "anonymized_run_77_site"
+        "trinkgut-zierles.de"
       ],
       "tested_archetypes": [
         "small_local_business_website"
       ],
       "positive_cases": 1,
-      "negative_cases": 0,
+      "negative_cases": 18,
       "fixture_tests": [
         "tests/batch85.test.js",
-        "tests/run77-resilience.test.js"
+        "tests/run77-resilience.test.js",
+        "tests/http-status-validation.test.js"
       ],
       "real_world_runs": [
         "run-77-forensic-validation"
@@ -4181,20 +4232,21 @@
       "false_negatives": 0,
       "severity_errors": 0,
       "scope_errors": 0,
-      "stability_runs": 1,
+      "stability_runs": 3,
       "known_limits": [
         "Only one real domain has independent historical validation; cross-domain behavior remains unproven.",
         "Historical reconstruction uses stored Run 77 evidence and does not substitute current live state."
       ],
       "manual_review_reason": "",
-      "last_validated_at": "2026-07-18",
-      "last_validated_commit": "ca4055eaef7623e9604684065e873815353b21f9",
+      "last_validated_at": "2026-07-19",
+      "last_validated_commit": "901a096a43169a8fa5fd21ec6682da30507f5a9d",
       "evidence_references": [
         "tests/batch85.test.js",
         "tests/run77-resilience.test.js",
-        "tests/run77-resilience.test.js"
+        "tests/http-status-validation.test.js",
+        "docs/http-status-check-validation-v1.md"
       ],
-      "recommended_trust_action": "diagnostic_with_disclosure_until_cross_domain_validation",
+      "recommended_trust_action": "automated_with_limits",
       "historical_observations": 64,
       "historical_run_count": 44,
       "validation_gap": {
@@ -4230,7 +4282,7 @@
         "normalizedInternalLinkRows",
         "initialTargetStatus",
         "redirectChain",
-        "finalTargetStatus"
+        "stableFinalTargetStatus"
       ],
       "requirement_definition_status": "declared",
       "inventory_issues": [],
@@ -4240,48 +4292,60 @@
       ],
       "scope": "url_aggregate",
       "root_cause_family": "tech.internal_links_to_4xx_5xx",
-      "current_validation_status": "fixture_validated",
-      "validation_status": "fixture_validated",
-      "validation_confidence": "medium",
-      "tested_domains": [],
-      "tested_archetypes": [],
-      "positive_cases": 0,
-      "negative_cases": 0,
-      "fixture_tests": [
-        "tests/batch85.test.js"
+      "current_validation_status": "single_domain_validated",
+      "validation_status": "single_domain_validated",
+      "validation_confidence": "high",
+      "tested_domains": [
+        "trinkgut-zierles.de"
       ],
-      "real_world_runs": [],
+      "tested_archetypes": [
+        "small_local_business_website"
+      ],
+      "positive_cases": 5,
+      "negative_cases": 18,
+      "fixture_tests": [
+        "tests/batch85.test.js",
+        "tests/run77-resilience.test.js",
+        "tests/http-status-validation.test.js"
+      ],
+      "real_world_runs": [
+        "run-77-forensic-validation",
+        "http-status-validation-v1-2026-07-19"
+      ],
       "false_positives": 0,
       "false_negatives": 0,
       "severity_errors": 0,
       "scope_errors": 0,
-      "stability_runs": 0,
-      "known_limits": [],
+      "stability_runs": 3,
+      "known_limits": [
+        "Only one real domain supplied independently confirmed broken internal-link positives; cross-domain positive behavior remains open.",
+        "A URL variant that was not separately requested remains insufficient evidence even if its normalized queue identity matches another authored variant."
+      ],
       "manual_review_reason": "",
       "last_validated_at": "2026-07-19",
-      "last_validated_commit": "020e13c8fc2cc16c689ec01eed415c4e0b2950ad",
+      "last_validated_commit": "901a096a43169a8fa5fd21ec6682da30507f5a9d",
       "evidence_references": [
-        "tests/batch85.test.js"
+        "tests/batch85.test.js",
+        "tests/run77-resilience.test.js",
+        "tests/http-status-validation.test.js",
+        "docs/http-status-check-validation-v1.md"
       ],
-      "recommended_trust_action": "diagnostic_with_disclosure_until_real_validation",
+      "recommended_trust_action": "automated_with_limits",
       "historical_observations": 64,
       "historical_run_count": 44,
       "validation_gap": {
         "missing_evidence": [
-          "independent real-domain validation",
-          "real positive case",
-          "real negative case",
-          "severity and scope review",
-          "repeatability confirmation"
+          "second real positive domain",
+          "second positive website archetype"
         ],
         "needed_real_positive_cases": 1,
-        "needed_real_negative_cases": 1,
+        "needed_real_negative_cases": 0,
         "suitable_archetypes": [
           "small_static_site",
           "large_dynamic_site"
         ],
-        "needed_fixture": "",
-        "manual_method": "Parse delivered HTML independently and verify scope, positive/negative facts, severity, and repeatability.",
+        "needed_fixture": "Controlled redirect-to-404, persistent 5xx, asset exclusion and duplicate-occurrence fixtures exist.",
+        "manual_method": "Independently crawl every internal target with GET and compare occurrence and unique-target totals.",
         "expected_effort": "M",
         "risk_if_unchanged": "High: an unconfirmed high-impact conclusion can materially distort audit prioritization."
       }
@@ -5893,38 +5957,52 @@
       "check_id": "tech.redirect_pages",
       "name": "Redirect pages present",
       "category": "Server & Infrastructure",
-      "finding_type": "core_issue",
+      "finding_type": "info",
       "default_severity": "Medium",
       "active": true,
-      "score_effect": "score_capable",
-      "evidence_class": "primary_required",
+      "score_effect": "score_free",
+      "evidence_class": "inventory",
       "coverage_unit": "check:tech.redirect_pages",
-      "required_facts": [],
-      "requirement_definition_status": "missing",
-      "inventory_issues": [
-        "missing_central_requirement_definition"
+      "required_facts": [
+        "initialGetStatus",
+        "redirectChain",
+        "finalStatus"
       ],
+      "requirement_definition_status": "declared",
+      "inventory_issues": [],
       "data_sources": [
         "pages",
         "extracted_html_facts"
       ],
       "scope": "site_aggregate",
       "root_cause_family": "tech.redirect",
-      "current_validation_status": "single_domain_validated",
-      "validation_status": "single_domain_validated",
-      "validation_confidence": "medium",
+      "current_validation_status": "cross_domain_validated",
+      "validation_status": "cross_domain_validated",
+      "validation_confidence": "high",
       "tested_domains": [
-        "anonymized_run_77_site"
+        "marcdeboer.de",
+        "trinkgut-zierles.de",
+        "react.dev",
+        "web.dev",
+        "developer.mozilla.org",
+        "www.ikea.com",
+        "app.uniswap.org",
+        "nextjs.org"
       ],
       "tested_archetypes": [
-        "small_local_business_website"
+        "small_static_expert",
+        "local_commerce_dynamic",
+        "ssr_documentation",
+        "large_ecommerce",
+        "csr_application"
       ],
-      "positive_cases": 1,
-      "negative_cases": 0,
+      "positive_cases": 27,
+      "negative_cases": 16,
       "fixture_tests": [
         "tests/batch85.test.js",
         "tests/calibration-v2.test.js",
-        "tests/run77-resilience.test.js"
+        "tests/run77-resilience.test.js",
+        "tests/http-status-validation.test.js"
       ],
       "real_world_runs": [
         "run-77-forensic-validation"
@@ -5933,41 +6011,25 @@
       "false_negatives": 0,
       "severity_errors": 0,
       "scope_errors": 0,
-      "stability_runs": 1,
+      "stability_runs": 3,
       "known_limits": [
-        "Only one real domain has independent historical validation; cross-domain behavior remains unproven.",
-        "Historical reconstruction uses stored Run 77 evidence and does not substitute current live state."
+        "The inventory proves an initial redirect, not that the redirect is harmful.",
+        "Redirect quality, chain length and internal-link remediation are evaluated by dedicated checks."
       ],
       "manual_review_reason": "",
-      "last_validated_at": "2026-07-18",
-      "last_validated_commit": "ca4055eaef7623e9604684065e873815353b21f9",
+      "last_validated_at": "2026-07-19",
+      "last_validated_commit": "901a096a43169a8fa5fd21ec6682da30507f5a9d",
       "evidence_references": [
         "tests/batch85.test.js",
         "tests/calibration-v2.test.js",
         "tests/run77-resilience.test.js",
-        "tests/run77-resilience.test.js"
+        "tests/http-status-validation.test.js",
+        "docs/http-status-check-validation-v1.md"
       ],
-      "recommended_trust_action": "diagnostic_with_disclosure_until_cross_domain_validation",
+      "recommended_trust_action": "diagnostic_only",
       "historical_observations": 64,
       "historical_run_count": 44,
-      "validation_gap": {
-        "missing_evidence": [
-          "second real domain",
-          "second website archetype",
-          "independent positive and negative case pair",
-          "repeatability confirmation"
-        ],
-        "needed_real_positive_cases": 1,
-        "needed_real_negative_cases": 1,
-        "suitable_archetypes": [
-          "small_static_site",
-          "large_dynamic_site"
-        ],
-        "needed_fixture": "",
-        "manual_method": "Independent curl GET/redirect/header validation with body spot-checks.",
-        "expected_effort": "M",
-        "risk_if_unchanged": "Medium: a primary-evidence conclusion remains insufficiently demonstrated on real implementations."
-      }
+      "validation_gap": null
     },
     {
       "check_id": "tech.referrer_policy",
@@ -6401,11 +6463,11 @@
       "score_effect": "score_capable",
       "evidence_class": "primary_required",
       "coverage_unit": "check:tech.sitemap_urls_non_200",
-      "required_facts": [],
-      "requirement_definition_status": "missing",
-      "inventory_issues": [
-        "missing_central_requirement_definition"
+      "required_facts": [
+        "initialAndFinalGetStatusForEverySitemapUrl"
       ],
+      "requirement_definition_status": "declared",
+      "inventory_issues": [],
       "data_sources": [
         "domain_assets",
         "pages",
@@ -6413,44 +6475,55 @@
       ],
       "scope": "url_aggregate",
       "root_cause_family": "tech.sitemap_urls_non_200",
-      "current_validation_status": "unvalidated",
-      "validation_status": "unvalidated",
-      "validation_confidence": "low",
-      "tested_domains": [],
-      "tested_archetypes": [],
-      "positive_cases": 0,
-      "negative_cases": 0,
-      "fixture_tests": [],
-      "real_world_runs": [],
+      "current_validation_status": "fixture_validated",
+      "validation_status": "fixture_validated",
+      "validation_confidence": "medium",
+      "tested_domains": [
+        "trinkgut-zierles.de"
+      ],
+      "tested_archetypes": [
+        "small_local_business_website"
+      ],
+      "positive_cases": 2,
+      "negative_cases": 1,
+      "fixture_tests": [
+        "tests/http-status-validation.test.js"
+      ],
+      "real_world_runs": [
+        "run-77-forensic-validation"
+      ],
       "false_positives": 0,
       "false_negatives": 0,
       "severity_errors": 0,
       "scope_errors": 0,
-      "stability_runs": 0,
-      "known_limits": [],
+      "stability_runs": 1,
+      "known_limits": [
+        "Real-domain validation currently confirms only a negative direct-200 case; redirect and missing-measurement positives are fixtures.",
+        "The check covers sitemap URLs selected into the audit plan, not every URL in an arbitrarily large sitemap corpus."
+      ],
       "manual_review_reason": "",
-      "last_validated_at": "",
-      "last_validated_commit": "",
-      "evidence_references": [],
-      "recommended_trust_action": "validation_required_score_free",
+      "last_validated_at": "2026-07-19",
+      "last_validated_commit": "901a096a43169a8fa5fd21ec6682da30507f5a9d",
+      "evidence_references": [
+        "tests/http-status-validation.test.js",
+        "docs/http-status-check-validation-v1.md"
+      ],
+      "recommended_trust_action": "automated_with_limits",
       "historical_observations": 64,
       "historical_run_count": 44,
       "validation_gap": {
         "missing_evidence": [
-          "direct regression fixture",
-          "independent real-domain validation",
           "real positive case",
-          "real negative case",
-          "severity and scope review",
+          "second real domain",
           "repeatability confirmation"
         ],
         "needed_real_positive_cases": 1,
-        "needed_real_negative_cases": 1,
+        "needed_real_negative_cases": 0,
         "suitable_archetypes": [
           "small_static_site",
           "large_dynamic_site"
         ],
-        "needed_fixture": "Add controlled positive and negative fixtures for tech.sitemap_urls_non_200.",
+        "needed_fixture": "Direct-200, redirect-to-200 and missing-measurement fixtures exist.",
         "manual_method": "Independent curl GET/redirect/header validation with body spot-checks.",
         "expected_effort": "M",
         "risk_if_unchanged": "Medium: a primary-evidence conclusion remains insufficiently demonstrated on real implementations."
@@ -6514,47 +6587,58 @@
       "score_effect": "score_free",
       "evidence_class": "inventory",
       "coverage_unit": "check:tech.status_code_distribution",
-      "required_facts": [],
-      "requirement_definition_status": "missing",
-      "inventory_issues": [
-        "missing_central_requirement_definition"
+      "required_facts": [
+        "pageGetStatuses"
       ],
+      "requirement_definition_status": "declared",
+      "inventory_issues": [],
       "data_sources": [
         "pages",
         "extracted_html_facts"
       ],
       "scope": "site",
       "root_cause_family": "tech.status_code_distribution",
-      "current_validation_status": "unvalidated",
-      "validation_status": "unvalidated",
-      "validation_confidence": "low",
-      "tested_domains": [],
-      "tested_archetypes": [],
-      "positive_cases": 0,
-      "negative_cases": 0,
-      "fixture_tests": [],
-      "real_world_runs": [],
+      "current_validation_status": "single_domain_validated",
+      "validation_status": "single_domain_validated",
+      "validation_confidence": "high",
+      "tested_domains": [
+        "trinkgut-zierles.de"
+      ],
+      "tested_archetypes": [
+        "small_local_business_website"
+      ],
+      "positive_cases": 2,
+      "negative_cases": 1,
+      "fixture_tests": [
+        "tests/http-status-validation.test.js"
+      ],
+      "real_world_runs": [
+        "run-77-forensic-validation"
+      ],
       "false_positives": 0,
       "false_negatives": 0,
       "severity_errors": 0,
       "scope_errors": 0,
-      "stability_runs": 0,
-      "known_limits": [],
+      "stability_runs": 2,
+      "known_limits": [
+        "The distribution covers requested audit URLs and reports initial and final statuses separately; it is not a full-site census.",
+        "Pure technical failures are counted separately and are not converted to status zero."
+      ],
       "manual_review_reason": "",
-      "last_validated_at": "",
-      "last_validated_commit": "",
-      "evidence_references": [],
-      "recommended_trust_action": "validation_required_score_free",
+      "last_validated_at": "2026-07-19",
+      "last_validated_commit": "901a096a43169a8fa5fd21ec6682da30507f5a9d",
+      "evidence_references": [
+        "tests/http-status-validation.test.js",
+        "docs/http-status-check-validation-v1.md"
+      ],
+      "recommended_trust_action": "diagnostic_only",
       "historical_observations": 64,
       "historical_run_count": 44,
       "validation_gap": {
         "missing_evidence": [
-          "direct regression fixture",
-          "independent real-domain validation",
-          "real positive case",
-          "real negative case",
-          "severity and scope review",
-          "repeatability confirmation"
+          "second real domain",
+          "second website archetype",
+          "cross-domain repeatability confirmation"
         ],
         "needed_real_positive_cases": 1,
         "needed_real_negative_cases": 1,
@@ -6562,8 +6646,8 @@
           "small_static_site",
           "large_dynamic_site"
         ],
-        "needed_fixture": "Add controlled positive and negative fixtures for tech.status_code_distribution.",
-        "manual_method": "Parse delivered HTML independently and verify scope, positive/negative facts, severity, and repeatability.",
+        "needed_fixture": "Initial/final status and technical-error distribution fixtures already exist.",
+        "manual_method": "Independently reconcile initial and final GET status totals on a second real audit sample.",
         "expected_effort": "S",
         "risk_if_unchanged": "Low: diagnostic or optional output may be misleading until independently validated."
       }
@@ -6608,7 +6692,8 @@
       "negative_cases": 8,
       "fixture_tests": [
         "tests/batch-c1-c7.test.js",
-        "tests/calibration-v2.test.js"
+        "tests/calibration-v2.test.js",
+        "tests/http-status-validation.test.js"
       ],
       "real_world_runs": [
         "synthetic-not-found-manual-validation-2026-07-19"
@@ -6618,16 +6703,21 @@
       "severity_errors": 0,
       "scope_errors": 0,
       "stability_runs": 6,
-      "known_limits": [],
+      "known_limits": [
+        "Retry-sensitive 429/500/502/503/504 and network failures use at most two attempts; persistent infrastructure instability can still remain technical evidence rather than a site conclusion.",
+        "A WAF can block randomized unknown paths; such a block is technical_error and score-free."
+      ],
       "manual_review_reason": "",
       "last_validated_at": "2026-07-19",
-      "last_validated_commit": "020e13c8fc2cc16c689ec01eed415c4e0b2950ad",
+      "last_validated_commit": "901a096a43169a8fa5fd21ec6682da30507f5a9d",
       "evidence_references": [
         "tests/batch-c1-c7.test.js",
         "tests/calibration-v2.test.js",
-        "docs/check-validation-registry.md#first-validated-group"
+        "docs/check-validation-registry.md#first-validated-group",
+        "tests/http-status-validation.test.js",
+        "docs/http-status-check-validation-v1.md"
       ],
-      "recommended_trust_action": "active",
+      "recommended_trust_action": "fully_automated",
       "historical_observations": 0,
       "historical_run_count": 0,
       "validation_gap": null
@@ -7240,11 +7330,14 @@
       "score_effect": "score_capable",
       "evidence_class": "primary_required",
       "coverage_unit": "check:tech.www_non_www_consistency",
-      "required_facts": [],
-      "requirement_definition_status": "missing",
-      "inventory_issues": [
-        "missing_central_requirement_definition"
+      "required_facts": [
+        "getResponseForBothHostVariants",
+        "initialStatus",
+        "redirectChain",
+        "finalHost"
       ],
+      "requirement_definition_status": "declared",
+      "inventory_issues": [],
       "data_sources": [
         "projects",
         "pages",
@@ -7252,48 +7345,58 @@
       ],
       "scope": "site",
       "root_cause_family": "tech.www_non_www_consistency",
-      "current_validation_status": "unvalidated",
-      "validation_status": "unvalidated",
-      "validation_confidence": "low",
-      "tested_domains": [],
-      "tested_archetypes": [],
-      "positive_cases": 0,
-      "negative_cases": 0,
-      "fixture_tests": [],
-      "real_world_runs": [],
+      "current_validation_status": "validated_with_limits",
+      "validation_status": "validated_with_limits",
+      "validation_confidence": "high",
+      "tested_domains": [
+        "marcdeboer.de",
+        "trinkgut-zierles.de",
+        "react.dev",
+        "web.dev",
+        "developer.mozilla.org",
+        "www.ikea.com",
+        "app.uniswap.org",
+        "nextjs.org"
+      ],
+      "tested_archetypes": [
+        "small_static_expert",
+        "local_commerce_dynamic",
+        "ssr_documentation",
+        "large_ecommerce",
+        "csr_application"
+      ],
+      "positive_cases": 4,
+      "negative_cases": 14,
+      "fixture_tests": [
+        "tests/http-status-validation.test.js",
+        "tests/url.test.js"
+      ],
+      "real_world_runs": [
+        "http-status-validation-v1-2026-07-19",
+        "run-77-forensic-validation"
+      ],
       "false_positives": 0,
       "false_negatives": 0,
       "severity_errors": 0,
       "scope_errors": 0,
-      "stability_runs": 0,
-      "known_limits": [],
+      "stability_runs": 3,
+      "known_limits": [
+        "An intentionally unprovisioned alternate host or an active migration can require operational context.",
+        "Root candidates prove root convergence; deep path/query preservation was independently probed but is not yet persisted as a separate production probe.",
+        "Genuine subdomain audits are not assigned a fabricated www-of-subdomain requirement."
+      ],
       "manual_review_reason": "",
-      "last_validated_at": "",
-      "last_validated_commit": "",
-      "evidence_references": [],
-      "recommended_trust_action": "validation_required_score_free",
+      "last_validated_at": "2026-07-19",
+      "last_validated_commit": "901a096a43169a8fa5fd21ec6682da30507f5a9d",
+      "evidence_references": [
+        "tests/http-status-validation.test.js",
+        "tests/url.test.js",
+        "docs/http-status-check-validation-v1.md"
+      ],
+      "recommended_trust_action": "automated_with_limits",
       "historical_observations": 64,
       "historical_run_count": 44,
-      "validation_gap": {
-        "missing_evidence": [
-          "direct regression fixture",
-          "independent real-domain validation",
-          "real positive case",
-          "real negative case",
-          "severity and scope review",
-          "repeatability confirmation"
-        ],
-        "needed_real_positive_cases": 1,
-        "needed_real_negative_cases": 1,
-        "suitable_archetypes": [
-          "small_static_site",
-          "large_dynamic_site"
-        ],
-        "needed_fixture": "Add controlled positive and negative fixtures for tech.www_non_www_consistency.",
-        "manual_method": "Parse delivered HTML independently and verify scope, positive/negative facts, severity, and repeatability.",
-        "expected_effort": "M",
-        "risk_if_unchanged": "Medium: a primary-evidence conclusion remains insufficiently demonstrated on real implementations."
-      }
+      "validation_gap": null
     },
     {
       "check_id": "tech.x_content_type_options",

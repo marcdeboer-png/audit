@@ -147,7 +147,9 @@ export async function followRedirectChain(startUrl, options = {}) {
         startUrl,
         finalUrl: currentUrl,
         statusCode: response.status,
-        ok: response.status >= 200 && response.status < 500,
+        // A valid HTTP response proves transport reachability even when the
+        // website itself returns 5xx. Status checks decide whether it is healthy.
+        ok: response.status >= 100 && response.status <= 599,
         chain
       };
     } catch (error) {

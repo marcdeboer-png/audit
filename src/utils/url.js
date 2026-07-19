@@ -1,3 +1,5 @@
+import { isRegistrableApexHost } from './httpStatus.js';
+
 const TRACKING_PARAMS = new Set([
   'utm_source',
   'utm_medium',
@@ -34,7 +36,7 @@ export function originCandidates(input) {
     `https://${domain}`,
     `http://${domain}`
   ];
-  if (!isIpAddress(host)) {
+  if (!isIpAddress(host) && isRegistrableApexHost(host)) {
     candidates.splice(1, 0, `https://www.${domain}`);
     candidates.push(`http://www.${domain}`);
   }

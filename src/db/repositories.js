@@ -22,6 +22,7 @@ import { computeNextRunAt, normalizeScheduleTiming } from '../scheduler/schedule
 import { boundedJson, normalizeDomainAssetForStorage, retentionPolicyFromRun, sanitizeCheckResultForStorage, truncateText } from '../storage/retention.js';
 import { buildRuntimeProvenance } from '../runtime/provenance.js';
 import { requireRunId } from '../scope/runScope.js';
+import { normalizeRequestUrl } from '../utils/url.js';
 
 export function createProject(db, { inputDomain, brandName = null }) {
   const result = db.prepare(`
@@ -390,7 +391,7 @@ export function insertPage(db, page) {
   requireRunId(page?.runId, 'insert page');
   db.prepare(`
     INSERT INTO pages (
-      runId, url, normalizedUrl, finalUrl, depth, sourceUrl, statusCode, initialStatusCode, redirectChainJson, contentType,
+      runId, url, normalizedUrl, finalUrl, depth, sourceUrl, statusCode, initialStatusCode, redirectChainJson, httpAttemptHistoryJson, contentType,
       indexable, noindex, nofollow, title, titleLength, metaDescription, metaDescriptionLength,
       h1Json, h1Count, h2Json, canonical, canonicalStatus, htmlLang, viewport, metaRobots,
       metaCharset, hasHeaderUtf8, hasMetaCharsetUtf8, xRobotsTag, wordCountRaw, wordCountRendered, rawTextLength,
@@ -415,7 +416,7 @@ export function insertPage(db, page) {
       effectiveTwitterJson, effectiveHreflangJson, effectiveSchemaTypesJson
     )
     VALUES (
-      @runId, @url, @normalizedUrl, @finalUrl, @depth, @sourceUrl, @statusCode, @initialStatusCode, @redirectChainJson, @contentType,
+      @runId, @url, @normalizedUrl, @finalUrl, @depth, @sourceUrl, @statusCode, @initialStatusCode, @redirectChainJson, @httpAttemptHistoryJson, @contentType,
       @indexable, @noindex, @nofollow, @title, @titleLength, @metaDescription, @metaDescriptionLength,
       @h1Json, @h1Count, @h2Json, @canonical, @canonicalStatus, @htmlLang, @viewport, @metaRobots,
       @metaCharset, @hasHeaderUtf8, @hasMetaCharsetUtf8, @xRobotsTag, @wordCountRaw, @wordCountRendered, @rawTextLength,
@@ -446,6 +447,7 @@ export function insertPage(db, page) {
       statusCode = excluded.statusCode,
       initialStatusCode = excluded.initialStatusCode,
       redirectChainJson = excluded.redirectChainJson,
+      httpAttemptHistoryJson = excluded.httpAttemptHistoryJson,
       contentType = excluded.contentType,
       indexable = excluded.indexable,
       noindex = excluded.noindex,
@@ -577,6 +579,7 @@ export function insertPage(db, page) {
     templateClusterKey: null,
     initialStatusCode: page?.statusCode ?? null,
     redirectChainJson: JSON.stringify([]),
+    httpAttemptHistoryJson: JSON.stringify([]),
     visibleTextLength: page?.rawTextLength ?? null,
     renderedVisibleTextLength: page?.renderedTextLength ?? null,
     textFactsJson: null,
@@ -757,41 +760,31 @@ export function replacePageArtifacts(db, runId, pageUrl, { links = [], images = 
 
 export function hydrateInternalLinkHttpFacts(db, runId) {
   requireRunId(runId, 'hydrate internal link HTTP facts');
-  return db.prepare(`
+  const candidates = db.prepare(`
+    SELECT l.id, COALESCE(l.linkedUrl, l.targetUrl) AS linkedUrl,
+           p.url AS requestedPageUrl, p.initialStatusCode, p.redirectChainJson,
+           p.finalUrl, p.statusCode AS finalStatusCode
+    FROM page_links l
+    JOIN pages p ON p.runId = l.runId AND p.normalizedUrl = l.normalizedTargetUrl
+    WHERE l.runId = ? AND l.linkType = 'internal'
+    ORDER BY l.id
+  `).all(runId).filter((row) => {
+    if (!row.linkedUrl) return true;
+    return normalizeRequestUrl(row.linkedUrl) === normalizeRequestUrl(row.requestedPageUrl);
+  });
+  const update = db.prepare(`
     UPDATE page_links
-    SET initialStatusCode = (
-          SELECT p.initialStatusCode FROM pages p
-          WHERE p.runId = page_links.runId AND p.normalizedUrl = page_links.normalizedTargetUrl
-            AND (page_links.linkedUrl IS NULL OR p.url = page_links.linkedUrl)
-        ),
-        statusCode = (
-          SELECT p.initialStatusCode FROM pages p
-          WHERE p.runId = page_links.runId AND p.normalizedUrl = page_links.normalizedTargetUrl
-            AND (page_links.linkedUrl IS NULL OR p.url = page_links.linkedUrl)
-        ),
-        redirectChainJson = (
-          SELECT p.redirectChainJson FROM pages p
-          WHERE p.runId = page_links.runId AND p.normalizedUrl = page_links.normalizedTargetUrl
-            AND (page_links.linkedUrl IS NULL OR p.url = page_links.linkedUrl)
-        ),
-        finalUrl = (
-          SELECT p.finalUrl FROM pages p
-          WHERE p.runId = page_links.runId AND p.normalizedUrl = page_links.normalizedTargetUrl
-            AND (page_links.linkedUrl IS NULL OR p.url = page_links.linkedUrl)
-        ),
-        finalStatusCode = (
-          SELECT p.statusCode FROM pages p
-          WHERE p.runId = page_links.runId AND p.normalizedUrl = page_links.normalizedTargetUrl
-            AND (page_links.linkedUrl IS NULL OR p.url = page_links.linkedUrl)
-        )
-    WHERE runId = ?
-      AND linkType = 'internal'
-      AND EXISTS (
-        SELECT 1 FROM pages p
-        WHERE p.runId = page_links.runId AND p.normalizedUrl = page_links.normalizedTargetUrl
-          AND (page_links.linkedUrl IS NULL OR p.url = page_links.linkedUrl)
-      )
-  `).run(runId).changes;
+    SET initialStatusCode = ?, statusCode = ?, redirectChainJson = ?, finalUrl = ?, finalStatusCode = ?
+    WHERE id = ? AND runId = ?
+  `);
+  const tx = db.transaction((rows) => {
+    let changes = 0;
+    for (const row of rows) {
+      changes += update.run(row.initialStatusCode, row.initialStatusCode, row.redirectChainJson, row.finalUrl, row.finalStatusCode, row.id, runId).changes;
+    }
+    return changes;
+  });
+  return tx(candidates);
 }
 
 function buildLinkAggregates(links = [], totalLinks = links.length, truncated = false) {

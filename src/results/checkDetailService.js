@@ -4,6 +4,8 @@ import { thresholds } from '../checks/config/thresholds.js';
 import { retentionPolicyFromRun } from '../storage/retention.js';
 import { createRunScope, requireRunId, scopeSafeCheckResult } from '../scope/runScope.js';
 import { canonicalTargetFacts, evaluateCanonicalPage } from '../checks/canonicalSemantics.js';
+import { classifyHttpStability } from '../utils/httpStatus.js';
+import { isLikelyHtmlPage } from '../utils/url.js';
 
 const DETAIL_LIMIT = 10000;
 const NON_DECORATIVE_IMAGE_DETAIL_WHERE = `
@@ -430,18 +432,40 @@ function sqlString(value) {
 }
 
 function statusPageDetails({ db, runId, checkResult, recommendation }) {
+  if (checkResult.checkId === 'tech.sitemap_urls_non_200') {
+    const rows = db.prepare(`
+      SELECT q.url, p.initialStatusCode, p.statusCode, p.redirectChainJson,
+             p.finalUrl, p.httpAttemptHistoryJson, q.status AS queueStatus
+      FROM crawl_queue q
+      LEFT JOIN pages p ON p.runId = q.runId AND p.normalizedUrl = q.normalizedUrl
+      WHERE q.runId = ? AND q.sourceType IN ('sitemap', 'robots_sitemap')
+        AND p.statusCode IS NOT NULL
+        AND (COALESCE(p.initialStatusCode, p.statusCode) <> 200 OR p.statusCode <> 200)
+      ORDER BY q.id
+    `).all(runId).map((row) => ({ ...row, measurementStability: classifyHttpStability(row.httpAttemptHistoryJson).status, recommendation }));
+    return {
+      columns: [
+        ['url', 'URL'], ['initialStatusCode', 'Initial Status Code'], ['statusCode', 'Final Status Code'],
+        ['redirectChainJson', 'Redirect Chain'], ['finalUrl', 'Final URL'],
+        ['measurementStability', 'Measurement Stability'], ['httpAttemptHistoryJson', 'Measurement Attempts'],
+        ['recommendation', 'Recommendation']
+      ],
+      rows,
+      dataSource: 'crawl_queue/pages'
+    };
+  }
   const where = pageCondition(checkResult.checkId, {
     'tech.4xx_pages': 'statusCode >= 400 AND statusCode < 500',
     'tech.5xx_pages': 'statusCode >= 500',
-    'tech.redirect_pages': '(initialStatusCode >= 300 AND initialStatusCode < 400) OR (initialStatusCode IS NULL AND finalUrl <> url)',
-    'tech.sitemap_urls_non_200': 'COALESCE(statusCode, 0) <> 200'
+    'tech.redirect_pages': '(initialStatusCode >= 300 AND initialStatusCode < 400) OR (initialStatusCode IS NULL AND finalUrl <> url)'
   });
-  const rows = db.prepare(`
+  let rows = db.prepare(`
     SELECT
       p.url,
       p.statusCode,
       p.initialStatusCode,
       p.redirectChainJson,
+      p.httpAttemptHistoryJson,
       p.finalUrl,
       (SELECT COUNT(*) FROM page_links l WHERE l.runId = p.runId AND l.normalizedTargetUrl = p.normalizedUrl) AS inlinksCount,
       (SELECT GROUP_CONCAT(sourceUrl, ' | ') FROM (
@@ -454,7 +478,9 @@ function statusPageDetails({ db, runId, checkResult, recommendation }) {
     FROM pages p
     WHERE p.runId = ? AND (${where})
     ORDER BY p.id ASC
-  `).all(runId).map((row) => ({ ...row, recommendation }));
+  `).all(runId).map((row) => ({ ...row, measurementStability: classifyHttpStability(row.httpAttemptHistoryJson).status, recommendation }));
+  if (checkResult.checkId === 'tech.5xx_pages') rows = rows.filter((row) => row.measurementStability === 'confirmed');
+  if (checkResult.checkId === 'tech.4xx_pages') rows = rows.filter((row) => ![408, 429].includes(Number(row.statusCode)));
   return {
     columns: [
       ['url', 'URL'],
@@ -462,6 +488,8 @@ function statusPageDetails({ db, runId, checkResult, recommendation }) {
       ['initialStatusCode', 'Initial Status Code'],
       ['redirectChainJson', 'Redirect Chain'],
       ['finalUrl', 'Final URL'],
+      ['measurementStability', 'Measurement Stability'],
+      ['httpAttemptHistoryJson', 'Measurement Attempts'],
       ['inlinksCount', 'Inlinks Count'],
       ['sampleInlinks', 'Sample Inlinks'],
       ['recommendation', 'Recommendation']
@@ -472,32 +500,46 @@ function statusPageDetails({ db, runId, checkResult, recommendation }) {
 }
 
 function internalLinkDetails({ db, runId, checkResult, recommendation }) {
-  const targetWhere = checkResult.checkId === 'tech.internal_links_to_3xx'
-    ? 'l.initialStatusCode >= 300 AND l.initialStatusCode < 400'
-    : 'COALESCE(l.finalStatusCode, p.statusCode) >= 400';
-  const rows = db.prepare(`
+  let rows = db.prepare(`
     SELECT
       l.sourceUrl,
       COALESCE(l.linkedUrl, l.targetUrl) AS targetUrl,
+      l.normalizedTargetUrl,
       l.anchorText,
       l.initialStatusCode,
       l.redirectChainJson,
       COALESCE(l.finalStatusCode, p.statusCode) AS finalStatusCode,
-      COALESCE(l.finalUrl, p.finalUrl) AS finalTargetUrl
+      COALESCE(l.finalUrl, p.finalUrl) AS finalTargetUrl,
+      p.contentType,
+      p.httpAttemptHistoryJson
     FROM page_links l
-    JOIN pages p ON p.runId = l.runId AND p.normalizedUrl = l.normalizedTargetUrl
-    WHERE l.runId = ? AND l.linkType = 'internal' AND ${targetWhere}
+    LEFT JOIN pages p ON p.runId = l.runId AND p.normalizedUrl = l.normalizedTargetUrl
+    WHERE l.runId = ? AND l.linkType = 'internal'
     ORDER BY l.id ASC
-  `).all(runId).map((row) => ({ ...row, recommendation }));
+  `).all(runId).filter((row) => isLikelyHtmlPage(row.normalizedTargetUrl || row.targetUrl)).map((row) => ({
+    ...row,
+    measurementStability: classifyHttpStability(row.httpAttemptHistoryJson).status,
+    recommendation
+  }));
+  rows = rows.filter((row) => {
+    if (checkResult.checkId === 'tech.internal_links_to_3xx') return Number(row.initialStatusCode) >= 300 && Number(row.initialStatusCode) < 400;
+    const status = Number(row.finalStatusCode);
+    if (!(status >= 400 && status < 600) || [408, 429].includes(status)) return false;
+    return status < 500 || row.measurementStability === 'confirmed';
+  });
   return {
     columns: [
       ['sourceUrl', 'Source URL'],
       ['targetUrl', 'Target URL'],
+      ['normalizedTargetUrl', 'Normalized Target'],
       ['anchorText', 'Anchor Text'],
       ['initialStatusCode', 'Initial Status'],
       ['redirectChainJson', 'Redirect Chain'],
       ['finalStatusCode', 'Final Status'],
       ['finalTargetUrl', 'Final Target URL'],
+      ['contentType', 'Content Type'],
+      ['measurementStability', 'Measurement Stability'],
+      ['httpAttemptHistoryJson', 'Measurement Attempts'],
       ['recommendation', 'Recommendation']
     ],
     rows,

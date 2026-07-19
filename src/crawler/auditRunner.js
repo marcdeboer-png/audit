@@ -20,6 +20,7 @@ import {
 } from '../db/repositories.js';
 import {
   completeUrl,
+  appendHttpAttempt,
   failUrlPermanent,
   claimNextUrlForLock,
   nextWaitingDelayMs,
@@ -488,6 +489,7 @@ async function workerLoop(db, runId, workerId, lockToken, browser, robots, hostL
     const urlStartedAt = performance.now();
     try {
       const outcome = await processQueueItem(db, run, run, item, browser, robots, runtimeMetrics);
+      if (outcome.httpAttempt) appendHttpAttempt(db, item.id, outcome.httpAttempt);
       if (outcome.status === 'skipped') {
         skipUrl(db, item.id, outcome.reason);
       } else {
@@ -496,6 +498,16 @@ async function workerLoop(db, runId, workerId, lockToken, browser, robots, hostL
       syncRunCounters(db, runId);
       updateRun(db, runId, { currentPhase: 'crawling', currentUrl: null });
     } catch (error) {
+      const classification = classifyError(error);
+      if (error.httpAttempt || classification.retryable) {
+        appendHttpAttempt(db, item.id, error.httpAttempt || {
+          attempt: item.attempts,
+          method: 'GET',
+          requestedUrl: item.url || item.normalizedUrl,
+          technicalErrorType: classification.errorType,
+          technicalError: error.message
+        });
+      }
       runtimeMetrics?.recordUrl({
         url: item.url || item.normalizedUrl,
         pageType: 'other',
@@ -504,7 +516,6 @@ async function workerLoop(db, runId, workerId, lockToken, browser, robots, hostL
         renderStatus: 'technical_error',
         measurementError: error.message
       });
-      const classification = classifyError(error);
       if (shouldRetryError(item, run, error)) {
         const nextAttemptAt = nextRetryAt(item, run);
         scheduleRetry(db, item.id, {
