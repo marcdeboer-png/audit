@@ -39,6 +39,13 @@ Familie. Ebenso sind Canonicalabweichung, `noindex` und inhaltliche
 Indexierungsabsicht eigenstaendige Aussagen und werden nicht in
 `sitemap_urls_non_200` hineingemischt.
 
+Die ebenfalls inventarisierten Checks `geo.llms_txt_present`,
+`geo.llms_txt_http_status` und `geo.llms_full_txt_present` messen Existenz,
+Status und Referenzierung eigener Textressourcen, nicht Robots- oder
+Sitemap-Discovery. Sie bleiben deshalb mit ihrem bisherigen Registry-Status
+in einer getrennten Validierungsgruppe. Nur die robots.txt-seitige
+Blockierungsfrage ist hier durch `geo.robots_blocks_txt_files` abgedeckt.
+
 ## Reale Gegenpruefung
 
 Die unabhaengige Probe verwendete serielle `curl`-GETs, getrennte
