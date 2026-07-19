@@ -6,6 +6,7 @@ import { createRunScope, requireRunId, scopeSafeCheckResult } from '../scope/run
 import { canonicalTargetFacts, evaluateCanonicalPage } from '../checks/canonicalSemantics.js';
 import { classifyHttpStability } from '../utils/httpStatus.js';
 import { isLikelyHtmlPage } from '../utils/url.js';
+import { collectHeadMetadataPopulation, duplicateHeadGroups } from '../checks/headSemantics.js';
 
 const DETAIL_LIMIT = 10000;
 const NON_DECORATIVE_IMAGE_DETAIL_WHERE = `
@@ -221,9 +222,9 @@ function titleDetails({ db, runId, checkResult, recommendation }) {
     db,
     runId,
     where: pageCondition(checkResult.checkId, {
-      'tech.title_missing': `${indexableContentHtmlWhere()} AND ${current ? 'COALESCE(metadataProvenanceComplete, 0) = 1 AND (effectiveTitle IS NULL OR effectiveTitle = \'\')' : "(title IS NULL OR title = '')"}`,
-      'tech.title_too_short': `${indexableContentHtmlWhere()} AND ${current ? `COALESCE(metadataProvenanceComplete, 0) = 1 AND LENGTH(effectiveTitle) < ${thresholds.titleTooShort} AND COALESCE(effectiveTitle, '') <> ''` : `titleLength < ${thresholds.titleTooShort} AND COALESCE(title, '') <> ''`}`,
-      'tech.title_too_long': `${indexableContentHtmlWhere()} AND ${current ? `COALESCE(metadataProvenanceComplete, 0) = 1 AND LENGTH(effectiveTitle) > ${thresholds.titleTooLong}` : `titleLength > ${thresholds.titleTooLong}`}`
+      'tech.title_missing': `${indexableContentHtmlWhere()} AND ${current ? 'rawDocumentStateJson IS NOT NULL AND COALESCE(metadataProvenanceComplete, 0) = 1 AND (effectiveTitle IS NULL OR effectiveTitle = \'\')' : "(title IS NULL OR title = '')"}`,
+      'tech.title_too_short': `${indexableContentHtmlWhere()} AND ${current ? `rawDocumentStateJson IS NOT NULL AND COALESCE(metadataProvenanceComplete, 0) = 1 AND LENGTH(effectiveTitle) < ${thresholds.titleTooShort} AND COALESCE(effectiveTitle, '') <> ''` : `titleLength < ${thresholds.titleTooShort} AND COALESCE(title, '') <> ''`}`,
+      'tech.title_too_long': `${indexableContentHtmlWhere()} AND ${current ? `rawDocumentStateJson IS NOT NULL AND COALESCE(metadataProvenanceComplete, 0) = 1 AND LENGTH(effectiveTitle) > ${thresholds.titleTooLong}` : `titleLength > ${thresholds.titleTooLong}`}`
     }),
     columns: [
       ['url', 'URL'],
@@ -248,9 +249,9 @@ function metaDescriptionDetails({ db, runId, checkResult, recommendation }) {
     db,
     runId,
     where: pageCondition(checkResult.checkId, {
-      'tech.meta_description_missing': `${indexableContentHtmlWhere()} AND ${current ? 'COALESCE(metadataProvenanceComplete, 0) = 1 AND (effectiveMetaDescription IS NULL OR effectiveMetaDescription = \'\')' : "(metaDescription IS NULL OR metaDescription = '')"}`,
-      'tech.meta_description_too_short': `${indexableContentHtmlWhere()} AND ${current ? `COALESCE(metadataProvenanceComplete, 0) = 1 AND LENGTH(effectiveMetaDescription) < ${thresholds.descriptionTooShort} AND COALESCE(effectiveMetaDescription, '') <> ''` : `metaDescriptionLength < ${thresholds.descriptionTooShort} AND COALESCE(metaDescription, '') <> ''`}`,
-      'tech.meta_description_too_long': `${indexableContentHtmlWhere()} AND ${current ? `COALESCE(metadataProvenanceComplete, 0) = 1 AND LENGTH(effectiveMetaDescription) > ${thresholds.descriptionTooLong}` : `metaDescriptionLength > ${thresholds.descriptionTooLong}`}`
+      'tech.meta_description_missing': `${indexableContentHtmlWhere()} AND ${current ? 'rawDocumentStateJson IS NOT NULL AND COALESCE(metadataProvenanceComplete, 0) = 1 AND (effectiveMetaDescription IS NULL OR effectiveMetaDescription = \'\')' : "(metaDescription IS NULL OR metaDescription = '')"}`,
+      'tech.meta_description_too_short': `${indexableContentHtmlWhere()} AND ${current ? `rawDocumentStateJson IS NOT NULL AND COALESCE(metadataProvenanceComplete, 0) = 1 AND LENGTH(effectiveMetaDescription) < ${thresholds.descriptionTooShort} AND COALESCE(effectiveMetaDescription, '') <> ''` : `metaDescriptionLength < ${thresholds.descriptionTooShort} AND COALESCE(metaDescription, '') <> ''`}`,
+      'tech.meta_description_too_long': `${indexableContentHtmlWhere()} AND ${current ? `rawDocumentStateJson IS NOT NULL AND COALESCE(metadataProvenanceComplete, 0) = 1 AND LENGTH(effectiveMetaDescription) > ${thresholds.descriptionTooLong}` : `metaDescriptionLength > ${thresholds.descriptionTooLong}`}`
     }),
     columns: [
       ['url', 'URL'],
@@ -562,15 +563,19 @@ function internalLinkDetails({ db, runId, checkResult, recommendation }) {
 
 function h1Details({ db, runId, checkResult, recommendation }) {
   const current = hasRenderProvenance(db, runId);
+  const missingCheck = checkResult.checkId === 'tech.h1_missing';
   const where = checkResult.checkId === 'tech.h1_missing'
-    ? current ? 'COALESCE(metadataProvenanceComplete, 0) = 1 AND COALESCE(effectiveH1Count, 0) = 0' : "h1Count = 0 AND NOT (renderStatus = 'success' AND renderedH1Count > 0)"
-    : current ? 'COALESCE(metadataProvenanceComplete, 0) = 1 AND COALESCE(effectiveH1Count, 0) > 1' : 'h1Count > 1';
+    ? current ? 'rawDocumentStateJson IS NOT NULL AND COALESCE(metadataProvenanceComplete, 0) = 1 AND COALESCE(effectiveH1Count, 0) = 0' : "h1Count = 0 AND NOT (renderStatus = 'success' AND renderedH1Count > 0)"
+    : current ? 'rawDocumentStateJson IS NOT NULL AND COALESCE(metadataProvenanceComplete, 0) = 1 AND COALESCE(effectiveH1Count, 0) > 1' : 'h1Count > 1';
+  const contentScope = missingCheck ? "AND indexable = 1 AND COALESCE(pageType, 'other') <> 'legal'" : '';
   const rows = db.prepare(`
     SELECT url,
       ${current ? 'h1Count AS rawH1Count, h1Json AS rawH1Json, effectiveH1Count AS h1Count, effectiveH1Json AS h1Json' : 'h1Count, h1Json, h1Count AS rawH1Count, h1Json AS rawH1Json'},
       effectiveH1Count, effectiveH1Json, renderStatus, settlingStatus, pageType, indexable
     FROM pages
-    WHERE runId = ? AND (${htmlWhere()}) AND statusCode >= 200 AND statusCode < 300 AND COALESCE(indexable, 1) = 1 AND (${where})
+    WHERE runId = ? AND (${htmlWhere()}) AND statusCode >= 200 AND statusCode < 300
+      AND COALESCE(initialStatusCode, statusCode) >= 200 AND COALESCE(initialStatusCode, statusCode) < 300
+      ${contentScope} AND (${where})
     ORDER BY id ASC
   `).all(runId).map((row) => ({
     ...row,
@@ -593,32 +598,20 @@ function h1Details({ db, runId, checkResult, recommendation }) {
 }
 
 function duplicateMetaDetails({ db, runId, checkResult, recommendation }) {
-  const current = hasRenderProvenance(db, runId);
-  const field = checkResult.checkId === 'tech.duplicate_titles'
-    ? current ? 'effectiveTitle' : 'title'
-    : current ? 'effectiveMetaDescription' : 'metaDescription';
-  const groups = db.prepare(`
-    SELECT LOWER(${field}) AS groupKey, ${field} AS duplicateValue, COUNT(*) AS groupSize
-    FROM pages
-    WHERE runId = ? AND ${indexableContentHtmlWhere()} ${current ? 'AND COALESCE(metadataProvenanceComplete, 0) = 1' : ''} AND ${field} IS NOT NULL AND ${field} <> ''
-    GROUP BY LOWER(${field})
-    HAVING COUNT(*) > 1
-  `).all(runId);
+  const run = db.prepare(`SELECT r.id, p.finalDomain FROM runs r JOIN projects p ON p.id=r.projectId WHERE r.id=?`).get(runId) || {};
+  const field = checkResult.checkId === 'tech.duplicate_titles' ? 'title' : 'metaDescription';
+  const population = collectHeadMetadataPopulation(db, runId, run.finalDomain, field);
+  const groups = duplicateHeadGroups(population.rows);
   const rows = [];
   for (const group of groups) {
-    const pages = db.prepare(`
-      SELECT url, pageType, indexable
-      FROM pages
-      WHERE runId = ? AND ${indexableContentHtmlWhere()} ${current ? 'AND COALESCE(metadataProvenanceComplete, 0) = 1' : ''} AND LOWER(${field}) = ?
-      ORDER BY id ASC
-    `).all(runId, group.groupKey);
-    for (const page of pages) {
+    for (const url of group.urls) {
+      const page = population.rows.find((candidate) => candidate.url === url);
       rows.push({
-        duplicateValue: group.duplicateValue,
+        duplicateValue: group.value,
         url: page.url,
         pageType: page.pageType,
         indexable: page.indexable,
-        groupSize: group.groupSize,
+        groupSize: group.count,
         recommendation
       });
     }
@@ -633,7 +626,7 @@ function duplicateMetaDetails({ db, runId, checkResult, recommendation }) {
       ['recommendation', 'Recommendation']
     ],
     rows,
-    dataSource: 'pages'
+    dataSource: population.current ? 'pages/effective document state' : 'pages (legacy)'
   };
 }
 
@@ -1003,7 +996,7 @@ function htmlWhere(alias = '') {
 
 function indexableContentHtmlWhere(alias = '') {
   const prefix = alias ? `${alias}.` : '';
-  return `${htmlWhere(alias)} AND ${prefix}statusCode >= 200 AND ${prefix}statusCode < 300 AND COALESCE(${prefix}initialStatusCode, ${prefix}statusCode) >= 200 AND COALESCE(${prefix}initialStatusCode, ${prefix}statusCode) < 300 AND COALESCE(${prefix}indexable, 1) = 1 AND COALESCE(${prefix}pageType, 'other') <> 'legal'`;
+  return `${htmlWhere(alias)} AND ${prefix}statusCode >= 200 AND ${prefix}statusCode < 300 AND COALESCE(${prefix}initialStatusCode, ${prefix}statusCode) >= 200 AND COALESCE(${prefix}initialStatusCode, ${prefix}statusCode) < 300 AND ${prefix}indexable = 1 AND COALESCE(${prefix}pageType, 'other') <> 'legal'`;
 }
 
 function withReviewColumns(columns) {

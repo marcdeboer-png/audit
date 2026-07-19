@@ -188,13 +188,15 @@ test('rendered H1 evidence prevents a raw-only missing-H1 finding', () => {
   assert.equal(runTech('tech.h1_missing', fixture).status, 'OK');
 });
 
-test('finding assessment preserves explicit Medium priority for Error display status', () => {
+test('H1 absence remains a measured review signal without claiming an automatic SEO error', () => {
   const fixture = makeFixture('https://heading.invalid');
   insertPage(fixture.db, fixture.runId, 'https://heading.invalid/', { h1Count: 0 });
   const result = runTech('tech.h1_missing', fixture);
-  assert.equal(result.status, 'Error');
-  assert.equal(result.priority, 'Medium');
-  assert.equal(result.assessment.severity, 'medium');
+  assert.equal(result.status, 'Warning');
+  assert.equal(result.priority, 'Low');
+  assert.equal(result.assessment.severity, 'low');
+  assert.equal(result.scoreEligible, false);
+  assert.equal(result.reviewRecommended, true);
 });
 
 test('HTML scope gates exclude redirect responses even when their final response is 200 HTML', () => {

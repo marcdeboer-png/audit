@@ -29,6 +29,11 @@ import {
   evaluateCanonicalPage
 } from '../canonicalSemantics.js';
 import {
+  collectHeadMetadataPopulation,
+  duplicateHeadGroups,
+  HEAD_CHECK_LOGIC_VERSION
+} from '../headSemantics.js';
+import {
   analyzeRobotsAsset,
   extractSitemapDirectives,
   parseJson as parseDiscoveryJson,
@@ -50,7 +55,7 @@ const tech = (id, category, name, run, options = {}) => ({
 const LEGAL_PAGE_WHERE = "COALESCE(pageType, 'other') = 'legal'";
 const NON_LEGAL_PAGE_WHERE = "COALESCE(pageType, 'other') <> 'legal'";
 const SUCCESSFUL_HTML_WHERE = `${HTML_WHERE} AND statusCode >= 200 AND statusCode < 300 AND COALESCE(initialStatusCode, statusCode) >= 200 AND COALESCE(initialStatusCode, statusCode) < 300`;
-const INDEXABLE_CONTENT_HTML_WHERE = `${SUCCESSFUL_HTML_WHERE} AND COALESCE(indexable, 1) = 1 AND ${NON_LEGAL_PAGE_WHERE}`;
+const INDEXABLE_CONTENT_HTML_WHERE = `${SUCCESSFUL_HTML_WHERE} AND indexable = 1 AND ${NON_LEGAL_PAGE_WHERE}`;
 const ROBOTS_TEXT_EXPR = "LOWER(COALESCE(metaRobots, '') || ' ' || COALESCE(xRobotsTag, ''))";
 const VISIBLE_TEXT_FACTS_WHERE = `COALESCE(textFactsJson, '') LIKE '%"normalization_version":"${VISIBLE_TEXT_NORMALIZATION_VERSION}"%'`;
 const NON_DECORATIVE_IMAGE_WHERE = `
@@ -154,10 +159,18 @@ export function techChecks() {
     effectiveMetadataLength('title_too_short', 'HTML Head & Meta', `Title too short < ${thresholds.titleTooShort}`, 'title', 'effectiveTitle', '<', thresholds.titleTooShort, 'Warning', 'Low'),
     effectiveMetadataLength('title_too_long', 'HTML Head & Meta', `Title too long > ${thresholds.titleTooLong}`, 'title', 'effectiveTitle', '>', thresholds.titleTooLong, 'Warning', 'Low'),
     effectiveDuplicateMetadata('duplicate_titles', 'HTML Head & Meta', 'Duplicate titles', 'title', 'effectiveTitle', 'Warning'),
-    effectiveMetadataMissing('meta_description_missing', 'HTML Head & Meta', 'Meta description missing', 'metaDescription', 'effectiveMetaDescription', 'Warning'),
+    effectiveMetadataMissing('meta_description_missing', 'HTML Head & Meta', 'Meta description missing', 'metaDescription', 'effectiveMetaDescription', 'Warning', 'Low', INDEXABLE_CONTENT_HTML_WHERE, {
+      findingType: 'opportunity',
+      scoreEligible: false,
+      reviewReason: 'Search engines may generate snippets from page content; prioritization depends on page importance and snippet intent.'
+    }),
     effectiveMetadataLength('meta_description_too_short', 'HTML Head & Meta', `Meta description too short < ${thresholds.descriptionTooShort}`, 'metaDescription', 'effectiveMetaDescription', '<', thresholds.descriptionTooShort, 'Warning', 'Low'),
     effectiveMetadataLength('meta_description_too_long', 'HTML Head & Meta', `Meta description too long > ${thresholds.descriptionTooLong}`, 'metaDescription', 'effectiveMetaDescription', '>', thresholds.descriptionTooLong, 'Warning', 'Low'),
-    effectiveDuplicateMetadata('duplicate_meta_descriptions', 'HTML Head & Meta', 'Duplicate meta descriptions', 'metaDescription', 'effectiveMetaDescription', 'Warning', 'Low'),
+    effectiveDuplicateMetadata('duplicate_meta_descriptions', 'HTML Head & Meta', 'Duplicate meta descriptions', 'metaDescription', 'effectiveMetaDescription', 'Warning', 'Low', {
+      findingType: 'opportunity',
+      scoreEligible: false,
+      reviewReason: 'Duplicate descriptions are a snippet-quality opportunity; page intent and consolidation must be reviewed.'
+    }),
     effectiveH1Missing(),
     effectiveMultipleH1(),
     htmlSemanticsSummary(),
@@ -182,7 +195,13 @@ export function techChecks() {
     highTtfbCheck(),
     renderedPageSignalCheck('rendered_word_count_delta', `Rendered word count > raw word count * ${thresholds.renderedRawWordCountRatio}`, `wordCountRendered > wordCountRaw * ${thresholds.renderedRawWordCountRatio} AND wordCountRendered - wordCountRaw > 50`),
     criticalContentRawHtmlSignal(),
-    renderedPageSignalCheck('raw_h1_missing_rendered_present', 'Raw H1 missing but rendered H1 present', 'h1Count = 0 AND renderedH1Count > 0'),
+    renderedPageSignalCheck('raw_h1_missing_rendered_present', 'Raw H1 missing but rendered H1 present', 'h1Count = 0 AND renderedH1Count > 0', {
+      requiredFacts: ['rawH1Facts', 'settledRenderedH1Facts', 'successfulNavigation'],
+      priority: 'Low',
+      findingType: 'best_practice',
+      scoreEligible: false,
+      reviewReason: 'A rendered H1 proves the effective heading exists; server-rendering priority depends on crawl/render requirements.'
+    }),
     renderedPageSignalCheck('raw_internal_links_fewer_rendered', 'Raw internal links much fewer than rendered links', 'renderedLinksCount > internalLinksCount * 1.5 AND renderedLinksCount - internalLinksCount > 5'),
     consoleErrorsPresent(),
     jsDependentContentCheck(),
@@ -1243,7 +1262,7 @@ function htmlSemanticsSummary() {
     const rows = all(ctx.db, `
       SELECT url, h1Count, h2Json, featureFlagsJson
       FROM pages
-      WHERE runId = ? AND ${HTML_WHERE}
+      WHERE runId = ? AND ${SUCCESSFUL_HTML_WHERE}
       ORDER BY id ASC
       LIMIT 500
     `, [ctx.run.id]);
@@ -1273,6 +1292,10 @@ function htmlSemanticsSummary() {
         if (Number(row.flags.emptyH1Count || 0) > 0 || Number(row.flags.emptyH2Count || 0) > 0) issues.push('empty H1/H2 detected');
         if (Number(row.flags.headingHierarchySkips || 0) > 0) issues.push('heading hierarchy skips detected');
         if (row.h1Count > 1) issues.push('multiple H1 requires review');
+        if (Number(row.flags.conflictingTitleElementCount || 0) > 1) issues.push('multiple conflicting title elements detected');
+        if (Number(row.flags.conflictingMetaDescriptionElementCount || 0) > 1) issues.push('multiple conflicting meta description elements detected');
+        if (Number(row.flags.staticallyHiddenH1Count || 0) > 0) issues.push('statically hidden H1 requires rendered review');
+        if (Number(row.flags.unnamedVisibleH1Count || 0) > 0) issues.push('visible H1 without a usable name detected');
         return { ...row, issues };
       })
       .filter((row) => row.issues.length);
@@ -1405,7 +1428,7 @@ function duplicateContentField(id, category, name, field, status = 'Warning', pr
   }, { priority });
 }
 
-function effectiveMetadataMissing(id, category, name, legacyField, effectiveField, status = 'Warning', priority = 'Medium', scope = INDEXABLE_CONTENT_HTML_WHERE) {
+function effectiveMetadataMissing(id, category, name, legacyField, effectiveField, status = 'Warning', priority = 'Medium', scope = INDEXABLE_CONTENT_HTML_WHERE, options = {}) {
   return tech(id, category, name, function run(ctx) {
     const total = count(ctx.db, `SELECT COUNT(*) AS count FROM pages WHERE runId = ? AND ${scope}`, [ctx.run.id]);
     if (!total) return availabilityResult(this, 'not_applicable', {
@@ -1414,9 +1437,9 @@ function effectiveMetadataMissing(id, category, name, legacyField, effectiveFiel
       requirements: { requiredFacts: ['successfulHtmlExtraction'], missingFacts: [], minimumCoverage: 1, canCollectWithTargetedRun: true }
     });
     const currentModelRows = count(ctx.db, `SELECT COUNT(*) AS count FROM pages WHERE runId = ? AND ${scope} AND rawDocumentStateJson IS NOT NULL`, [ctx.run.id]);
-    const incomplete = currentModelRows ? count(ctx.db, `SELECT COUNT(*) AS count FROM pages WHERE runId = ? AND ${scope} AND rawDocumentStateJson IS NOT NULL AND COALESCE(metadataProvenanceComplete, 0) = 0`, [ctx.run.id]) : 0;
+    const incomplete = currentModelRows ? count(ctx.db, `SELECT COUNT(*) AS count FROM pages WHERE runId = ? AND ${scope} AND (rawDocumentStateJson IS NULL OR COALESCE(metadataProvenanceComplete, 0) = 0)`, [ctx.run.id]) : 0;
     const valueSql = currentModelRows ? effectiveField : legacyField;
-    const completenessSql = currentModelRows ? 'AND COALESCE(metadataProvenanceComplete, 0) = 1' : '';
+    const completenessSql = currentModelRows ? 'AND rawDocumentStateJson IS NOT NULL AND COALESCE(metadataProvenanceComplete, 0) = 1' : '';
     const where = `${scope} ${completenessSql} AND (${valueSql} IS NULL OR TRIM(${valueSql}) = '')`;
     const affectedCount = count(ctx.db, `SELECT COUNT(*) AS count FROM pages WHERE runId = ? AND ${where}`, [ctx.run.id]);
     const rows = all(ctx.db, `SELECT url, ${legacyField} AS rawValue, ${effectiveField} AS effectiveValue, renderStatus, settlingStatus, effectiveDocumentStateJson FROM pages WHERE runId = ? AND ${where} ORDER BY id LIMIT 10`, [ctx.run.id]);
@@ -1434,32 +1457,39 @@ function effectiveMetadataMissing(id, category, name, legacyField, effectiveFiel
       evidence: { field: legacyField, eligiblePages: total, evaluatedPages: total - incomplete, incompleteEffectiveStates: incomplete, samples: rows.map((row) => ({ url: row.url, rawValue: row.rawValue, effectiveValue: row.effectiveValue, renderStatus: row.renderStatus, settlingStatus: row.settlingStatus })) },
       facts: { sourceModel: currentModelRows ? 'effective_document_state' : 'legacy_raw_html', affectedCount, incomplete },
       requirements: { requiredFacts: ['successfulHtmlExtraction', 'effectiveDocumentState'], optionalFacts: ['rawRenderedDelta'], missingFacts: incomplete ? ['stableEffectiveDocumentState'] : [], minimumCoverage: 1, canCollectWithTargetedRun: true },
-      limitations: incomplete ? 'Some rendered pages were excluded because the bounded settling policy did not produce a stable state.' : ''
+      limitations: incomplete ? 'Some rendered pages were excluded because the bounded settling policy did not produce a stable state.' : '',
+      logicVersion: HEAD_CHECK_LOGIC_VERSION,
+      findingType: options.findingType,
+      scoreEligible: options.scoreEligible,
+      scoreExclusionReason: options.scoreEligible === false ? 'The measured absence is an optimization opportunity, not an indexing or rendering failure.' : undefined,
+      reviewRecommended: Boolean(options.reviewReason && affectedCount),
+      reviewReason: affectedCount ? options.reviewReason : null,
+      automationCoverage: options.reviewReason ? 'requires_human_review' : 'full'
     });
   }, { priority });
 }
 
-function effectiveDuplicateMetadata(id, category, name, legacyField, effectiveField, status = 'Warning', priority = 'Medium') {
+function effectiveDuplicateMetadata(id, category, name, legacyField, effectiveField, status = 'Warning', priority = 'Medium', options = {}) {
   return tech(id, category, name, function run(ctx) {
-    const total = count(ctx.db, `SELECT COUNT(*) AS count FROM pages WHERE runId = ? AND ${INDEXABLE_CONTENT_HTML_WHERE}`, [ctx.run.id]);
-    const currentModelRows = count(ctx.db, `SELECT COUNT(*) AS count FROM pages WHERE runId = ? AND ${INDEXABLE_CONTENT_HTML_WHERE} AND rawDocumentStateJson IS NOT NULL`, [ctx.run.id]);
-    const incomplete = currentModelRows ? count(ctx.db, `SELECT COUNT(*) AS count FROM pages WHERE runId = ? AND ${INDEXABLE_CONTENT_HTML_WHERE} AND COALESCE(metadataProvenanceComplete, 0) = 0`, [ctx.run.id]) : 0;
-    const field = currentModelRows ? effectiveField : legacyField;
-    const complete = currentModelRows ? 'AND COALESCE(metadataProvenanceComplete, 0) = 1' : '';
-    const allGroups = all(ctx.db, `
-      SELECT ${field} AS value, COUNT(*) AS count
-      FROM pages
-      WHERE runId = ? AND ${INDEXABLE_CONTENT_HTML_WHERE} ${complete} AND ${field} IS NOT NULL AND TRIM(${field}) <> ''
-      GROUP BY LOWER(TRIM(${field})) HAVING COUNT(*) > 1 ORDER BY count DESC
-    `, [ctx.run.id]);
-    if (!allGroups.length && incomplete) return availabilityResult(this, 'insufficient_evidence', {
-      finding: `${name}: duplicate absence cannot be established because ${incomplete}/${total} effective state(s) are incomplete.`,
-      evidence: { eligiblePages: total, incompleteEffectiveStates: incomplete, field: legacyField },
+    const population = collectHeadMetadataPopulation(ctx.db, ctx.run.id, ctx.project.finalDomain, legacyField);
+    const allGroups = duplicateHeadGroups(population.rows);
+    if (!allGroups.length && population.incomplete) return availabilityResult(this, 'insufficient_evidence', {
+      finding: `${name}: duplicate absence cannot be established because ${population.incomplete}/${population.total} effective state(s) are incomplete.`,
+      evidence: { eligiblePages: population.total, incompleteEffectiveStates: population.incomplete, canonicalizedPagesExcluded: population.canonicalizedExcluded, field: legacyField, logicVersion: HEAD_CHECK_LOGIC_VERSION },
       requirements: { requiredFacts: ['completeEffectiveMetadataCoverage'], missingFacts: ['stableEffectiveDocumentState'], minimumCoverage: 1, canCollectWithTargetedRun: true }
     });
     const groups = allGroups.slice(0, 10);
     const affectedCount = allGroups.reduce((sum, group) => sum + Number(group.count || 0), 0);
     const family = legacyField === 'title' ? 'html_meta.duplicate_title' : 'html_meta.duplicate_description';
+    const rootCauseCandidates = allGroups.map((group) => ({
+      key: `${family}:${duplicateValueHash(legacyField, group.value)}`,
+      family,
+      occurrenceCount: group.count,
+      affectedUrlCount: group.count,
+      scopeType: 'url',
+      deduplicationConfidence: 'high',
+      reason: `Distinct normalized duplicate effective ${legacyField} value.`
+    }));
     return makeResult(this, affectedCount ? status : 'OK', {
       priority,
       affectedCount,
@@ -1468,9 +1498,28 @@ function effectiveDuplicateMetadata(id, category, name, legacyField, effectiveFi
       displayedSampleCount: groups.length,
       rootCauseFamily: family,
       scopeType: 'url',
-      finding: affectedCount ? `${affectedCount} indexable content URLs share duplicate effective ${legacyField} values.` : `No duplicate effective ${legacyField} values found.`,
+      finding: affectedCount ? `${affectedCount} distinct indexable content URLs share duplicate effective ${legacyField} values.` : `No duplicate effective ${legacyField} values found.`,
       recommendation: `Make effective ${legacyField} values unique where pages target different intents.`,
-      evidence: { sourceModel: currentModelRows ? 'effective_document_state' : 'legacy_raw_html', totalAffected: affectedCount, totalGroups: allGroups.length, displayedSamples: groups.length, incompleteEffectiveStates: incomplete, duplicateGroups: groups }
+      evidence: {
+        logicVersion: HEAD_CHECK_LOGIC_VERSION,
+        normalization: 'NFKC + collapsed whitespace + locale-independent case folding',
+        sourceModel: population.current ? 'effective_document_state' : 'legacy_raw_html',
+        eligiblePages: population.total,
+        evaluatedPages: population.rows.length,
+        canonicalizedPagesExcluded: population.canonicalizedExcluded,
+        totalAffected: affectedCount,
+        totalGroups: allGroups.length,
+        displayedSamples: groups.length,
+        incompleteEffectiveStates: population.incomplete,
+        duplicateGroups: groups,
+        rootCauseCandidates
+      },
+      findingType: options.findingType,
+      scoreEligible: options.scoreEligible,
+      scoreExclusionReason: options.scoreEligible === false ? 'This duplicate observation requires page-intent review and is score-free.' : undefined,
+      reviewRecommended: Boolean(options.reviewReason && affectedCount),
+      reviewReason: affectedCount ? options.reviewReason : null,
+      automationCoverage: options.reviewReason ? 'requires_human_review' : 'full'
     });
   }, { priority });
 }
@@ -1479,13 +1528,26 @@ function effectiveMetadataLength(id, category, name, legacyField, effectiveField
   return tech(id, category, name, function run(ctx) {
     const current = count(ctx.db, `SELECT COUNT(*) AS count FROM pages WHERE runId = ? AND ${INDEXABLE_CONTENT_HTML_WHERE} AND rawDocumentStateJson IS NOT NULL`, [ctx.run.id]);
     const field = current ? effectiveField : legacyField;
-    const incomplete = current ? count(ctx.db, `SELECT COUNT(*) AS count FROM pages WHERE runId = ? AND ${INDEXABLE_CONTENT_HTML_WHERE} AND COALESCE(metadataProvenanceComplete, 0) = 0`, [ctx.run.id]) : 0;
-    const complete = current ? 'AND COALESCE(metadataProvenanceComplete, 0) = 1' : '';
+    const incomplete = current ? count(ctx.db, `SELECT COUNT(*) AS count FROM pages WHERE runId = ? AND ${INDEXABLE_CONTENT_HTML_WHERE} AND (rawDocumentStateJson IS NULL OR COALESCE(metadataProvenanceComplete, 0) = 0)`, [ctx.run.id]) : 0;
+    const complete = current ? 'AND rawDocumentStateJson IS NOT NULL AND COALESCE(metadataProvenanceComplete, 0) = 1' : '';
     const where = `${INDEXABLE_CONTENT_HTML_WHERE} ${complete} AND COALESCE(${field}, '') <> '' AND LENGTH(${field}) ${operator} ?`;
     const affectedCount = count(ctx.db, `SELECT COUNT(*) AS count FROM pages WHERE runId = ? AND ${where}`, [ctx.run.id, threshold]);
     const rows = all(ctx.db, `SELECT url, ${legacyField} AS rawValue, ${effectiveField} AS effectiveValue, LENGTH(${field}) AS effectiveLength, renderStatus, settlingStatus FROM pages WHERE runId = ? AND ${where} LIMIT 10`, [ctx.run.id, threshold]);
     if (!affectedCount && incomplete) return availabilityResult(this, 'insufficient_evidence', { finding: `${name}: ${incomplete} effective state(s) are incomplete.`, evidence: { incompleteEffectiveStates: incomplete, threshold, operator }, requirements: { requiredFacts: ['effectiveMetadataValue'], missingFacts: ['stableEffectiveDocumentState'], minimumCoverage: 1, canCollectWithTargetedRun: true } });
-    return makeResult(this, affectedCount ? status : 'OK', { priority, affectedCount, sampleUrls: rows.map((row) => row.url), finding: affectedCount ? `${affectedCount} effective ${legacyField} value(s) match the length condition.` : `No effective ${legacyField} value matches the length condition.`, recommendation: `Review ${legacyField} length for affected pages without changing valid intent-specific values mechanically.`, evidence: { sourceModel: current ? 'effective_document_state' : 'legacy_raw_html', threshold, operator, incomplete, samples: rows } });
+    return makeResult(this, affectedCount ? status : 'OK', {
+      priority,
+      affectedCount,
+      sampleUrls: rows.map((row) => row.url),
+      finding: affectedCount ? `${affectedCount} effective ${legacyField} value(s) match the editorial length threshold.` : `No effective ${legacyField} value matches the editorial length threshold.`,
+      recommendation: `Review ${legacyField} length for affected pages without changing valid intent-specific values mechanically.`,
+      evidence: { logicVersion: HEAD_CHECK_LOGIC_VERSION, sourceModel: current ? 'effective_document_state' : 'legacy_raw_html', threshold, operator, incomplete, samples: rows },
+      findingType: 'opportunity',
+      scoreEligible: false,
+      scoreExclusionReason: 'Search-result display has no fixed character limit; this threshold is an editorial diagnostic.',
+      reviewRecommended: affectedCount > 0,
+      reviewReason: affectedCount ? 'Intent, brand wording, device width and actual search presentation require editorial review.' : null,
+      automationCoverage: 'requires_human_review'
+    });
   }, { priority });
 }
 
@@ -1522,29 +1584,56 @@ function effectiveH1Missing() {
     if (!eligible) return availabilityResult(this, 'not_applicable', { finding: 'H1 missing: no eligible successful indexable HTML page is in scope.', evidence: { eligiblePages: 0 }, requirements: { requiredFacts: ['eligibleSuccessfulHtmlPage'], missingFacts: [], minimumCoverage: 1, canCollectWithTargetedRun: true } });
     const current = count(ctx.db, `SELECT COUNT(*) AS count FROM pages WHERE runId = ? AND ${INDEXABLE_CONTENT_HTML_WHERE} AND rawDocumentStateJson IS NOT NULL`, [ctx.run.id]);
     const field = current ? 'effectiveH1Count' : 'h1Count';
-    const complete = current ? 'AND COALESCE(metadataProvenanceComplete, 0) = 1' : '';
-    const incomplete = current ? count(ctx.db, `SELECT COUNT(*) AS count FROM pages WHERE runId = ? AND ${INDEXABLE_CONTENT_HTML_WHERE} AND COALESCE(metadataProvenanceComplete, 0) = 0`, [ctx.run.id]) : 0;
+    const complete = current ? 'AND rawDocumentStateJson IS NOT NULL AND COALESCE(metadataProvenanceComplete, 0) = 1' : '';
+    const incomplete = current ? count(ctx.db, `SELECT COUNT(*) AS count FROM pages WHERE runId = ? AND ${INDEXABLE_CONTENT_HTML_WHERE} AND (rawDocumentStateJson IS NULL OR COALESCE(metadataProvenanceComplete, 0) = 0)`, [ctx.run.id]) : 0;
     const legacyRenderedFallback = current ? '' : "AND NOT (renderStatus = 'success' AND renderedH1Count > 0)";
     const where = `${INDEXABLE_CONTENT_HTML_WHERE} ${complete} AND COALESCE(${field}, 0) = 0 ${legacyRenderedFallback}`;
     const affectedCount = count(ctx.db, `SELECT COUNT(*) AS count FROM pages WHERE runId = ? AND ${where}`, [ctx.run.id]);
     const rows = all(ctx.db, `SELECT url, h1Count AS rawH1Count, effectiveH1Count, renderStatus, settlingStatus FROM pages WHERE runId = ? AND ${where} LIMIT 10`, [ctx.run.id]);
     if (!affectedCount && incomplete) return availabilityResult(this, 'insufficient_evidence', { finding: `H1 missing: ${incomplete} page(s) lack a stable effective H1 state.`, evidence: { incomplete }, requirements: { requiredFacts: ['effectiveH1'], missingFacts: ['stableEffectiveDocumentState'], minimumCoverage: 1, canCollectWithTargetedRun: true } });
-    return makeResult(this, affectedCount ? 'Error' : 'OK', { priority: 'Medium', affectedCount, sampleUrls: rows.map((row) => row.url), finding: affectedCount ? `${affectedCount} effective document state(s) have no H1.` : 'All eligible effective document states include an H1.', recommendation: 'Provide a descriptive H1 in the stable effective DOM.', evidence: { sourceModel: current ? 'effective_document_state' : 'legacy_raw_html', incomplete, samples: rows } });
-  }, { priority: 'Medium' });
+    return makeResult(this, affectedCount ? 'Warning' : 'OK', {
+      priority: 'Low',
+      affectedCount,
+      sampleUrls: rows.map((row) => row.url),
+      finding: affectedCount ? `${affectedCount} effective document state(s) have no visible, named H1.` : 'All eligible effective document states include a visible, named H1.',
+      recommendation: 'Review whether a descriptive programmatic main heading is needed; H1 absence is not by itself an indexing failure.',
+      evidence: { logicVersion: HEAD_CHECK_LOGIC_VERSION, sourceModel: current ? 'effective_document_state' : 'legacy_raw_html', incomplete, samples: rows },
+      findingType: 'best_practice',
+      scoreEligible: false,
+      scoreExclusionReason: 'H1 absence is a semantic/content-structure review signal, not an automatic SEO failure.',
+      reviewRecommended: affectedCount > 0,
+      reviewReason: affectedCount ? 'Page type, visible hierarchy and accessible heading structure require manual interpretation.' : null,
+      automationCoverage: 'requires_human_review',
+      limitations: 'Raw-only visibility can prove hidden attributes and inline styles, but external CSS and closed Shadow DOM require browser/accessibility review.'
+    });
+  }, { priority: 'Low' });
 }
 
 function effectiveMultipleH1() {
   return tech('multiple_h1', 'HTML Head & Meta', 'Multiple H1', function run(ctx) {
     const current = count(ctx.db, `SELECT COUNT(*) AS count FROM pages WHERE runId = ? AND ${SUCCESSFUL_HTML_WHERE} AND rawDocumentStateJson IS NOT NULL`, [ctx.run.id]);
     const field = current ? 'effectiveH1Count' : 'h1Count';
-    const incomplete = current ? count(ctx.db, `SELECT COUNT(*) AS count FROM pages WHERE runId = ? AND ${SUCCESSFUL_HTML_WHERE} AND COALESCE(metadataProvenanceComplete, 0) = 0`, [ctx.run.id]) : 0;
-    const complete = current ? 'AND COALESCE(metadataProvenanceComplete, 0) = 1' : '';
+    const incomplete = current ? count(ctx.db, `SELECT COUNT(*) AS count FROM pages WHERE runId = ? AND ${SUCCESSFUL_HTML_WHERE} AND (rawDocumentStateJson IS NULL OR COALESCE(metadataProvenanceComplete, 0) = 0)`, [ctx.run.id]) : 0;
+    const complete = current ? 'AND rawDocumentStateJson IS NOT NULL AND COALESCE(metadataProvenanceComplete, 0) = 1' : '';
     const where = `${SUCCESSFUL_HTML_WHERE} ${complete} AND COALESCE(${field}, 0) > 1`;
     const affectedCount = count(ctx.db, `SELECT COUNT(*) AS count FROM pages WHERE runId = ? AND ${where}`, [ctx.run.id]);
     const rows = all(ctx.db, `SELECT url, h1Count AS rawH1Count, effectiveH1Count, renderStatus, settlingStatus FROM pages WHERE runId = ? AND ${where} LIMIT 10`, [ctx.run.id]);
     if (!affectedCount && incomplete) return availabilityResult(this, 'insufficient_evidence', { finding: `Multiple H1: ${incomplete} effective state(s) are incomplete.`, evidence: { incomplete }, requirements: { requiredFacts: ['effectiveH1'], missingFacts: ['stableEffectiveDocumentState'], minimumCoverage: 1, canCollectWithTargetedRun: true } });
-    return makeResult(this, affectedCount ? 'Warning' : 'OK', { affectedCount, sampleUrls: rows.map((row) => row.url), finding: affectedCount ? `${affectedCount} effective document state(s) contain multiple H1 elements.` : 'No effective document state with multiple H1 elements found.', recommendation: 'Review heading semantics; multiple H1 elements are not automatically invalid when the document structure is intentional.', evidence: { sourceModel: current ? 'effective_document_state' : 'legacy_raw_html', incomplete, samples: rows } });
-  }, { priority: 'Medium' });
+    return makeResult(this, affectedCount ? 'Warning' : 'OK', {
+      priority: 'Low',
+      affectedCount,
+      sampleUrls: rows.map((row) => row.url),
+      finding: affectedCount ? `${affectedCount} effective document state(s) contain multiple visible, named H1 elements.` : 'No effective document state with multiple visible, named H1 elements found.',
+      recommendation: 'Review document and component semantics; multiple H1 elements are not automatically invalid or an SEO defect.',
+      evidence: { logicVersion: HEAD_CHECK_LOGIC_VERSION, sourceModel: current ? 'effective_document_state' : 'legacy_raw_html', incomplete, samples: rows },
+      findingType: 'info',
+      scoreEligible: false,
+      scoreExclusionReason: 'Multiple top-level headings require structural context and are inventory without a proven defect.',
+      reviewRecommended: affectedCount > 0,
+      reviewReason: affectedCount ? 'Document outline, sectioning context and visual prominence need manual review.' : null,
+      automationCoverage: 'requires_human_review'
+    });
+  }, { priority: 'Low' });
 }
 
 function duplicateValueHash(field, value) {
@@ -2557,7 +2646,8 @@ function consoleErrorsPresent() {
   }, { priority: 'Low' });
 }
 
-function renderedPageSignalCheck(id, name, condition, { minimumMeasurements = 1 } = {}) {
+function renderedPageSignalCheck(id, name, condition, options = {}) {
+  const minimumMeasurements = Number(options.minimumMeasurements || 1);
   return tech(id, 'JavaScript & Rendering', name, function run(ctx) {
     const successful = count(ctx.db, `SELECT COUNT(*) AS count FROM pages WHERE runId = ? AND ${SUCCESSFUL_HTML_WHERE} AND renderStatus = 'success' AND settlingStatus IN ('settled','content_remained_empty')`, [ctx.run.id]);
     const normalizedSuccessful = count(ctx.db, `SELECT COUNT(*) AS count FROM pages WHERE runId = ? AND ${SUCCESSFUL_HTML_WHERE} AND renderStatus = 'success' AND settlingStatus IN ('settled','content_remained_empty') AND renderProvenanceVersion IS NOT NULL AND ${VISIBLE_TEXT_FACTS_WHERE} AND textFactsJson LIKE '%"rendered_visible_text":{"length"%'`, [ctx.run.id]);
@@ -2566,17 +2656,17 @@ function renderedPageSignalCheck(id, name, condition, { minimumMeasurements = 1 
       return availabilityResult(this, 'not_executed', {
         finding: `${name}: rendered extraction was not executed.`,
         evidence: { runId: ctx.run.id, usePlaywright: false },
-        requirements: { requiredFacts: ['rawVisibleText', 'renderedVisibleText'], missingFacts: ['renderedVisibleText'], minimumCoverage: 1, canCollectWithTargetedRun: true }
+        requirements: { requiredFacts: options.requiredFacts || ['rawVisibleText', 'renderedVisibleText'], missingFacts: ['renderedEvidence'], minimumCoverage: 1, canCollectWithTargetedRun: true }
       });
     }
     if (successful < minimumMeasurements) {
       return availabilityResult(this, navigationErrors && !successful ? 'technical_error' : 'insufficient_evidence', {
         finding: `${name}: too few successful rendered measurements.`,
         evidence: { successfulRenderedMeasurements: successful, navigationErrors },
-        requirements: { requiredFacts: ['rawVisibleText', 'renderedVisibleText'], missingFacts: ['stableRenderedVisibleText'], minimumCoverage: minimumMeasurements, canCollectWithTargetedRun: true }
+        requirements: { requiredFacts: options.requiredFacts || ['rawVisibleText', 'renderedVisibleText'], missingFacts: ['stableRenderedEvidence'], minimumCoverage: minimumMeasurements, canCollectWithTargetedRun: true }
       });
     }
-    if (normalizedSuccessful < minimumMeasurements) return availabilityResult(this, 'insufficient_evidence', {
+    if (!options.requiredFacts && normalizedSuccessful < minimumMeasurements) return availabilityResult(this, 'insufficient_evidence', {
       finding: `${name}: rendered samples do not contain comparable visible_text provenance on both sides.`,
       evidence: { successfulRenderedMeasurements: successful, normalizedComparableMeasurements: normalizedSuccessful, normalization: VISIBLE_TEXT_NORMALIZATION_VERSION },
       requirements: { requiredFacts: ['rawVisibleText', 'renderedVisibleText', 'sharedTextNormalization'], missingFacts: ['sharedTextNormalization'], minimumCoverage: minimumMeasurements, canCollectWithTargetedRun: true }
@@ -2585,14 +2675,21 @@ function renderedPageSignalCheck(id, name, condition, { minimumMeasurements = 1 
     const affectedCount = count(ctx.db, `SELECT COUNT(*) AS count FROM pages WHERE runId = ? AND (${where})`, [ctx.run.id]);
     const rows = all(ctx.db, `SELECT url, wordCountRaw, wordCountRendered, h1Count, renderedH1Count, internalLinksCount, renderedLinksCount FROM pages WHERE runId = ? AND (${where}) ORDER BY id ASC LIMIT 10`, [ctx.run.id]);
     return makeResult(this, affectedCount ? 'Warning' : 'OK', {
+      priority: options.priority,
       affectedCount,
       sampleUrls: rows.map((row) => row.url),
       finding: affectedCount ? `${affectedCount} rendered page(s) match this signal.` : `No issue observed in ${successful} successfully rendered page(s).`,
       recommendation: 'Review server-rendered and browser-rendered output on affected templates.',
       evidence: { normalization: VISIBLE_TEXT_NORMALIZATION_VERSION, successfulRenderedMeasurements: successful, navigationErrors, samples: rows },
-      requirements: { requiredFacts: ['rawVisibleText', 'renderedVisibleText', 'successfulNavigation'], optionalFacts: [], missingFacts: [], minimumCoverage: minimumMeasurements, canCollectWithTargetedRun: true }
+      requirements: { requiredFacts: options.requiredFacts || ['rawVisibleText', 'renderedVisibleText', 'successfulNavigation'], optionalFacts: [], missingFacts: [], minimumCoverage: minimumMeasurements, canCollectWithTargetedRun: true },
+      findingType: options.findingType,
+      scoreEligible: options.scoreEligible,
+      scoreExclusionReason: options.scoreEligible === false ? 'Raw-versus-rendered H1 presence is diagnostic when the effective H1 exists.' : undefined,
+      reviewRecommended: Boolean(options.reviewReason && affectedCount),
+      reviewReason: affectedCount ? options.reviewReason : null,
+      automationCoverage: options.reviewReason ? 'requires_human_review' : 'full'
     });
-  });
+  }, { priority: options.priority || 'Medium' });
 }
 
 function jsDependentContentCheck() {

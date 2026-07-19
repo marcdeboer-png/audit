@@ -149,33 +149,43 @@ function expectation(checkId, {
 
 export const legitCheckExpectations = [
   expectation('tech.title_missing', {
-    expectedScope: 'Indexable HTML pages with no stored title element.',
+    expectedScope: 'Successful indexable non-legal HTML pages with complete effective document state and no usable effective title.',
     allowedStatuses: ['OK', 'Error', 'NA'],
     detailHandlerExpected: true
   }),
   expectation('tech.title_too_short', {
-    expectedScope: 'HTML pages with non-empty titleLength below configured titleTooShort.',
+    expectedScope: 'Successful indexable non-legal HTML pages with complete effective title below the internal editorial threshold.',
     allowedStatuses: ['OK', 'Warning', 'NA'],
+    allowedFindingTypes: OPPORTUNITY_TYPES,
+    hardIssueAllowed: false,
     detailHandlerExpected: true
   }),
   expectation('tech.title_too_long', {
-    expectedScope: 'HTML pages with titleLength above configured titleTooLong.',
+    expectedScope: 'Successful indexable non-legal HTML pages with complete effective title above the internal editorial threshold.',
     allowedStatuses: ['OK', 'Warning', 'NA'],
+    allowedFindingTypes: OPPORTUNITY_TYPES,
+    hardIssueAllowed: false,
     detailHandlerExpected: true
   }),
   expectation('tech.meta_description_missing', {
-    expectedScope: 'Indexable HTML pages with no stored meta description.',
+    expectedScope: 'Successful indexable non-legal HTML pages with complete effective state and no usable meta description.',
     allowedStatuses: ['OK', 'Warning', 'NA'],
+    allowedFindingTypes: OPPORTUNITY_TYPES,
+    hardIssueAllowed: false,
     detailHandlerExpected: true
   }),
   expectation('tech.meta_description_too_short', {
-    expectedScope: 'HTML pages with non-empty metaDescriptionLength below configured descriptionTooShort.',
+    expectedScope: 'Successful indexable non-legal HTML pages with effective description below the internal editorial threshold.',
     allowedStatuses: ['OK', 'Warning', 'NA'],
+    allowedFindingTypes: OPPORTUNITY_TYPES,
+    hardIssueAllowed: false,
     detailHandlerExpected: true
   }),
   expectation('tech.meta_description_too_long', {
-    expectedScope: 'HTML pages with metaDescriptionLength above configured descriptionTooLong.',
+    expectedScope: 'Successful indexable non-legal HTML pages with effective description above the internal editorial threshold.',
     allowedStatuses: ['OK', 'Warning', 'NA'],
+    allowedFindingTypes: OPPORTUNITY_TYPES,
+    hardIssueAllowed: false,
     detailHandlerExpected: true
   }),
   expectation('tech.canonical_missing', {
@@ -243,13 +253,17 @@ export const legitCheckExpectations = [
     detailHandlerExpected: true
   }),
   expectation('tech.h1_missing', {
-    expectedScope: 'HTML pages with no raw H1.',
-    allowedStatuses: ['OK', 'Error', 'NA'],
+    expectedScope: 'Successful indexable non-legal HTML pages with complete effective state and no visible, named H1.',
+    allowedStatuses: ['OK', 'Warning', 'NA'],
+    allowedFindingTypes: BEST_PRACTICE_TYPES,
+    hardIssueAllowed: false,
     detailHandlerExpected: true
   }),
   expectation('tech.multiple_h1', {
-    expectedScope: 'HTML pages with more than one raw H1.',
+    expectedScope: 'Successful HTML pages with complete effective state and more than one visible, named H1.',
     allowedStatuses: ['OK', 'Warning', 'NA'],
+    allowedFindingTypes: ['info'],
+    hardIssueAllowed: false,
     detailHandlerExpected: true
   }),
   expectation('tech.charset_utf8_present', {
@@ -267,8 +281,10 @@ export const legitCheckExpectations = [
     detailHandlerExpected: true
   }),
   expectation('tech.raw_h1_missing_rendered_present', {
-    expectedScope: 'Pages where raw H1 is absent but rendered H1 exists.',
+    expectedScope: 'Successful HTML pages where raw named H1 is absent and a stable rendered named H1 exists.',
     allowedStatuses: ['OK', 'Warning', 'NA'],
+    allowedFindingTypes: BEST_PRACTICE_TYPES,
+    hardIssueAllowed: false,
     detailHandlerExpected: false
   }),
   expectation('tech.images_without_alt', {

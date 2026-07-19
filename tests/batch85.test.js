@@ -103,7 +103,7 @@ test('SEO issue fixture triggers exact URL counts, details, CSV and full exports
   assertCheck(results, 'tech.meta_description_missing', 'Warning', 1, [`${origin}/missing-description`]);
   assertCheck(results, 'tech.meta_description_too_short', 'Warning', 1, [`${origin}/short-description`]);
   assertCheck(results, 'tech.meta_description_too_long', 'Warning', 1, [`${origin}/long-description`]);
-  assertCheck(results, 'tech.h1_missing', 'Error', 1, [`${origin}/missing-h1`]);
+  assertCheck(results, 'tech.h1_missing', 'Warning', 1, [`${origin}/missing-h1`]);
   assertCheck(results, 'tech.multiple_h1', 'Warning', 1, [`${origin}/multi-h1`]);
   assertCheck(results, 'tech.canonical_to_other_domain', 'Warning', 1, [`${origin}/canonical-external`]);
   assertCheck(results, 'tech.canonical_target_non_200', 'Warning', 1, [`${origin}/canonical-404`]);

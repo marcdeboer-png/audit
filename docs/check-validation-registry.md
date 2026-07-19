@@ -1,6 +1,6 @@
-# Audit check validation registry v5
+# Audit check validation registry v6
 
-Stand: 19. Juli 2026. Die maschinenlesbare Registry liegt in
+Stand: 20. Juli 2026. Die maschinenlesbare Registry liegt in
 [`check-validation-registry.json`](check-validation-registry.json). Sie ist
 eine interne Vertrauens- und Gap-Dokumentation. Sie aendert weder den
 Auditablauf noch Scoringparameter, Check-Severities oder Kundenreports.
@@ -22,7 +22,7 @@ Evidenzreferenzen, Fehlerhistorie, bekannte Grenzen und eine konkrete
 Vertrauensempfehlung. Wo ein Check seine Requirements in einem leeren Lauf
 nicht zentral deklariert, bleibt `required_facts` bewusst leer und
 `missing_central_requirement_definition` wird ausgewiesen. Das betrifft nach
-der Structured-Data-Validierung 38 Checks und ist selbst eine priorisierte
+der HTML-Head-/Heading-Validierung 28 Checks und ist selbst eine priorisierte
 Architekturluecke; es wurde keine
 Anforderung erfunden.
 
@@ -37,11 +37,11 @@ aggregierten Ergebniszaehlern ohne Domain- oder Inhaltsdaten.
 
 | Status | Aktive Checks |
 | --- | ---: |
-| `cross_domain_validated` | 5 |
+| `cross_domain_validated` | 7 |
 | `validated_with_limits` | 13 |
-| `manual_review_required` | 89 |
-| `single_domain_validated` | 14 |
-| `fixture_validated` | 9 |
+| `manual_review_required` | 93 |
+| `single_domain_validated` | 9 |
+| `fixture_validated` | 8 |
 | `unvalidated` | 7 |
 | `invalid` | 0 |
 | `deprecated` | 0 |
@@ -50,14 +50,14 @@ Alle 137 aktiven Checks besitzen damit einen dokumentierten Status
 (`status_assignment_coverage`: 100 %). Die strengere
 `check_validation_coverage` zaehlt nur `cross_domain_validated`,
 `validated_with_limits` und dauerhaft `manual_review_required` und liegt bei
-78,10 %. Weitere Kennzahlen:
+82,48 %. Weitere Kennzahlen:
 
-- scoregewichtete Validierungsabdeckung: 39,20 %;
+- scoregewichtete Validierungsabdeckung: 44,76 %;
 - Critical-/High-Abdeckung: 33,33 % (es gibt aktuell keine als Critical
   registrierte Default-Severity und neun High-Checks);
-- Primary-Evidence-Abdeckung: 55,74 %;
-- nach historischer Ausfuehrungshaeufigkeit gewichtete Abdeckung: 78,55 %;
-- 44 `score_capable`; `tech.redirect_pages` ist nach der HTTP-Validierung ein
+- Primary-Evidence-Abdeckung: 60,38 %;
+- nach historischer Ausfuehrungshaeufigkeit gewichtete Abdeckung: 84,12 %;
+- 40 `score_capable`; `tech.redirect_pages` ist nach der HTTP-Validierung ein
   scorefreies Inventar und kein eigenstaendiger Defekt.
 
 Die scoregewichtete Registry-Kennzahl ist kein Audit-Score. Sie verwendet nur
@@ -235,3 +235,25 @@ Fixture-Abdeckung konservativ `fixture_validated`, weil kein organischer
 oeffentlicher Syntaxfehler beobachtet wurde. Browser-/Extraktionsfehler werden
 nun technisch getrennt. Neue Runs speichern kompakte Block-/Entityprovenienz,
 aber keine vollstaendigen fremden JSON-LD-Bodys.
+
+## HTML head and heading validation group
+
+Die HTML-Head-/Heading-Gruppe umfasst 15 aktive Checks fuer Title, Meta
+Description, H1, Sprache, Duplicate-Gruppen, Raw-/Rendered-Differenzen und
+Template-Patterns. Methodik, 15 reale Hauptdomains, zusaetzliche oeffentliche
+Grenzfaelle, Run-77-Rekonstruktion, Korrekturen und Grenzen stehen in
+[`html-head-heading-check-validation-v1.md`](html-head-heading-check-validation-v1.md).
+
+`tech.title_missing` und `tech.html_lang_missing` sind nach wiederholten realen
+positiven und negativen Implementierungen `cross_domain_validated`. Die
+Sprachaussage bleibt strikt auf das fehlende Attribut begrenzt.
+`tech.raw_h1_missing_rendered_present` bleibt als scorefreie Diagnose
+`validated_with_limits`.
+
+Description-, H1-, Multiple-, Duplicate-, Laengen- und Patternchecks sind
+`manual_review_required`. Ihr objektiver Faktenteil wurde gehaertet, ihre
+fachliche Prioritaet benoetigt aber Seitentyp-, Intent- oder
+Konsolidierungskontext. Fehlende Description, fehlende oder mehrere H1 und
+reine Raw-/Rendered-H1-Differenzen sind Low und scorefrei. Duplicate-Gruppen
+verwenden nun denselben effektiven, canonical- und indexability-bereinigten
+Population- und Normalisierungspfad in Finding, Detailansicht und Export.

@@ -32,12 +32,15 @@ export function createDocumentState(input = {}, context = {}) {
   const visibleText = normalizeVisibleText(input.visibleText || '');
   const mainText = normalizeVisibleText(input.mainText || '');
   const title = normalizeScalar(input.title);
+  const titleValues = normalizeStringArray(input.titleValues ?? (title ? [title] : []), { preserveEmpty: true });
   const metaDescription = normalizeScalar(input.metaDescription);
+  const metaDescriptionValues = normalizeStringArray(input.metaDescriptionValues ?? (metaDescription ? [metaDescription] : []), { preserveEmpty: true });
   const canonical = normalizeAbsoluteUrl(input.canonical, context.url);
   const canonicalValues = normalizeCanonicalValues(input.canonicalValues ?? (canonical ? [canonical] : []), context.url);
   const htmlLang = normalizeLanguage(input.htmlLang);
   const robots = normalizeRobots(input.robots);
   const h1 = normalizeStringArray(input.h1);
+  const h1Facts = normalizeHeadingFacts(input.h1Facts);
   const links = normalizeUrlArray(input.links, context.url)
     .filter((link) => !context.url || isInternalUrl(link, context.finalDomain || context.url));
   const hreflang = normalizeHreflang(input.hreflang, context.url);
@@ -52,7 +55,9 @@ export function createDocumentState(input = {}, context = {}) {
   const observedAt = context.observedAt || new Date().toISOString();
   const state = {
     title,
+    titleValues,
     metaDescription,
+    metaDescriptionValues,
     canonical,
     canonicalValues,
     htmlLang,
@@ -61,6 +66,7 @@ export function createDocumentState(input = {}, context = {}) {
     openGraph,
     twitter,
     h1,
+    h1Facts,
     visibleText: textFact(visibleText),
     mainText: textFact(mainText),
     internalLinks: links,
@@ -80,7 +86,9 @@ export function createRawDocumentState(extractedPage = {}, facts = {}, url = nul
   const rawState = facts.rawDocumentState || {};
   return createDocumentState({
     title: extractedPage.title,
+    titleValues: rawState.titleValues,
     metaDescription: extractedPage.metaDescription,
+    metaDescriptionValues: rawState.metaDescriptionValues,
     canonical: extractedPage.canonical,
     canonicalValues: rawState.canonicalValues ?? (extractedPage.canonical ? [extractedPage.canonical] : []),
     htmlLang: extractedPage.htmlLang,
@@ -89,6 +97,7 @@ export function createRawDocumentState(extractedPage = {}, facts = {}, url = nul
     openGraph: safeObject(extractedPage.ogJson),
     twitter: rawState.twitter,
     h1: safeArray(extractedPage.h1Json),
+    h1Facts: rawState.h1Facts,
     visibleText: rawState.visibleText,
     mainText: rawState.mainText,
     links: rawState.links,
@@ -106,7 +115,7 @@ export function buildEffectiveDocumentState(raw, initial, settled, render = {}) 
       ? 'Browser rendering was not executed; raw HTML is the available document state.'
       : 'No stable rendered state is available; raw HTML is retained and rendered-dependent checks must gate on availability.';
   const fields = {};
-  for (const field of ['title', 'metaDescription', 'canonical', 'canonicalValues', 'htmlLang', 'robots', 'hreflang', 'openGraph', 'twitter', 'h1', 'visibleText', 'mainText', 'internalLinks', 'structuredData']) {
+  for (const field of ['title', 'titleValues', 'metaDescription', 'metaDescriptionValues', 'canonical', 'canonicalValues', 'htmlLang', 'robots', 'hreflang', 'openGraph', 'twitter', 'h1', 'h1Facts', 'visibleText', 'mainText', 'internalLinks', 'structuredData']) {
     fields[field] = {
       raw: raw?.[field] ?? null,
       initial: initial?.[field] ?? null,
@@ -137,7 +146,9 @@ export function summarizeSnapshot(input = {}, context = {}) {
 export function semanticFingerprint(state = {}) {
   const payload = {
     title: state.title || null,
+    titleValues: state.titleValues || [],
     metaDescription: state.metaDescription || null,
+    metaDescriptionValues: state.metaDescriptionValues || [],
     canonical: state.canonical || null,
     canonicalValues: state.canonicalValues || [],
     htmlLang: state.htmlLang || null,
@@ -146,6 +157,7 @@ export function semanticFingerprint(state = {}) {
     openGraph: state.openGraph || {},
     twitter: state.twitter || {},
     h1: state.h1 || [],
+    h1Facts: state.h1Facts || [],
     visibleText: semanticTextSignature(state.visibleText, false),
     mainText: semanticTextSignature(state.mainText, true),
     internalLinks: state.internalLinks || [],
@@ -241,21 +253,38 @@ export function browserDocumentStateEvaluator() {
   const metaMap = (prefix, attr) => Object.fromEntries([...document.querySelectorAll(`meta[${attr}^="${prefix}"]`)]
     .map((node) => [node.getAttribute(attr), node.getAttribute('content') || null])
     .filter(([key]) => key));
-  const h1 = [...document.querySelectorAll('h1')]
-    .filter((node) => {
-      for (let element = node; element && element !== document.documentElement; element = element.parentElement) {
-        if (hidden(element)) return false;
-      }
-      return true;
-    })
-    .map((node) => node.textContent || node.getAttribute('aria-label') || '')
-    .filter(Boolean);
+  const browserText = (value) => String(value || '').normalize('NFKC').trim().replace(/\s+/g, ' ');
+  const headingName = (node) => {
+    const visible = browserText(node.innerText || '');
+    if (visible) return { name: visible, nameSource: 'visible_text', visibleText: visible, accessibleName: visible };
+    const ariaLabel = browserText(node.getAttribute('aria-label') || '');
+    const labelledBy = browserText((node.getAttribute('aria-labelledby') || '').split(/\s+/).filter(Boolean)
+      .map((id) => document.getElementById(id)?.innerText || document.getElementById(id)?.textContent || '').join(' '));
+    const imageAlt = browserText([...node.querySelectorAll('img[alt]')].map((image) => image.getAttribute('alt') || '').join(' '));
+    const svgName = browserText([...node.querySelectorAll('svg')]
+      .map((svg) => svg.getAttribute('aria-label') || svg.querySelector('title')?.textContent || '').join(' '));
+    const resolved = [['aria_label', ariaLabel], ['aria_labelledby', labelledBy], ['image_alt', imageAlt], ['svg_accessible_name', svgName]]
+      .find(([, value]) => value) || ['none', ''];
+    return { name: resolved[1], nameSource: resolved[0], visibleText: visible, accessibleName: ariaLabel || labelledBy || imageAlt || svgName || '' };
+  };
+  const h1Facts = [...document.querySelectorAll('h1')].map((node) => {
+    let visible = true;
+    for (let element = node; element && element !== document.documentElement; element = element.parentElement) {
+      if (hidden(element)) visible = false;
+    }
+    return { level: 1, ...headingName(node), visible };
+  });
+  const h1 = h1Facts.filter((fact) => fact.visible && fact.name).map((fact) => fact.name);
+  const titleValues = [...document.head.querySelectorAll(':scope > title')].map((node) => browserText(node.textContent || ''));
+  const metaDescriptionValues = [...document.head.querySelectorAll('meta[name="description" i]')].map((node) => browserText(node.getAttribute('content') || ''));
   const schemas = [...document.querySelectorAll('script[type="application/ld+json"]')].map((node) => node.textContent || '');
   const loadingIndicators = [...document.querySelectorAll('[aria-busy="true"],[data-loading="true"],.loading,.loader,.spinner')]
     .filter((node) => !hidden(node)).length;
   return {
     title: document.title || null,
+    titleValues,
     metaDescription: content('meta[name="description" i]'),
+    metaDescriptionValues,
     canonical: content('link[rel~="canonical" i]', 'href'),
     canonicalValues: [...document.querySelectorAll('link[rel~="canonical" i]')]
       .map((node) => node.getAttribute('href'))
@@ -269,6 +298,7 @@ export function browserDocumentStateEvaluator() {
     openGraph: metaMap('og:', 'property'),
     twitter: metaMap('twitter:', 'name'),
     h1,
+    h1Facts,
     visibleText: visibleText(document.body),
     mainText: visibleText(document.querySelector('main,[role="main"],article')),
     links: [...document.querySelectorAll('a[href]')].map((node) => node.href).filter(Boolean),
@@ -352,8 +382,21 @@ function normalizeRobots(value) {
   return [...new Set(String(value || '').toLowerCase().split(/[;,]/).map((item) => item.trim()).filter(Boolean))].sort();
 }
 
-function normalizeStringArray(value) {
-  return [...new Set((Array.isArray(value) ? value : []).map(normalizeScalar).filter(Boolean))];
+function normalizeStringArray(value, options = {}) {
+  const normalized = (Array.isArray(value) ? value : []).map((item) => normalizeScalar(item) ?? '');
+  return (options.preserveEmpty ? normalized : [...new Set(normalized.filter(Boolean))]).slice(0, 500);
+}
+
+function normalizeHeadingFacts(value) {
+  return (Array.isArray(value) ? value : []).slice(0, 80).map((fact) => ({
+    level: Number(fact?.level || 1),
+    name: normalizeScalar(fact?.name),
+    nameSource: normalizeScalar(fact?.nameSource) || 'none',
+    visibleText: normalizeScalar(fact?.visibleText),
+    accessibleName: normalizeScalar(fact?.accessibleName),
+    visible: fact?.visible === undefined ? Boolean(fact?.staticallyVisible) : Boolean(fact.visible),
+    staticallyVisible: fact?.staticallyVisible === undefined ? null : Boolean(fact.staticallyVisible)
+  }));
 }
 
 function normalizeAbsoluteUrl(value, base) {

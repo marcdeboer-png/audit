@@ -20,8 +20,12 @@ export function extractHtml(rawHtml, pageUrl, finalDomain, responseHeaders = {})
   const bodyText = textKinds.visibleText;
   const rawTextLength = textKinds.rawTextLength;
   const wordCountRaw = countVisibleWords(bodyText);
-  const title = cleanText($('head > title').first().text()) || null;
-  const metaDescription = attrContent($, 'meta[name="description"]') || null;
+  const titleValues = $('head > title').map((_, element) => cleanText($(element).text())).get();
+  const title = titleValues.find(Boolean) || null;
+  const metaDescriptionValues = $('head > meta[name="description" i]')
+    .map((_, element) => cleanText($(element).attr('content') || ''))
+    .get();
+  const metaDescription = metaDescriptionValues.find(Boolean) || null;
   const metaRobots = attrContent($, 'meta[name="robots"]') || null;
   const canonicalValues = $('link[rel~="canonical"]')
     .map((_, element) => absoluteUrl($(element).attr('href'), pageUrl))
@@ -38,8 +42,10 @@ export function extractHtml(rawHtml, pageUrl, finalDomain, responseHeaders = {})
   const manifest = absoluteUrl($('link[rel="manifest"]').first().attr('href'), pageUrl);
   const og = extractOpenGraph($);
   const twitter = extractTwitterMetadata($);
-  const h1 = headings($, 'h1');
-  const h2 = headings($, 'h2');
+  const h1Facts = headingFacts($, 'h1');
+  const h2Facts = headingFacts($, 'h2');
+  const h1 = h1Facts.filter((fact) => fact.staticallyVisible && fact.name).map((fact) => fact.name).slice(0, 50);
+  const h2 = h2Facts.filter((fact) => fact.staticallyVisible && fact.name).map((fact) => fact.name).slice(0, 50);
   const links = extractLinks($, pageUrl, finalDomain);
   const images = extractImages($, pageUrl);
   const resources = extractVisibleResources($, pageUrl, finalDomain);
@@ -60,7 +66,9 @@ export function extractHtml(rawHtml, pageUrl, finalDomain, responseHeaders = {})
   const mainText = mainRoot.length ? extractTextKinds(mainRoot.toString()).visibleText : '';
   const rawDocumentState = createDocumentState({
     title,
+    titleValues,
     metaDescription,
+    metaDescriptionValues,
     canonical,
     canonicalValues,
     htmlLang,
@@ -69,6 +77,7 @@ export function extractHtml(rawHtml, pageUrl, finalDomain, responseHeaders = {})
     openGraph: og,
     twitter,
     h1,
+    h1Facts,
     visibleText: bodyText,
     mainText,
     links: links.filter((link) => link.linkType === 'internal').map((link) => link.normalizedTargetUrl),
@@ -127,7 +136,16 @@ export function extractHtml(rawHtml, pageUrl, finalDomain, responseHeaders = {})
       ogJson: JSON.stringify(og),
       favicon,
       manifest,
-      featureFlagsJson: JSON.stringify(featureFlags),
+      featureFlagsJson: JSON.stringify({
+        ...featureFlags,
+        titleElementCount: titleValues.length,
+        metaDescriptionElementCount: metaDescriptionValues.length,
+        conflictingTitleElementCount: new Set(titleValues.filter(Boolean)).size > 1 ? titleValues.length : 0,
+        conflictingMetaDescriptionElementCount: new Set(metaDescriptionValues.filter(Boolean)).size > 1 ? metaDescriptionValues.length : 0,
+        staticallyHiddenH1Count: h1Facts.filter((fact) => !fact.staticallyVisible).length,
+        unnamedVisibleH1Count: h1Facts.filter((fact) => fact.staticallyVisible && !fact.name).length,
+        h1Facts: h1Facts.slice(0, 50)
+      }),
       pageType,
       pageTypeConfidence: pageTypeClassification.confidence,
       pageTypeSignalsJson: JSON.stringify(pageTypeClassification.signals),
@@ -173,19 +191,41 @@ function charsetFromContentType(value) {
   return match ? match[1].trim() : null;
 }
 
-function headings($, selector) {
-  return $(selector)
-    .map((_, element) => {
-      const node = $(element);
-      const text = cleanText(node.text());
-      if (text) return text;
-      const ariaLabel = cleanText(node.attr('aria-label') || '');
-      if (ariaLabel) return ariaLabel;
-      return cleanText(node.find('img[alt]').map((__, image) => $(image).attr('alt') || '').get().join(' '));
-    })
-    .get()
-    .filter(Boolean)
-    .slice(0, 50);
+function headingFacts($, selector) {
+  return $(selector).map((_, element) => {
+    const node = $(element);
+    const clone = node.clone();
+    clone.find('[hidden],[aria-hidden="true"],script,style,noscript,template,svg').remove();
+    const visibleText = cleanText(clone.text());
+    const ariaLabel = cleanText(node.attr('aria-label') || '');
+    const labelledBy = String(node.attr('aria-labelledby') || '').split(/\s+/).filter(Boolean)
+      .map((id) => cleanText($(`[id="${escapeAttributeValue(id)}"]`).first().text()))
+      .filter(Boolean).join(' ');
+    const imageAlt = cleanText(node.find('img[alt]').map((__, image) => $(image).attr('alt') || '').get().join(' '));
+    const svgName = cleanText(node.find('svg').map((__, svg) => {
+      const item = $(svg);
+      return item.attr('aria-label') || item.find('title').first().text() || '';
+    }).get().join(' '));
+    const resolved = [
+      ['visible_text', visibleText],
+      ['aria_label', ariaLabel],
+      ['aria_labelledby', labelledBy],
+      ['image_alt', imageAlt],
+      ['svg_accessible_name', svgName]
+    ].find(([, value]) => value) || ['none', ''];
+    return {
+      level: Number(String(element.tagName || '').replace(/^h/i, '')) || null,
+      name: resolved[1],
+      nameSource: resolved[0],
+      visibleText,
+      accessibleName: ariaLabel || labelledBy || imageAlt || svgName || visibleText || '',
+      staticallyVisible: isStaticallyVisible($, element)
+    };
+  }).get().slice(0, 80);
+}
+
+function escapeAttributeValue(value) {
+  return String(value).replaceAll('\\', '\\\\').replaceAll('"', '\\"');
 }
 
 function extractOpenGraph($) {
@@ -522,16 +562,14 @@ function detectConsentSignals(text) {
 }
 
 function extractSemanticSignals($) {
-  const headingLevels = $('h1,h2,h3,h4,h5,h6')
-    .map((_, element) => Number(element.tagName?.replace(/^h/i, '') || 0))
-    .get()
-    .filter(Boolean);
+  const allHeadingFacts = headingFacts($, 'h1,h2,h3,h4,h5,h6').filter((fact) => fact.staticallyVisible);
+  const headingLevels = allHeadingFacts.map((fact) => fact.level).filter(Boolean);
   let headingHierarchySkips = 0;
   for (let index = 1; index < headingLevels.length; index += 1) {
     if (headingLevels[index] - headingLevels[index - 1] > 1) headingHierarchySkips += 1;
   }
-  const emptyH1Count = $('h1').filter((_, element) => !cleanText($(element).text())).length;
-  const emptyH2Count = $('h2').filter((_, element) => !cleanText($(element).text())).length;
+  const emptyH1Count = allHeadingFacts.filter((fact) => fact.level === 1 && !fact.name).length;
+  const emptyH2Count = allHeadingFacts.filter((fact) => fact.level === 2 && !fact.name).length;
   const ariaLandmarkCount = $('[role="main"], [role="navigation"], [role="banner"], [role="contentinfo"], [role="complementary"], [role="search"]').length;
   return {
     mainRegionCount: $('main, [role="main"]').length,
@@ -596,8 +634,12 @@ function isStaticallyVisible($, element) {
   const node = $(element);
   if (node.is('[hidden], [aria-hidden="true"]')) return false;
   if (node.closest('[hidden], [aria-hidden="true"], script, style, noscript, template, head, svg').length) return false;
-  const style = String(node.attr('style') || '').toLowerCase().replace(/\s+/g, '');
-  return !style.includes('display:none') && !style.includes('visibility:hidden') && !style.includes('content-visibility:hidden');
+  let visible = true;
+  node.parents().addBack().each((_, ancestor) => {
+    const style = String($(ancestor).attr('style') || '').toLowerCase().replace(/\s+/g, '');
+    if (style.includes('display:none') || style.includes('visibility:hidden') || style.includes('content-visibility:hidden')) visible = false;
+  });
+  return visible;
 }
 
 function hasDatePattern(text) {

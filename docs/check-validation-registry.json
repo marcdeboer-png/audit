@@ -1,7 +1,7 @@
 {
-  "registry_version": "check-validation-registry-v5",
-  "generated_at": "2026-07-19T23:15:00.000Z",
-  "source_commit": "0b73e0fdb1f3851e01a575dcc18d5535dfb3b806",
+  "registry_version": "check-validation-registry-v6",
+  "generated_at": "2026-07-20T00:45:00.000Z",
+  "source_commit": "60f6329cfee7ed497f0693aaac0d2fdc044c0744",
   "check_logic_version": "csr-render-provenance-v1",
   "http_status_validation_version": "http-status-validation-v1",
   "structured_data_validation_version": "structured-data-validation-v1",
@@ -29,15 +29,15 @@
     "total_checks": 137,
     "total_active_checks": 137,
     "historical_checks": 0,
-    "validated_active_checks": 107,
+    "validated_active_checks": 113,
     "status_assignment_coverage": 100,
     "status_counts": {
       "unvalidated": 7,
-      "fixture_validated": 9,
-      "single_domain_validated": 14,
-      "cross_domain_validated": 5,
+      "fixture_validated": 8,
+      "single_domain_validated": 9,
+      "cross_domain_validated": 7,
       "validated_with_limits": 13,
-      "manual_review_required": 89,
+      "manual_review_required": 93,
       "invalid": 0,
       "deprecated": 0
     },
@@ -70,23 +70,23 @@
     },
     "severity_counts": {
       "High": 9,
-      "Low": 90,
-      "Medium": 38
+      "Low": 94,
+      "Medium": 34
     },
     "evidence_class_counts": {
       "inventory": 11,
-      "optional_opportunity": 55,
-      "primary_conditional": 22,
-      "primary_required": 39,
-      "secondary_diagnostic": 10
+      "optional_opportunity": 62,
+      "primary_conditional": 23,
+      "primary_required": 30,
+      "secondary_diagnostic": 11
     },
-    "score_capable_checks": 44,
-    "checks_without_central_requirement_definition": 38,
-    "check_validation_coverage": 78.1,
-    "score_weighted_validation_coverage": 39.2,
+    "score_capable_checks": 40,
+    "checks_without_central_requirement_definition": 28,
+    "check_validation_coverage": 82.48,
+    "score_weighted_validation_coverage": 44.76,
     "critical_high_validation_coverage": 33.33,
-    "primary_evidence_validation_coverage": 55.74,
-    "usage_weighted_validation_coverage": 78.55,
+    "primary_evidence_validation_coverage": 60.38,
+    "usage_weighted_validation_coverage": 84.12,
     "historical_usage_snapshot": {
       "result_observations": 6895,
       "distinct_runs_with_results": 64,
@@ -3269,71 +3269,91 @@
       "finding_type": "core_issue",
       "default_severity": "Low",
       "active": true,
-      "score_effect": "score_capable",
-      "evidence_class": "primary_required",
-      "coverage_unit": "check:tech.duplicate_meta_descriptions",
-      "required_facts": [],
-      "requirement_definition_status": "missing",
-      "inventory_issues": [
-        "missing_central_requirement_definition"
+      "score_effect": "score_free",
+      "evidence_class": "optional_opportunity",
+      "coverage_unit": "group:effective_meta_description_duplicate",
+      "required_facts": [
+        "eligibleSuccessfulHtmlPage",
+        "completeEffectiveDocumentState"
       ],
+      "requirement_definition_status": "declared",
+      "inventory_issues": [],
       "data_sources": [
         "pages",
-        "extracted_html_facts"
+        "raw_document_state",
+        "settled_rendered_document_state"
       ],
-      "scope": "site_aggregate",
-      "root_cause_family": "tech.duplicate_meta_descriptions",
-      "current_validation_status": "single_domain_validated",
-      "validation_status": "single_domain_validated",
-      "validation_confidence": "medium",
+      "scope": "eligible_html_url_or_homogeneous_template",
+      "root_cause_family": "html_head.duplicate_meta_description_opportunity",
+      "current_validation_status": "manual_review_required",
+      "validation_status": "manual_review_required",
+      "validation_confidence": "high",
       "tested_domains": [
-        "anonymized_run_77_site"
+        "marcdeboer.de",
+        "trinkgut-zierles.de",
+        "react.dev",
+        "web.dev",
+        "developer.mozilla.org",
+        "www.ikea.com",
+        "app.uniswap.org",
+        "nextjs.org",
+        "app.aave.com",
+        "theguardian.com",
+        "shopify.com",
+        "stripe.com",
+        "wikipedia.org",
+        "gov.uk",
+        "apple.com",
+        "info.cern.ch",
+        "neverssl.com",
+        "gnu.org",
+        "motherfuckingwebsite.com",
+        "httpbin.org",
+        "w3.org",
+        "example.edu",
+        "textfiles.com",
+        "spacejam.com"
       ],
       "tested_archetypes": [
-        "small_local_business_website"
+        "small_static_expert_site",
+        "small_local_business_site",
+        "hydrated_documentation",
+        "editorial_publication",
+        "large_ecommerce",
+        "csr_application",
+        "server_rendered_saas",
+        "public_institution",
+        "encyclopedia"
       ],
-      "positive_cases": 1,
-      "negative_cases": 0,
-      "fixture_tests": [],
+      "positive_cases": 4,
+      "negative_cases": 27,
+      "fixture_tests": [
+        "tests/html-head-heading-validation.test.js"
+      ],
       "real_world_runs": [
+        "html-head-heading-validation-v1-independent-live-probes",
         "run-77-forensic-validation"
       ],
       "false_positives": 0,
       "false_negatives": 0,
       "severity_errors": 0,
       "scope_errors": 0,
-      "stability_runs": 1,
+      "stability_runs": 2,
       "known_limits": [
-        "Only one real domain has independent historical validation; cross-domain behavior remains unproven.",
-        "Historical reconstruction uses stored Run 77 evidence and does not substitute current live state."
+        "Automated facts do not establish search intent, editorial quality or business context."
       ],
-      "manual_review_reason": "",
-      "last_validated_at": "2026-07-18",
-      "last_validated_commit": "ca4055eaef7623e9604684065e873815353b21f9",
+      "manual_review_reason": "Duplicate effective descriptions are measurable, but business intent, canonical consolidation and snippet usefulness require review.",
+      "last_validated_at": "2026-07-20T00:45:00.000Z",
+      "last_validated_commit": "60f6329cfee7ed497f0693aaac0d2fdc044c0744",
       "evidence_references": [
-        "tests/run77-resilience.test.js"
+        "tests/run77-resilience.test.js",
+        "docs/html-head-heading-check-validation-v1.md",
+        "tests/html-head-heading-validation.test.js"
       ],
-      "recommended_trust_action": "diagnostic_with_disclosure_until_cross_domain_validation",
+      "recommended_trust_action": "manual_review_required",
       "historical_observations": 64,
       "historical_run_count": 44,
-      "validation_gap": {
-        "missing_evidence": [
-          "second real domain",
-          "second website archetype",
-          "independent positive and negative case pair",
-          "repeatability confirmation"
-        ],
-        "needed_real_positive_cases": 1,
-        "needed_real_negative_cases": 1,
-        "suitable_archetypes": [
-          "small_static_site",
-          "large_dynamic_site"
-        ],
-        "needed_fixture": "Add controlled positive and negative fixtures for tech.duplicate_meta_descriptions.",
-        "manual_method": "Parse delivered HTML independently and verify scope, positive/negative facts, severity, and repeatability.",
-        "expected_effort": "M",
-        "risk_if_unchanged": "Medium: a primary-evidence conclusion remains insufficiently demonstrated on real implementations."
-      }
+      "validation_gap": null
     },
     {
       "check_id": "tech.duplicate_titles",
@@ -3343,77 +3363,95 @@
       "default_severity": "Medium",
       "active": true,
       "score_effect": "score_capable",
-      "evidence_class": "primary_required",
-      "coverage_unit": "check:tech.duplicate_titles",
-      "required_facts": [],
-      "requirement_definition_status": "missing",
-      "inventory_issues": [
-        "missing_central_requirement_definition"
+      "evidence_class": "primary_conditional",
+      "coverage_unit": "group:effective_title_duplicate",
+      "required_facts": [
+        "eligibleSuccessfulHtmlPage",
+        "completeEffectiveDocumentState"
       ],
+      "requirement_definition_status": "declared",
+      "inventory_issues": [],
       "data_sources": [
         "pages",
-        "extracted_html_facts"
+        "raw_document_state",
+        "settled_rendered_document_state"
       ],
-      "scope": "site_aggregate",
-      "root_cause_family": "tech.duplicate_titles",
-      "current_validation_status": "single_domain_validated",
-      "validation_status": "single_domain_validated",
-      "validation_confidence": "medium",
+      "scope": "eligible_html_url_or_homogeneous_template",
+      "root_cause_family": "html_head.duplicate_effective_title",
+      "current_validation_status": "manual_review_required",
+      "validation_status": "manual_review_required",
+      "validation_confidence": "high",
       "tested_domains": [
-        "anonymized_run_77_site"
+        "marcdeboer.de",
+        "trinkgut-zierles.de",
+        "react.dev",
+        "web.dev",
+        "developer.mozilla.org",
+        "www.ikea.com",
+        "app.uniswap.org",
+        "nextjs.org",
+        "app.aave.com",
+        "theguardian.com",
+        "shopify.com",
+        "stripe.com",
+        "wikipedia.org",
+        "gov.uk",
+        "apple.com",
+        "info.cern.ch",
+        "neverssl.com",
+        "gnu.org",
+        "motherfuckingwebsite.com",
+        "httpbin.org",
+        "w3.org",
+        "example.edu",
+        "textfiles.com",
+        "spacejam.com"
       ],
       "tested_archetypes": [
-        "small_local_business_website"
+        "small_static_expert_site",
+        "small_local_business_site",
+        "hydrated_documentation",
+        "editorial_publication",
+        "large_ecommerce",
+        "csr_application",
+        "server_rendered_saas",
+        "public_institution",
+        "encyclopedia"
       ],
-      "positive_cases": 1,
-      "negative_cases": 0,
+      "positive_cases": 4,
+      "negative_cases": 27,
       "fixture_tests": [
         "tests/render-provenance.test.js",
         "tests/run77-resilience.test.js",
-        "tests/scoring-v2.test.js"
+        "tests/scoring-v2.test.js",
+        "tests/html-head-heading-validation.test.js"
       ],
       "real_world_runs": [
+        "html-head-heading-validation-v1-independent-live-probes",
         "run-77-forensic-validation"
       ],
       "false_positives": 0,
       "false_negatives": 0,
       "severity_errors": 0,
       "scope_errors": 0,
-      "stability_runs": 1,
+      "stability_runs": 2,
       "known_limits": [
-        "Only one real domain has independent historical validation; cross-domain behavior remains unproven.",
-        "Historical reconstruction uses stored Run 77 evidence and does not substitute current live state."
+        "Automated facts do not establish search intent, editorial quality or business context."
       ],
-      "manual_review_reason": "",
-      "last_validated_at": "2026-07-18",
-      "last_validated_commit": "ca4055eaef7623e9604684065e873815353b21f9",
+      "manual_review_reason": "Duplicate groups are objective after effective-state, indexability and canonical filtering; whether sameness is harmful depends on page intent and consolidation.",
+      "last_validated_at": "2026-07-20T00:45:00.000Z",
+      "last_validated_commit": "60f6329cfee7ed497f0693aaac0d2fdc044c0744",
       "evidence_references": [
         "tests/render-provenance.test.js",
         "tests/run77-resilience.test.js",
         "tests/scoring-v2.test.js",
-        "tests/run77-resilience.test.js"
+        "docs/html-head-heading-check-validation-v1.md",
+        "tests/html-head-heading-validation.test.js"
       ],
-      "recommended_trust_action": "diagnostic_with_disclosure_until_cross_domain_validation",
+      "recommended_trust_action": "manual_review_required",
       "historical_observations": 64,
       "historical_run_count": 44,
-      "validation_gap": {
-        "missing_evidence": [
-          "second real domain",
-          "second website archetype",
-          "independent positive and negative case pair",
-          "repeatability confirmation"
-        ],
-        "needed_real_positive_cases": 1,
-        "needed_real_negative_cases": 1,
-        "suitable_archetypes": [
-          "small_static_site",
-          "large_dynamic_site"
-        ],
-        "needed_fixture": "",
-        "manual_method": "Parse delivered HTML independently and verify scope, positive/negative facts, severity, and repeatability.",
-        "expected_effort": "M",
-        "risk_if_unchanged": "Medium: a primary-evidence conclusion remains insufficiently demonstrated on real implementations."
-      }
+      "validation_gap": null
     },
     {
       "check_id": "tech.empty_alt_texts",
@@ -3594,84 +3632,102 @@
       "name": "H1 missing",
       "category": "HTML Head & Meta",
       "finding_type": "core_issue",
-      "default_severity": "Medium",
+      "default_severity": "Low",
       "active": true,
-      "score_effect": "score_capable",
-      "evidence_class": "primary_required",
-      "coverage_unit": "check:tech.h1_missing",
+      "score_effect": "score_free",
+      "evidence_class": "primary_conditional",
+      "coverage_unit": "url:visible_primary_heading",
       "required_facts": [
-        "eligibleSuccessfulHtmlPage"
+        "eligibleSuccessfulHtmlPage",
+        "completeEffectiveDocumentState"
       ],
       "requirement_definition_status": "declared",
       "inventory_issues": [],
       "data_sources": [
         "pages",
-        "extracted_html_facts"
+        "raw_document_state",
+        "settled_rendered_document_state"
       ],
-      "scope": "url_aggregate",
-      "root_cause_family": "tech.h1",
-      "current_validation_status": "single_domain_validated",
-      "validation_status": "single_domain_validated",
-      "validation_confidence": "medium",
+      "scope": "eligible_html_url_or_homogeneous_template",
+      "root_cause_family": "html_heading.main_heading_review",
+      "current_validation_status": "manual_review_required",
+      "validation_status": "manual_review_required",
+      "validation_confidence": "high",
       "tested_domains": [
-        "anonymized_run_77_site"
+        "marcdeboer.de",
+        "trinkgut-zierles.de",
+        "react.dev",
+        "web.dev",
+        "developer.mozilla.org",
+        "www.ikea.com",
+        "app.uniswap.org",
+        "nextjs.org",
+        "app.aave.com",
+        "theguardian.com",
+        "shopify.com",
+        "stripe.com",
+        "wikipedia.org",
+        "gov.uk",
+        "apple.com",
+        "info.cern.ch",
+        "neverssl.com",
+        "gnu.org",
+        "motherfuckingwebsite.com",
+        "httpbin.org",
+        "w3.org",
+        "example.edu",
+        "textfiles.com",
+        "spacejam.com"
       ],
       "tested_archetypes": [
-        "small_local_business_website"
+        "small_static_expert_site",
+        "small_local_business_site",
+        "hydrated_documentation",
+        "editorial_publication",
+        "large_ecommerce",
+        "csr_application",
+        "server_rendered_saas",
+        "public_institution",
+        "encyclopedia"
       ],
-      "positive_cases": 1,
-      "negative_cases": 0,
+      "positive_cases": 9,
+      "negative_cases": 27,
       "fixture_tests": [
         "tests/batch101.test.js",
         "tests/batch85.test.js",
         "tests/calibration-v2.test.js",
         "tests/render-provenance.test.js",
-        "tests/run77-resilience.test.js"
+        "tests/run77-resilience.test.js",
+        "tests/html-head-heading-validation.test.js"
       ],
       "real_world_runs": [
+        "html-head-heading-validation-v1-independent-live-probes",
         "run-77-forensic-validation"
       ],
       "false_positives": 0,
       "false_negatives": 0,
       "severity_errors": 0,
       "scope_errors": 0,
-      "stability_runs": 1,
+      "stability_runs": 2,
       "known_limits": [
-        "Only one real domain has independent historical validation; cross-domain behavior remains unproven.",
-        "Historical reconstruction uses stored Run 77 evidence and does not substitute current live state."
+        "Automated facts do not establish search intent, editorial quality or business context."
       ],
-      "manual_review_reason": "",
-      "last_validated_at": "2026-07-18",
-      "last_validated_commit": "ca4055eaef7623e9604684065e873815353b21f9",
+      "manual_review_reason": "The absence of a visible named h1 is measurable; whether a page lacks a usable primary heading also depends on page type, accessible naming and content design.",
+      "last_validated_at": "2026-07-20T00:45:00.000Z",
+      "last_validated_commit": "60f6329cfee7ed497f0693aaac0d2fdc044c0744",
       "evidence_references": [
         "tests/batch101.test.js",
         "tests/batch85.test.js",
         "tests/calibration-v2.test.js",
         "tests/render-provenance.test.js",
         "tests/run77-resilience.test.js",
-        "tests/run77-resilience.test.js"
+        "docs/html-head-heading-check-validation-v1.md",
+        "tests/html-head-heading-validation.test.js"
       ],
-      "recommended_trust_action": "diagnostic_with_disclosure_until_cross_domain_validation",
+      "recommended_trust_action": "manual_review_required",
       "historical_observations": 64,
       "historical_run_count": 44,
-      "validation_gap": {
-        "missing_evidence": [
-          "second real domain",
-          "second website archetype",
-          "independent positive and negative case pair",
-          "repeatability confirmation"
-        ],
-        "needed_real_positive_cases": 1,
-        "needed_real_negative_cases": 1,
-        "suitable_archetypes": [
-          "small_static_site",
-          "large_dynamic_site"
-        ],
-        "needed_fixture": "",
-        "manual_method": "Parse delivered HTML independently and verify scope, positive/negative facts, severity, and repeatability.",
-        "expected_effort": "M",
-        "risk_if_unchanged": "Medium: a primary-evidence conclusion remains insufficiently demonstrated on real implementations."
-      }
+      "validation_gap": null
     },
     {
       "check_id": "tech.high_ttfb",
@@ -3889,69 +3945,90 @@
       "active": true,
       "score_effect": "score_capable",
       "evidence_class": "primary_required",
-      "coverage_unit": "check:tech.html_lang_missing",
+      "coverage_unit": "url:effective_html_language",
       "required_facts": [
-        "successfulHtmlExtraction"
+        "eligibleSuccessfulHtmlPage",
+        "completeEffectiveHtmlLangState"
       ],
       "requirement_definition_status": "declared",
       "inventory_issues": [],
       "data_sources": [
         "pages",
-        "extracted_html_facts"
+        "raw_document_state",
+        "settled_rendered_document_state"
       ],
-      "scope": "url_aggregate",
-      "root_cause_family": "tech.html_lang",
-      "current_validation_status": "single_domain_validated",
-      "validation_status": "single_domain_validated",
-      "validation_confidence": "medium",
+      "scope": "eligible_indexable_html_url",
+      "root_cause_family": "html_head.effective_language_missing",
+      "current_validation_status": "cross_domain_validated",
+      "validation_status": "cross_domain_validated",
+      "validation_confidence": "high",
       "tested_domains": [
-        "anonymized_run_77_site"
+        "marcdeboer.de",
+        "trinkgut-zierles.de",
+        "react.dev",
+        "web.dev",
+        "developer.mozilla.org",
+        "www.ikea.com",
+        "app.uniswap.org",
+        "nextjs.org",
+        "app.aave.com",
+        "theguardian.com",
+        "shopify.com",
+        "stripe.com",
+        "wikipedia.org",
+        "gov.uk",
+        "apple.com",
+        "info.cern.ch",
+        "neverssl.com",
+        "gnu.org",
+        "motherfuckingwebsite.com",
+        "httpbin.org",
+        "w3.org",
+        "example.edu",
+        "textfiles.com",
+        "spacejam.com"
       ],
       "tested_archetypes": [
-        "small_local_business_website"
+        "small_static_expert_site",
+        "small_local_business_site",
+        "hydrated_documentation",
+        "editorial_publication",
+        "large_ecommerce",
+        "csr_application",
+        "server_rendered_saas",
+        "public_institution",
+        "encyclopedia"
       ],
-      "positive_cases": 1,
-      "negative_cases": 0,
-      "fixture_tests": [],
+      "positive_cases": 5,
+      "negative_cases": 31,
+      "fixture_tests": [
+        "tests/html-head-heading-validation.test.js"
+      ],
       "real_world_runs": [
+        "html-head-heading-validation-v1-independent-live-probes",
         "run-77-forensic-validation"
       ],
       "false_positives": 0,
       "false_negatives": 0,
       "severity_errors": 0,
       "scope_errors": 0,
-      "stability_runs": 1,
+      "stability_runs": 3,
       "known_limits": [
-        "Only one real domain has independent historical validation; cross-domain behavior remains unproven.",
-        "Historical reconstruction uses stored Run 77 evidence and does not substitute current live state."
+        "The automated check establishes presence or absence only; it does not infer whether the declared language matches the prose.",
+        "Invalid-but-present language tags require a separate rule and are not reported as missing."
       ],
       "manual_review_reason": "",
-      "last_validated_at": "2026-07-18",
-      "last_validated_commit": "ca4055eaef7623e9604684065e873815353b21f9",
+      "last_validated_at": "2026-07-20T00:45:00.000Z",
+      "last_validated_commit": "60f6329cfee7ed497f0693aaac0d2fdc044c0744",
       "evidence_references": [
-        "tests/run77-resilience.test.js"
+        "tests/run77-resilience.test.js",
+        "docs/html-head-heading-check-validation-v1.md",
+        "tests/html-head-heading-validation.test.js"
       ],
-      "recommended_trust_action": "diagnostic_with_disclosure_until_cross_domain_validation",
+      "recommended_trust_action": "fully_automated",
       "historical_observations": 64,
       "historical_run_count": 44,
-      "validation_gap": {
-        "missing_evidence": [
-          "second real domain",
-          "second website archetype",
-          "independent positive and negative case pair",
-          "repeatability confirmation"
-        ],
-        "needed_real_positive_cases": 1,
-        "needed_real_negative_cases": 1,
-        "suitable_archetypes": [
-          "small_static_site",
-          "large_dynamic_site"
-        ],
-        "needed_fixture": "Add controlled positive and negative fixtures for tech.html_lang_missing.",
-        "manual_method": "Parse delivered HTML independently and verify scope, positive/negative facts, severity, and repeatability.",
-        "expected_effort": "M",
-        "risk_if_unchanged": "Medium: a primary-evidence conclusion remains insufficiently demonstrated on real implementations."
-      }
+      "validation_gap": null
     },
     {
       "check_id": "tech.html_semantics_summary",
@@ -3962,44 +4039,88 @@
       "active": true,
       "score_effect": "score_free",
       "evidence_class": "inventory",
-      "coverage_unit": "check:tech.html_semantics_summary",
-      "required_facts": [],
-      "requirement_definition_status": "missing",
-      "inventory_issues": [
-        "missing_central_requirement_definition"
+      "coverage_unit": "url:html_semantics_inventory",
+      "required_facts": [
+        "eligibleSuccessfulHtmlPage",
+        "completeEffectiveDocumentState"
       ],
+      "requirement_definition_status": "declared",
+      "inventory_issues": [],
       "data_sources": [
         "pages",
-        "extracted_html_facts"
+        "raw_document_state",
+        "settled_rendered_document_state"
       ],
-      "scope": "site_aggregate",
-      "root_cause_family": "tech.html_semantics",
+      "scope": "eligible_html_url_or_homogeneous_template",
+      "root_cause_family": "html_semantics.inventory",
       "current_validation_status": "manual_review_required",
       "validation_status": "manual_review_required",
-      "validation_confidence": "medium",
-      "tested_domains": [],
-      "tested_archetypes": [],
-      "positive_cases": 0,
-      "negative_cases": 0,
-      "fixture_tests": [
-        "tests/batch105.test.js"
+      "validation_confidence": "high",
+      "tested_domains": [
+        "marcdeboer.de",
+        "trinkgut-zierles.de",
+        "react.dev",
+        "web.dev",
+        "developer.mozilla.org",
+        "www.ikea.com",
+        "app.uniswap.org",
+        "nextjs.org",
+        "app.aave.com",
+        "theguardian.com",
+        "shopify.com",
+        "stripe.com",
+        "wikipedia.org",
+        "gov.uk",
+        "apple.com",
+        "info.cern.ch",
+        "neverssl.com",
+        "gnu.org",
+        "motherfuckingwebsite.com",
+        "httpbin.org",
+        "w3.org",
+        "example.edu",
+        "textfiles.com",
+        "spacejam.com"
       ],
-      "real_world_runs": [],
+      "tested_archetypes": [
+        "small_static_expert_site",
+        "small_local_business_site",
+        "hydrated_documentation",
+        "editorial_publication",
+        "large_ecommerce",
+        "csr_application",
+        "server_rendered_saas",
+        "public_institution",
+        "encyclopedia"
+      ],
+      "positive_cases": 10,
+      "negative_cases": 26,
+      "fixture_tests": [
+        "tests/batch105.test.js",
+        "tests/html-head-heading-validation.test.js"
+      ],
+      "real_world_runs": [
+        "html-head-heading-validation-v1-independent-live-probes",
+        "run-77-forensic-validation"
+      ],
       "false_positives": 0,
       "false_negatives": 0,
       "severity_errors": 0,
       "scope_errors": 0,
-      "stability_runs": 0,
+      "stability_runs": 2,
       "known_limits": [
-        "Automated facts do not determine business relevance, search intent, editorial quality, or implementation priority without human context."
+        "Automated facts do not establish search intent, editorial quality or business context."
       ],
-      "manual_review_reason": "HTML semantic structure summary can collect technical facts automatically, but the conclusion depends on page purpose, search intent, business context, editorial judgment, or implementation trade-offs.",
-      "last_validated_at": "2026-07-19",
-      "last_validated_commit": "020e13c8fc2cc16c689ec01eed415c4e0b2950ad",
+      "manual_review_reason": "The check is an inventory of semantics and accessibility signals; it does not by itself establish an SEO defect.",
+      "last_validated_at": "2026-07-20T00:45:00.000Z",
+      "last_validated_commit": "60f6329cfee7ed497f0693aaac0d2fdc044c0744",
       "evidence_references": [
-        "tests/batch105.test.js"
+        "tests/batch105.test.js",
+        "docs/html-head-heading-check-validation-v1.md",
+        "tests/html-head-heading-validation.test.js",
+        "tests/run77-resilience.test.js"
       ],
-      "recommended_trust_action": "manual_review_before_scoring",
+      "recommended_trust_action": "manual_review_required",
       "historical_observations": 1,
       "historical_run_count": 1,
       "validation_gap": null
@@ -5158,69 +5279,97 @@
       "name": "Meta description missing",
       "category": "HTML Head & Meta",
       "finding_type": "core_issue",
-      "default_severity": "Medium",
+      "default_severity": "Low",
       "active": true,
-      "score_effect": "score_capable",
-      "evidence_class": "primary_required",
-      "coverage_unit": "check:tech.meta_description_missing",
+      "score_effect": "score_free",
+      "evidence_class": "optional_opportunity",
+      "coverage_unit": "url:effective_meta_description",
       "required_facts": [
-        "successfulHtmlExtraction"
+        "eligibleSuccessfulHtmlPage",
+        "completeEffectiveDocumentState"
       ],
       "requirement_definition_status": "declared",
       "inventory_issues": [],
       "data_sources": [
         "pages",
-        "extracted_html_facts"
+        "raw_document_state",
+        "settled_rendered_document_state"
       ],
-      "scope": "url_aggregate",
-      "root_cause_family": "tech.meta_description",
-      "current_validation_status": "fixture_validated",
-      "validation_status": "fixture_validated",
-      "validation_confidence": "medium",
-      "tested_domains": [],
-      "tested_archetypes": [],
-      "positive_cases": 0,
-      "negative_cases": 0,
+      "scope": "eligible_html_url_or_homogeneous_template",
+      "root_cause_family": "html_head.meta_description_opportunity",
+      "current_validation_status": "manual_review_required",
+      "validation_status": "manual_review_required",
+      "validation_confidence": "high",
+      "tested_domains": [
+        "marcdeboer.de",
+        "trinkgut-zierles.de",
+        "react.dev",
+        "web.dev",
+        "developer.mozilla.org",
+        "www.ikea.com",
+        "app.uniswap.org",
+        "nextjs.org",
+        "app.aave.com",
+        "theguardian.com",
+        "shopify.com",
+        "stripe.com",
+        "wikipedia.org",
+        "gov.uk",
+        "apple.com",
+        "info.cern.ch",
+        "neverssl.com",
+        "gnu.org",
+        "motherfuckingwebsite.com",
+        "httpbin.org",
+        "w3.org",
+        "example.edu",
+        "textfiles.com",
+        "spacejam.com"
+      ],
+      "tested_archetypes": [
+        "small_static_expert_site",
+        "small_local_business_site",
+        "hydrated_documentation",
+        "editorial_publication",
+        "large_ecommerce",
+        "csr_application",
+        "server_rendered_saas",
+        "public_institution",
+        "encyclopedia"
+      ],
+      "positive_cases": 5,
+      "negative_cases": 29,
       "fixture_tests": [
         "tests/batch101.test.js",
-        "tests/batch85.test.js"
+        "tests/batch85.test.js",
+        "tests/html-head-heading-validation.test.js"
       ],
-      "real_world_runs": [],
+      "real_world_runs": [
+        "html-head-heading-validation-v1-independent-live-probes",
+        "run-77-forensic-validation"
+      ],
       "false_positives": 0,
       "false_negatives": 0,
       "severity_errors": 0,
       "scope_errors": 0,
-      "stability_runs": 0,
-      "known_limits": [],
-      "manual_review_reason": "",
-      "last_validated_at": "2026-07-19",
-      "last_validated_commit": "020e13c8fc2cc16c689ec01eed415c4e0b2950ad",
+      "stability_runs": 2,
+      "known_limits": [
+        "Automated facts do not establish search intent, editorial quality or business context."
+      ],
+      "manual_review_reason": "A missing description is an editorial snippet opportunity, not a technical indexing blockade; search engines may build snippets from page content.",
+      "last_validated_at": "2026-07-20T00:45:00.000Z",
+      "last_validated_commit": "60f6329cfee7ed497f0693aaac0d2fdc044c0744",
       "evidence_references": [
         "tests/batch101.test.js",
-        "tests/batch85.test.js"
+        "tests/batch85.test.js",
+        "docs/html-head-heading-check-validation-v1.md",
+        "tests/html-head-heading-validation.test.js",
+        "tests/run77-resilience.test.js"
       ],
-      "recommended_trust_action": "diagnostic_with_disclosure_until_real_validation",
+      "recommended_trust_action": "manual_review_required",
       "historical_observations": 64,
       "historical_run_count": 44,
-      "validation_gap": {
-        "missing_evidence": [
-          "independent real-domain validation",
-          "real positive case",
-          "real negative case",
-          "severity and scope review",
-          "repeatability confirmation"
-        ],
-        "needed_real_positive_cases": 1,
-        "needed_real_negative_cases": 1,
-        "suitable_archetypes": [
-          "small_static_site",
-          "large_dynamic_site"
-        ],
-        "needed_fixture": "",
-        "manual_method": "Parse delivered HTML independently and verify scope, positive/negative facts, severity, and repeatability.",
-        "expected_effort": "M",
-        "risk_if_unchanged": "Medium: a primary-evidence conclusion remains insufficiently demonstrated on real implementations."
-      }
+      "validation_gap": null
     },
     {
       "check_id": "tech.meta_description_too_long",
@@ -5229,50 +5378,94 @@
       "finding_type": "core_issue",
       "default_severity": "Low",
       "active": true,
-      "score_effect": "conditional",
-      "evidence_class": "primary_required",
-      "coverage_unit": "check:tech.meta_description_too_long",
-      "required_facts": [],
-      "requirement_definition_status": "missing",
-      "inventory_issues": [
-        "missing_central_requirement_definition"
+      "score_effect": "score_free",
+      "evidence_class": "optional_opportunity",
+      "coverage_unit": "url:effective_head_length_opportunity",
+      "required_facts": [
+        "eligibleSuccessfulHtmlPage",
+        "completeEffectiveDocumentState"
       ],
+      "requirement_definition_status": "declared",
+      "inventory_issues": [],
       "data_sources": [
         "pages",
-        "extracted_html_facts"
+        "raw_document_state",
+        "settled_rendered_document_state"
       ],
-      "scope": "url_aggregate",
-      "root_cause_family": "tech.meta_description_too_long",
+      "scope": "eligible_html_url_or_homogeneous_template",
+      "root_cause_family": "html_head.length_opportunity",
       "current_validation_status": "manual_review_required",
       "validation_status": "manual_review_required",
-      "validation_confidence": "medium",
-      "tested_domains": [],
-      "tested_archetypes": [],
-      "positive_cases": 0,
-      "negative_cases": 0,
+      "validation_confidence": "high",
+      "tested_domains": [
+        "marcdeboer.de",
+        "trinkgut-zierles.de",
+        "react.dev",
+        "web.dev",
+        "developer.mozilla.org",
+        "www.ikea.com",
+        "app.uniswap.org",
+        "nextjs.org",
+        "app.aave.com",
+        "theguardian.com",
+        "shopify.com",
+        "stripe.com",
+        "wikipedia.org",
+        "gov.uk",
+        "apple.com",
+        "info.cern.ch",
+        "neverssl.com",
+        "gnu.org",
+        "motherfuckingwebsite.com",
+        "httpbin.org",
+        "w3.org",
+        "example.edu",
+        "textfiles.com",
+        "spacejam.com"
+      ],
+      "tested_archetypes": [
+        "small_static_expert_site",
+        "small_local_business_site",
+        "hydrated_documentation",
+        "editorial_publication",
+        "large_ecommerce",
+        "csr_application",
+        "server_rendered_saas",
+        "public_institution",
+        "encyclopedia"
+      ],
+      "positive_cases": 8,
+      "negative_cases": 28,
       "fixture_tests": [
         "tests/batch105.test.js",
         "tests/batch107.test.js",
-        "tests/batch85.test.js"
+        "tests/batch85.test.js",
+        "tests/html-head-heading-validation.test.js"
       ],
-      "real_world_runs": [],
+      "real_world_runs": [
+        "html-head-heading-validation-v1-independent-live-probes",
+        "run-77-forensic-validation"
+      ],
       "false_positives": 0,
       "false_negatives": 0,
       "severity_errors": 0,
       "scope_errors": 0,
-      "stability_runs": 0,
+      "stability_runs": 2,
       "known_limits": [
-        "Automated facts do not determine business relevance, search intent, editorial quality, or implementation priority without human context."
+        "Automated facts do not establish search intent, editorial quality or business context."
       ],
-      "manual_review_reason": "Meta description too long > 160 can collect technical facts automatically, but the conclusion depends on page purpose, search intent, business context, editorial judgment, or implementation trade-offs.",
-      "last_validated_at": "2026-07-19",
-      "last_validated_commit": "020e13c8fc2cc16c689ec01eed415c4e0b2950ad",
+      "manual_review_reason": "Description length is contextual and search-result snippets are dynamically truncated.",
+      "last_validated_at": "2026-07-20T00:45:00.000Z",
+      "last_validated_commit": "60f6329cfee7ed497f0693aaac0d2fdc044c0744",
       "evidence_references": [
         "tests/batch105.test.js",
         "tests/batch107.test.js",
-        "tests/batch85.test.js"
+        "tests/batch85.test.js",
+        "docs/html-head-heading-check-validation-v1.md",
+        "tests/html-head-heading-validation.test.js",
+        "tests/run77-resilience.test.js"
       ],
-      "recommended_trust_action": "manual_review_before_scoring",
+      "recommended_trust_action": "manual_review_required",
       "historical_observations": 64,
       "historical_run_count": 44,
       "validation_gap": null
@@ -5284,48 +5477,92 @@
       "finding_type": "core_issue",
       "default_severity": "Low",
       "active": true,
-      "score_effect": "conditional",
-      "evidence_class": "primary_required",
-      "coverage_unit": "check:tech.meta_description_too_short",
-      "required_facts": [],
-      "requirement_definition_status": "missing",
-      "inventory_issues": [
-        "missing_central_requirement_definition"
+      "score_effect": "score_free",
+      "evidence_class": "optional_opportunity",
+      "coverage_unit": "url:effective_head_length_opportunity",
+      "required_facts": [
+        "eligibleSuccessfulHtmlPage",
+        "completeEffectiveDocumentState"
       ],
+      "requirement_definition_status": "declared",
+      "inventory_issues": [],
       "data_sources": [
         "pages",
-        "extracted_html_facts"
+        "raw_document_state",
+        "settled_rendered_document_state"
       ],
-      "scope": "url_aggregate",
-      "root_cause_family": "tech.meta_description_too_short",
+      "scope": "eligible_html_url_or_homogeneous_template",
+      "root_cause_family": "html_head.length_opportunity",
       "current_validation_status": "manual_review_required",
       "validation_status": "manual_review_required",
-      "validation_confidence": "medium",
-      "tested_domains": [],
-      "tested_archetypes": [],
-      "positive_cases": 0,
-      "negative_cases": 0,
+      "validation_confidence": "high",
+      "tested_domains": [
+        "marcdeboer.de",
+        "trinkgut-zierles.de",
+        "react.dev",
+        "web.dev",
+        "developer.mozilla.org",
+        "www.ikea.com",
+        "app.uniswap.org",
+        "nextjs.org",
+        "app.aave.com",
+        "theguardian.com",
+        "shopify.com",
+        "stripe.com",
+        "wikipedia.org",
+        "gov.uk",
+        "apple.com",
+        "info.cern.ch",
+        "neverssl.com",
+        "gnu.org",
+        "motherfuckingwebsite.com",
+        "httpbin.org",
+        "w3.org",
+        "example.edu",
+        "textfiles.com",
+        "spacejam.com"
+      ],
+      "tested_archetypes": [
+        "small_static_expert_site",
+        "small_local_business_site",
+        "hydrated_documentation",
+        "editorial_publication",
+        "large_ecommerce",
+        "csr_application",
+        "server_rendered_saas",
+        "public_institution",
+        "encyclopedia"
+      ],
+      "positive_cases": 8,
+      "negative_cases": 28,
       "fixture_tests": [
         "tests/batch85.test.js",
-        "tests/batch851.test.js"
+        "tests/batch851.test.js",
+        "tests/html-head-heading-validation.test.js"
       ],
-      "real_world_runs": [],
+      "real_world_runs": [
+        "html-head-heading-validation-v1-independent-live-probes",
+        "run-77-forensic-validation"
+      ],
       "false_positives": 0,
       "false_negatives": 0,
       "severity_errors": 0,
       "scope_errors": 0,
-      "stability_runs": 0,
+      "stability_runs": 2,
       "known_limits": [
-        "Automated facts do not determine business relevance, search intent, editorial quality, or implementation priority without human context."
+        "Automated facts do not establish search intent, editorial quality or business context."
       ],
-      "manual_review_reason": "Meta description too short < 70 can collect technical facts automatically, but the conclusion depends on page purpose, search intent, business context, editorial judgment, or implementation trade-offs.",
-      "last_validated_at": "2026-07-19",
-      "last_validated_commit": "020e13c8fc2cc16c689ec01eed415c4e0b2950ad",
+      "manual_review_reason": "Description length is contextual and search-result snippets are dynamically truncated.",
+      "last_validated_at": "2026-07-20T00:45:00.000Z",
+      "last_validated_commit": "60f6329cfee7ed497f0693aaac0d2fdc044c0744",
       "evidence_references": [
         "tests/batch85.test.js",
-        "tests/batch851.test.js"
+        "tests/batch851.test.js",
+        "docs/html-head-heading-check-validation-v1.md",
+        "tests/html-head-heading-validation.test.js",
+        "tests/run77-resilience.test.js"
       ],
-      "recommended_trust_action": "manual_review_before_scoring",
+      "recommended_trust_action": "manual_review_required",
       "historical_observations": 64,
       "historical_run_count": 44,
       "validation_gap": null
@@ -5396,48 +5633,92 @@
       "name": "Multiple H1",
       "category": "HTML Head & Meta",
       "finding_type": "core_issue",
-      "default_severity": "Medium",
+      "default_severity": "Low",
       "active": true,
-      "score_effect": "conditional",
-      "evidence_class": "primary_required",
-      "coverage_unit": "check:tech.multiple_h1",
-      "required_facts": [],
-      "requirement_definition_status": "missing",
-      "inventory_issues": [
-        "missing_central_requirement_definition"
+      "score_effect": "score_free",
+      "evidence_class": "secondary_diagnostic",
+      "coverage_unit": "url:visible_h1_inventory",
+      "required_facts": [
+        "eligibleSuccessfulHtmlPage",
+        "completeEffectiveDocumentState"
       ],
+      "requirement_definition_status": "declared",
+      "inventory_issues": [],
       "data_sources": [
         "pages",
-        "extracted_html_facts"
+        "raw_document_state",
+        "settled_rendered_document_state"
       ],
-      "scope": "url_aggregate",
-      "root_cause_family": "tech.multiple_h1",
+      "scope": "eligible_html_url_or_homogeneous_template",
+      "root_cause_family": "html_heading.multiple_h1_review",
       "current_validation_status": "manual_review_required",
       "validation_status": "manual_review_required",
-      "validation_confidence": "medium",
-      "tested_domains": [],
-      "tested_archetypes": [],
-      "positive_cases": 0,
-      "negative_cases": 0,
-      "fixture_tests": [
-        "tests/batch85.test.js"
+      "validation_confidence": "high",
+      "tested_domains": [
+        "marcdeboer.de",
+        "trinkgut-zierles.de",
+        "react.dev",
+        "web.dev",
+        "developer.mozilla.org",
+        "www.ikea.com",
+        "app.uniswap.org",
+        "nextjs.org",
+        "app.aave.com",
+        "theguardian.com",
+        "shopify.com",
+        "stripe.com",
+        "wikipedia.org",
+        "gov.uk",
+        "apple.com",
+        "info.cern.ch",
+        "neverssl.com",
+        "gnu.org",
+        "motherfuckingwebsite.com",
+        "httpbin.org",
+        "w3.org",
+        "example.edu",
+        "textfiles.com",
+        "spacejam.com"
       ],
-      "real_world_runs": [],
+      "tested_archetypes": [
+        "small_static_expert_site",
+        "small_local_business_site",
+        "hydrated_documentation",
+        "editorial_publication",
+        "large_ecommerce",
+        "csr_application",
+        "server_rendered_saas",
+        "public_institution",
+        "encyclopedia"
+      ],
+      "positive_cases": 5,
+      "negative_cases": 28,
+      "fixture_tests": [
+        "tests/batch85.test.js",
+        "tests/html-head-heading-validation.test.js"
+      ],
+      "real_world_runs": [
+        "html-head-heading-validation-v1-independent-live-probes",
+        "run-77-forensic-validation"
+      ],
       "false_positives": 0,
       "false_negatives": 0,
       "severity_errors": 0,
       "scope_errors": 0,
-      "stability_runs": 0,
+      "stability_runs": 2,
       "known_limits": [
-        "Automated facts do not determine business relevance, search intent, editorial quality, or implementation priority without human context."
+        "Automated facts do not establish search intent, editorial quality or business context."
       ],
-      "manual_review_reason": "Multiple H1 can collect technical facts automatically, but the conclusion depends on page purpose, search intent, business context, editorial judgment, or implementation trade-offs.",
-      "last_validated_at": "2026-07-19",
-      "last_validated_commit": "020e13c8fc2cc16c689ec01eed415c4e0b2950ad",
+      "manual_review_reason": "HTML permits multiple top-level headings in appropriate structures; semantic quality and page outline require contextual review.",
+      "last_validated_at": "2026-07-20T00:45:00.000Z",
+      "last_validated_commit": "60f6329cfee7ed497f0693aaac0d2fdc044c0744",
       "evidence_references": [
-        "tests/batch85.test.js"
+        "tests/batch85.test.js",
+        "docs/html-head-heading-check-validation-v1.md",
+        "tests/html-head-heading-validation.test.js",
+        "tests/run77-resilience.test.js"
       ],
-      "recommended_trust_action": "manual_review_before_scoring",
+      "recommended_trust_action": "manual_review_required",
       "historical_observations": 64,
       "historical_run_count": 44,
       "validation_gap": null
@@ -6084,74 +6365,96 @@
       "name": "Raw H1 missing but rendered H1 present",
       "category": "JavaScript & Rendering",
       "finding_type": "core_issue",
-      "default_severity": "Medium",
+      "default_severity": "Low",
       "active": true,
-      "score_effect": "score_capable",
+      "score_effect": "score_free",
       "evidence_class": "secondary_diagnostic",
-      "coverage_unit": "site:render_diagnostic:raw_rendered_content",
+      "coverage_unit": "url:raw_rendered_h1_delta",
       "required_facts": [
-        "rawVisibleText",
-        "renderedVisibleText"
+        "rawH1Facts",
+        "settledRenderedH1Facts",
+        "successfulNavigation"
       ],
       "requirement_definition_status": "declared",
       "inventory_issues": [],
       "data_sources": [
-        "pages",
-        "render_provenance",
-        "url_runtime_metrics"
+        "raw_document_state",
+        "settled_rendered_document_state"
       ],
-      "scope": "url_aggregate",
-      "root_cause_family": "tech.raw_h1_missing_rendered",
+      "scope": "rendered_eligible_html_url",
+      "root_cause_family": "html_heading.raw_render_delta",
       "current_validation_status": "validated_with_limits",
       "validation_status": "validated_with_limits",
-      "validation_confidence": "medium",
+      "validation_confidence": "high",
       "tested_domains": [
         "marcdeboer.de",
-        "app.uniswap.org",
+        "trinkgut-zierles.de",
         "react.dev",
         "web.dev",
-        "ikea.com",
         "developer.mozilla.org",
+        "www.ikea.com",
+        "app.uniswap.org",
+        "nextjs.org",
         "app.aave.com",
-        "nextjs.org"
+        "theguardian.com",
+        "shopify.com",
+        "stripe.com",
+        "wikipedia.org",
+        "gov.uk",
+        "apple.com",
+        "info.cern.ch",
+        "neverssl.com",
+        "gnu.org",
+        "motherfuckingwebsite.com",
+        "httpbin.org",
+        "w3.org",
+        "example.edu",
+        "textfiles.com",
+        "spacejam.com"
       ],
       "tested_archetypes": [
-        "static_expert",
-        "csr_app",
+        "small_static_expert_site",
+        "small_local_business_site",
         "hydrated_documentation",
-        "editorial_documentation",
-        "server_rendered_ecommerce",
-        "knowledge_documentation"
+        "editorial_publication",
+        "large_ecommerce",
+        "csr_application",
+        "server_rendered_saas",
+        "public_institution",
+        "encyclopedia"
       ],
-      "positive_cases": 14,
-      "negative_cases": 29,
+      "positive_cases": 6,
+      "negative_cases": 25,
       "fixture_tests": [
-        "tests/evidence-coverage-v3.test.js"
+        "tests/evidence-coverage-v3.test.js",
+        "tests/html-head-heading-validation.test.js"
       ],
       "real_world_runs": [
-        "render-runtime-benchmark-v1",
-        "render-gate-calibration-v2",
-        "coverage-v3-benchmark"
+        "html-head-heading-validation-v1-independent-live-probes",
+        "run-77-forensic-validation"
       ],
       "false_positives": 0,
       "false_negatives": 0,
       "severity_errors": 0,
       "scope_errors": 0,
-      "stability_runs": 9,
+      "stability_runs": 3,
       "known_limits": [
-        "Validation covers targeted raw/render evidence on a finite URL sample; unseen client-side patterns can still require manual review.",
-        "Network and browser variation can make an individual render attempt technically non-reproducible."
+        "Closed shadow roots and interaction-only headings are outside the settled document snapshot.",
+        "The delta is diagnostic and does not mean that the effective page lacks a heading."
       ],
       "manual_review_reason": "",
-      "last_validated_at": "2026-07-19",
-      "last_validated_commit": "003be2a323231e456c016debe587f1af2e0d49af",
+      "last_validated_at": "2026-07-20T00:45:00.000Z",
+      "last_validated_commit": "60f6329cfee7ed497f0693aaac0d2fdc044c0744",
       "evidence_references": [
         "tests/evidence-coverage-v3.test.js",
         "docs/render-runtime-benchmark-v1.md",
         "docs/render-gate-calibration-v2.md",
-        "docs/evidence-class-coverage-v3.md"
+        "docs/evidence-class-coverage-v3.md",
+        "docs/html-head-heading-check-validation-v1.md",
+        "tests/html-head-heading-validation.test.js",
+        "tests/run77-resilience.test.js"
       ],
-      "recommended_trust_action": "active_with_limit_disclosure",
+      "recommended_trust_action": "automated_with_limits",
       "historical_observations": 64,
       "historical_run_count": 44,
       "validation_gap": null
@@ -7206,29 +7509,62 @@
       "active": true,
       "score_effect": "score_capable",
       "evidence_class": "primary_required",
-      "coverage_unit": "check:tech.title_missing",
+      "coverage_unit": "url:effective_title",
       "required_facts": [
-        "successfulHtmlExtraction"
+        "eligibleSuccessfulHtmlPage",
+        "completeEffectiveTitleState"
       ],
       "requirement_definition_status": "declared",
       "inventory_issues": [],
       "data_sources": [
         "pages",
-        "extracted_html_facts"
+        "raw_document_state",
+        "settled_rendered_document_state"
       ],
-      "scope": "url_aggregate",
-      "root_cause_family": "tech.title",
-      "current_validation_status": "single_domain_validated",
-      "validation_status": "single_domain_validated",
-      "validation_confidence": "medium",
+      "scope": "eligible_indexable_html_url",
+      "root_cause_family": "html_head.effective_title_missing",
+      "current_validation_status": "cross_domain_validated",
+      "validation_status": "cross_domain_validated",
+      "validation_confidence": "high",
       "tested_domains": [
-        "anonymized_run_77_site"
+        "marcdeboer.de",
+        "trinkgut-zierles.de",
+        "react.dev",
+        "web.dev",
+        "developer.mozilla.org",
+        "www.ikea.com",
+        "app.uniswap.org",
+        "nextjs.org",
+        "app.aave.com",
+        "theguardian.com",
+        "shopify.com",
+        "stripe.com",
+        "wikipedia.org",
+        "gov.uk",
+        "apple.com",
+        "info.cern.ch",
+        "neverssl.com",
+        "gnu.org",
+        "motherfuckingwebsite.com",
+        "httpbin.org",
+        "w3.org",
+        "example.edu",
+        "textfiles.com",
+        "spacejam.com"
       ],
       "tested_archetypes": [
-        "small_local_business_website"
+        "small_static_expert_site",
+        "small_local_business_site",
+        "hydrated_documentation",
+        "editorial_publication",
+        "large_ecommerce",
+        "csr_application",
+        "server_rendered_saas",
+        "public_institution",
+        "encyclopedia"
       ],
-      "positive_cases": 1,
-      "negative_cases": 0,
+      "positive_cases": 3,
+      "negative_cases": 31,
       "fixture_tests": [
         "tests/batch110.test.js",
         "tests/batch62.test.js",
@@ -7238,23 +7574,25 @@
         "tests/batch91.test.js",
         "tests/batch93.test.js",
         "tests/render-provenance.test.js",
-        "tests/report-semantics.test.js"
+        "tests/report-semantics.test.js",
+        "tests/html-head-heading-validation.test.js"
       ],
       "real_world_runs": [
+        "html-head-heading-validation-v1-independent-live-probes",
         "run-77-forensic-validation"
       ],
       "false_positives": 0,
       "false_negatives": 0,
       "severity_errors": 0,
       "scope_errors": 0,
-      "stability_runs": 1,
+      "stability_runs": 3,
       "known_limits": [
-        "Only one real domain has independent historical validation; cross-domain behavior remains unproven.",
-        "Historical reconstruction uses stored Run 77 evidence and does not substitute current live state."
+        "A failed or unstable required render remains insufficient evidence rather than a missing-title finding.",
+        "Interaction-only or closed-shadow document titles are outside the settled document snapshot."
       ],
       "manual_review_reason": "",
-      "last_validated_at": "2026-07-18",
-      "last_validated_commit": "ca4055eaef7623e9604684065e873815353b21f9",
+      "last_validated_at": "2026-07-20T00:45:00.000Z",
+      "last_validated_commit": "60f6329cfee7ed497f0693aaac0d2fdc044c0744",
       "evidence_references": [
         "tests/batch110.test.js",
         "tests/batch62.test.js",
@@ -7265,29 +7603,14 @@
         "tests/batch93.test.js",
         "tests/render-provenance.test.js",
         "tests/report-semantics.test.js",
-        "tests/run77-resilience.test.js"
+        "tests/run77-resilience.test.js",
+        "docs/html-head-heading-check-validation-v1.md",
+        "tests/html-head-heading-validation.test.js"
       ],
-      "recommended_trust_action": "diagnostic_with_disclosure_until_cross_domain_validation",
+      "recommended_trust_action": "fully_automated",
       "historical_observations": 64,
       "historical_run_count": 44,
-      "validation_gap": {
-        "missing_evidence": [
-          "second real domain",
-          "second website archetype",
-          "independent positive and negative case pair",
-          "repeatability confirmation"
-        ],
-        "needed_real_positive_cases": 1,
-        "needed_real_negative_cases": 1,
-        "suitable_archetypes": [
-          "small_static_site",
-          "large_dynamic_site"
-        ],
-        "needed_fixture": "",
-        "manual_method": "Parse delivered HTML independently and verify scope, positive/negative facts, severity, and repeatability.",
-        "expected_effort": "M",
-        "risk_if_unchanged": "Medium: a primary-evidence conclusion remains insufficiently demonstrated on real implementations."
-      }
+      "validation_gap": null
     },
     {
       "check_id": "tech.title_too_long",
@@ -7296,54 +7619,98 @@
       "finding_type": "core_issue",
       "default_severity": "Low",
       "active": true,
-      "score_effect": "conditional",
-      "evidence_class": "primary_required",
-      "coverage_unit": "check:tech.title_too_long",
-      "required_facts": [],
-      "requirement_definition_status": "missing",
-      "inventory_issues": [
-        "missing_central_requirement_definition"
+      "score_effect": "score_free",
+      "evidence_class": "optional_opportunity",
+      "coverage_unit": "url:effective_head_length_opportunity",
+      "required_facts": [
+        "eligibleSuccessfulHtmlPage",
+        "completeEffectiveDocumentState"
       ],
+      "requirement_definition_status": "declared",
+      "inventory_issues": [],
       "data_sources": [
         "pages",
-        "extracted_html_facts"
+        "raw_document_state",
+        "settled_rendered_document_state"
       ],
-      "scope": "url_aggregate",
-      "root_cause_family": "tech.title_too_long",
+      "scope": "eligible_html_url_or_homogeneous_template",
+      "root_cause_family": "html_head.length_opportunity",
       "current_validation_status": "manual_review_required",
       "validation_status": "manual_review_required",
-      "validation_confidence": "medium",
-      "tested_domains": [],
-      "tested_archetypes": [],
-      "positive_cases": 0,
-      "negative_cases": 0,
+      "validation_confidence": "high",
+      "tested_domains": [
+        "marcdeboer.de",
+        "trinkgut-zierles.de",
+        "react.dev",
+        "web.dev",
+        "developer.mozilla.org",
+        "www.ikea.com",
+        "app.uniswap.org",
+        "nextjs.org",
+        "app.aave.com",
+        "theguardian.com",
+        "shopify.com",
+        "stripe.com",
+        "wikipedia.org",
+        "gov.uk",
+        "apple.com",
+        "info.cern.ch",
+        "neverssl.com",
+        "gnu.org",
+        "motherfuckingwebsite.com",
+        "httpbin.org",
+        "w3.org",
+        "example.edu",
+        "textfiles.com",
+        "spacejam.com"
+      ],
+      "tested_archetypes": [
+        "small_static_expert_site",
+        "small_local_business_site",
+        "hydrated_documentation",
+        "editorial_publication",
+        "large_ecommerce",
+        "csr_application",
+        "server_rendered_saas",
+        "public_institution",
+        "encyclopedia"
+      ],
+      "positive_cases": 7,
+      "negative_cases": 31,
       "fixture_tests": [
         "tests/batch101.test.js",
         "tests/batch102.test.js",
         "tests/batch107.test.js",
         "tests/batch85.test.js",
-        "tests/calibration-v2.test.js"
+        "tests/calibration-v2.test.js",
+        "tests/html-head-heading-validation.test.js"
       ],
-      "real_world_runs": [],
+      "real_world_runs": [
+        "html-head-heading-validation-v1-independent-live-probes",
+        "run-77-forensic-validation"
+      ],
       "false_positives": 0,
       "false_negatives": 0,
       "severity_errors": 0,
       "scope_errors": 0,
-      "stability_runs": 0,
+      "stability_runs": 2,
       "known_limits": [
-        "Automated facts do not determine business relevance, search intent, editorial quality, or implementation priority without human context."
+        "Automated facts do not establish search intent, editorial quality or business context."
       ],
-      "manual_review_reason": "Title too long > 65 can collect technical facts automatically, but the conclusion depends on page purpose, search intent, business context, editorial judgment, or implementation trade-offs.",
-      "last_validated_at": "2026-07-19",
-      "last_validated_commit": "020e13c8fc2cc16c689ec01eed415c4e0b2950ad",
+      "manual_review_reason": "Title length has no universal fixed search-result limit; truncation and title-link rewriting are contextual.",
+      "last_validated_at": "2026-07-20T00:45:00.000Z",
+      "last_validated_commit": "60f6329cfee7ed497f0693aaac0d2fdc044c0744",
       "evidence_references": [
         "tests/batch101.test.js",
         "tests/batch102.test.js",
         "tests/batch107.test.js",
         "tests/batch85.test.js",
-        "tests/calibration-v2.test.js"
+        "tests/calibration-v2.test.js",
+        "docs/html-head-heading-check-validation-v1.md",
+        "tests/html-head-heading-validation.test.js",
+        "tests/run77-resilience.test.js"
       ],
-      "recommended_trust_action": "manual_review_before_scoring",
+      "recommended_trust_action": "manual_review_required",
       "historical_observations": 64,
       "historical_run_count": 44,
       "validation_gap": null
@@ -7355,54 +7722,98 @@
       "finding_type": "core_issue",
       "default_severity": "Low",
       "active": true,
-      "score_effect": "conditional",
-      "evidence_class": "primary_required",
-      "coverage_unit": "check:tech.title_too_short",
-      "required_facts": [],
-      "requirement_definition_status": "missing",
-      "inventory_issues": [
-        "missing_central_requirement_definition"
+      "score_effect": "score_free",
+      "evidence_class": "optional_opportunity",
+      "coverage_unit": "url:effective_head_length_opportunity",
+      "required_facts": [
+        "eligibleSuccessfulHtmlPage",
+        "completeEffectiveDocumentState"
       ],
+      "requirement_definition_status": "declared",
+      "inventory_issues": [],
       "data_sources": [
         "pages",
-        "extracted_html_facts"
+        "raw_document_state",
+        "settled_rendered_document_state"
       ],
-      "scope": "url_aggregate",
-      "root_cause_family": "tech.title_too_short",
+      "scope": "eligible_html_url_or_homogeneous_template",
+      "root_cause_family": "html_head.length_opportunity",
       "current_validation_status": "manual_review_required",
       "validation_status": "manual_review_required",
-      "validation_confidence": "medium",
-      "tested_domains": [],
-      "tested_archetypes": [],
-      "positive_cases": 0,
-      "negative_cases": 0,
+      "validation_confidence": "high",
+      "tested_domains": [
+        "marcdeboer.de",
+        "trinkgut-zierles.de",
+        "react.dev",
+        "web.dev",
+        "developer.mozilla.org",
+        "www.ikea.com",
+        "app.uniswap.org",
+        "nextjs.org",
+        "app.aave.com",
+        "theguardian.com",
+        "shopify.com",
+        "stripe.com",
+        "wikipedia.org",
+        "gov.uk",
+        "apple.com",
+        "info.cern.ch",
+        "neverssl.com",
+        "gnu.org",
+        "motherfuckingwebsite.com",
+        "httpbin.org",
+        "w3.org",
+        "example.edu",
+        "textfiles.com",
+        "spacejam.com"
+      ],
+      "tested_archetypes": [
+        "small_static_expert_site",
+        "small_local_business_site",
+        "hydrated_documentation",
+        "editorial_publication",
+        "large_ecommerce",
+        "csr_application",
+        "server_rendered_saas",
+        "public_institution",
+        "encyclopedia"
+      ],
+      "positive_cases": 7,
+      "negative_cases": 31,
       "fixture_tests": [
         "tests/batch81.test.js",
         "tests/batch82.test.js",
         "tests/batch85.test.js",
         "tests/batch851.test.js",
-        "tests/calibration-v2.test.js"
+        "tests/calibration-v2.test.js",
+        "tests/html-head-heading-validation.test.js"
       ],
-      "real_world_runs": [],
+      "real_world_runs": [
+        "html-head-heading-validation-v1-independent-live-probes",
+        "run-77-forensic-validation"
+      ],
       "false_positives": 0,
       "false_negatives": 0,
       "severity_errors": 0,
       "scope_errors": 0,
-      "stability_runs": 0,
+      "stability_runs": 2,
       "known_limits": [
-        "Automated facts do not determine business relevance, search intent, editorial quality, or implementation priority without human context."
+        "Automated facts do not establish search intent, editorial quality or business context."
       ],
-      "manual_review_reason": "Title too short < 20 can collect technical facts automatically, but the conclusion depends on page purpose, search intent, business context, editorial judgment, or implementation trade-offs.",
-      "last_validated_at": "2026-07-19",
-      "last_validated_commit": "020e13c8fc2cc16c689ec01eed415c4e0b2950ad",
+      "manual_review_reason": "Title length has no universal fixed search-result limit; intent, branding and rendered result context require review.",
+      "last_validated_at": "2026-07-20T00:45:00.000Z",
+      "last_validated_commit": "60f6329cfee7ed497f0693aaac0d2fdc044c0744",
       "evidence_references": [
         "tests/batch81.test.js",
         "tests/batch82.test.js",
         "tests/batch85.test.js",
         "tests/batch851.test.js",
-        "tests/calibration-v2.test.js"
+        "tests/calibration-v2.test.js",
+        "docs/html-head-heading-check-validation-v1.md",
+        "tests/html-head-heading-validation.test.js",
+        "tests/run77-resilience.test.js"
       ],
-      "recommended_trust_action": "manual_review_before_scoring",
+      "recommended_trust_action": "manual_review_required",
       "historical_observations": 64,
       "historical_run_count": 44,
       "validation_gap": null
@@ -8620,47 +9031,90 @@
       "finding_type": "core_issue",
       "default_severity": "Low",
       "active": true,
-      "score_effect": "conditional",
-      "evidence_class": "primary_conditional",
-      "coverage_unit": "check:template.meta_pattern_issue",
-      "required_facts": [],
-      "requirement_definition_status": "missing",
-      "inventory_issues": [
-        "missing_central_requirement_definition"
+      "score_effect": "score_free",
+      "evidence_class": "optional_opportunity",
+      "coverage_unit": "template:effective_meta_description_pattern",
+      "required_facts": [
+        "eligibleSuccessfulHtmlPage",
+        "completeEffectiveDocumentState"
       ],
+      "requirement_definition_status": "declared",
+      "inventory_issues": [],
       "data_sources": [
-        "template_clusters",
-        "template_sample_results",
-        "playwright_results"
+        "pages",
+        "raw_document_state",
+        "settled_rendered_document_state"
       ],
-      "scope": "template",
-      "root_cause_family": "tech.meta_pattern_issue",
+      "scope": "eligible_html_url_or_homogeneous_template",
+      "root_cause_family": "html_head.template_meta_description_pattern",
       "current_validation_status": "manual_review_required",
       "validation_status": "manual_review_required",
-      "validation_confidence": "medium",
-      "tested_domains": [],
-      "tested_archetypes": [],
-      "positive_cases": 0,
-      "negative_cases": 0,
-      "fixture_tests": [
-        "tests/batch107.test.js"
+      "validation_confidence": "high",
+      "tested_domains": [
+        "marcdeboer.de",
+        "trinkgut-zierles.de",
+        "react.dev",
+        "web.dev",
+        "developer.mozilla.org",
+        "www.ikea.com",
+        "app.uniswap.org",
+        "nextjs.org",
+        "app.aave.com",
+        "theguardian.com",
+        "shopify.com",
+        "stripe.com",
+        "wikipedia.org",
+        "gov.uk",
+        "apple.com",
+        "info.cern.ch",
+        "neverssl.com",
+        "gnu.org",
+        "motherfuckingwebsite.com",
+        "httpbin.org",
+        "w3.org",
+        "example.edu",
+        "textfiles.com",
+        "spacejam.com"
       ],
-      "real_world_runs": [],
+      "tested_archetypes": [
+        "small_static_expert_site",
+        "small_local_business_site",
+        "hydrated_documentation",
+        "editorial_publication",
+        "large_ecommerce",
+        "csr_application",
+        "server_rendered_saas",
+        "public_institution",
+        "encyclopedia"
+      ],
+      "positive_cases": 7,
+      "negative_cases": 12,
+      "fixture_tests": [
+        "tests/batch107.test.js",
+        "tests/html-head-heading-validation.test.js"
+      ],
+      "real_world_runs": [
+        "html-head-heading-validation-v1-independent-live-probes",
+        "run-77-forensic-validation"
+      ],
       "false_positives": 0,
       "false_negatives": 0,
       "severity_errors": 0,
       "scope_errors": 0,
-      "stability_runs": 0,
+      "stability_runs": 2,
       "known_limits": [
-        "Automated facts do not determine business relevance, search intent, editorial quality, or implementation priority without human context."
+        "Automated facts do not establish search intent, editorial quality or business context."
       ],
-      "manual_review_reason": "Template meta description pattern issue can collect technical facts automatically, but the conclusion depends on page purpose, search intent, business context, editorial judgment, or implementation trade-offs.",
-      "last_validated_at": "2026-07-19",
-      "last_validated_commit": "020e13c8fc2cc16c689ec01eed415c4e0b2950ad",
+      "manual_review_reason": "A repeated effective-description pattern is measurable, but editorial intent and template ownership require review.",
+      "last_validated_at": "2026-07-20T00:45:00.000Z",
+      "last_validated_commit": "60f6329cfee7ed497f0693aaac0d2fdc044c0744",
       "evidence_references": [
-        "tests/batch107.test.js"
+        "tests/batch107.test.js",
+        "docs/html-head-heading-check-validation-v1.md",
+        "tests/html-head-heading-validation.test.js",
+        "tests/run77-resilience.test.js"
       ],
-      "recommended_trust_action": "manual_review_before_scoring",
+      "recommended_trust_action": "manual_review_required",
       "historical_observations": 1,
       "historical_run_count": 1,
       "validation_gap": null
@@ -8870,53 +9324,96 @@
       "finding_type": "core_issue",
       "default_severity": "Low",
       "active": true,
-      "score_effect": "conditional",
+      "score_effect": "score_free",
       "evidence_class": "primary_conditional",
-      "coverage_unit": "check:template.title_pattern_issue",
-      "required_facts": [],
-      "requirement_definition_status": "missing",
-      "inventory_issues": [
-        "missing_central_requirement_definition"
+      "coverage_unit": "template:effective_title_pattern",
+      "required_facts": [
+        "eligibleSuccessfulHtmlPage",
+        "completeEffectiveDocumentState"
       ],
+      "requirement_definition_status": "declared",
+      "inventory_issues": [],
       "data_sources": [
-        "template_clusters",
-        "template_sample_results",
-        "playwright_results"
+        "pages",
+        "raw_document_state",
+        "settled_rendered_document_state"
       ],
-      "scope": "template",
-      "root_cause_family": "tech.title_pattern_issue",
+      "scope": "eligible_html_url_or_homogeneous_template",
+      "root_cause_family": "html_head.template_title_pattern",
       "current_validation_status": "manual_review_required",
       "validation_status": "manual_review_required",
-      "validation_confidence": "medium",
-      "tested_domains": [],
-      "tested_archetypes": [],
-      "positive_cases": 0,
-      "negative_cases": 0,
+      "validation_confidence": "high",
+      "tested_domains": [
+        "marcdeboer.de",
+        "trinkgut-zierles.de",
+        "react.dev",
+        "web.dev",
+        "developer.mozilla.org",
+        "www.ikea.com",
+        "app.uniswap.org",
+        "nextjs.org",
+        "app.aave.com",
+        "theguardian.com",
+        "shopify.com",
+        "stripe.com",
+        "wikipedia.org",
+        "gov.uk",
+        "apple.com",
+        "info.cern.ch",
+        "neverssl.com",
+        "gnu.org",
+        "motherfuckingwebsite.com",
+        "httpbin.org",
+        "w3.org",
+        "example.edu",
+        "textfiles.com",
+        "spacejam.com"
+      ],
+      "tested_archetypes": [
+        "small_static_expert_site",
+        "small_local_business_site",
+        "hydrated_documentation",
+        "editorial_publication",
+        "large_ecommerce",
+        "csr_application",
+        "server_rendered_saas",
+        "public_institution",
+        "encyclopedia"
+      ],
+      "positive_cases": 7,
+      "negative_cases": 12,
       "fixture_tests": [
         "tests/batch10.test.js",
         "tests/batch105.test.js",
         "tests/batch107.test.js",
-        "tests/calibration-v2.test.js"
+        "tests/calibration-v2.test.js",
+        "tests/html-head-heading-validation.test.js"
       ],
-      "real_world_runs": [],
+      "real_world_runs": [
+        "html-head-heading-validation-v1-independent-live-probes",
+        "run-77-forensic-validation"
+      ],
       "false_positives": 0,
       "false_negatives": 0,
       "severity_errors": 0,
       "scope_errors": 0,
-      "stability_runs": 0,
+      "stability_runs": 2,
       "known_limits": [
-        "Automated facts do not determine business relevance, search intent, editorial quality, or implementation priority without human context."
+        "Automated facts do not establish search intent, editorial quality or business context."
       ],
-      "manual_review_reason": "Template title pattern issue can collect technical facts automatically, but the conclusion depends on page purpose, search intent, business context, editorial judgment, or implementation trade-offs.",
-      "last_validated_at": "2026-07-19",
-      "last_validated_commit": "020e13c8fc2cc16c689ec01eed415c4e0b2950ad",
+      "manual_review_reason": "A repeated effective-title pattern is measurable, but template ownership, content intent and remediation priority require review.",
+      "last_validated_at": "2026-07-20T00:45:00.000Z",
+      "last_validated_commit": "60f6329cfee7ed497f0693aaac0d2fdc044c0744",
       "evidence_references": [
         "tests/batch10.test.js",
         "tests/batch105.test.js",
         "tests/batch107.test.js",
-        "tests/calibration-v2.test.js"
+        "tests/calibration-v2.test.js",
+        "docs/html-head-heading-check-validation-v1.md",
+        "tests/html-head-heading-validation.test.js",
+        "tests/run77-resilience.test.js"
       ],
-      "recommended_trust_action": "manual_review_before_scoring",
+      "recommended_trust_action": "manual_review_required",
       "historical_observations": 1,
       "historical_run_count": 1,
       "validation_gap": null

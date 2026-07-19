@@ -6,6 +6,7 @@ import {
   canonicalTargetFacts,
   evaluateCanonicalPage
 } from '../checks/canonicalSemantics.js';
+import { collectHeadMetadataPopulation, HEAD_CHECK_LOGIC_VERSION } from '../checks/headSemantics.js';
 
 const CANONICAL_PATTERN_MIN_EVALUATED = 3;
 const CANONICAL_PATTERN_MIN_AFFECTED = 3;
@@ -43,38 +44,106 @@ export function templatePatternChecks() {
 
 function titlePatternIssue() {
   return templateCheck('template.title_pattern_issue', 'Template title pattern issue', function run(ctx) {
-    const rows = patternRows(ctx.db, ctx.run.id, `
-      title IS NULL OR title = '' OR titleLength > ${thresholds.titleTooLong} OR titleLength < ${thresholds.titleTooShort}
-    `, {
-      extraSelect: 'AVG(titleLength) AS avgTitleLength',
-      minAffected: 3
-    });
+    const rows = headPatternRows(ctx, 'title', thresholds.titleTooShort, thresholds.titleTooLong);
     return patternResult(this, rows, {
       issueLabel: 'title length/missing pattern',
       finding: rows.length
         ? `${sumAffected(rows)} URL(s) across ${rows.length} template/page-type pattern(s) have systematic title issues.`
         : 'No systematic title pattern issue detected.',
-      recommendation: 'Fix title generation at template level rather than editing individual URLs.'
+      recommendation: 'Fix title generation at template level rather than editing individual URLs.',
+      findingType: 'opportunity',
+      rootCauseFamily: 'html_meta.title_pattern',
+      logicVersion: HEAD_CHECK_LOGIC_VERSION,
+      patternThreshold: 'evaluated >= 3; affected >= 3; homogeneous issue share >= 50%; evidence coverage >= 80%',
+      requirements: {
+        requiredFacts: ['successfulIndexableHtmlPages', 'completeEffectiveTitleState', 'homogeneousTemplateOrPageTypeScope'],
+        optionalFacts: ['templateFingerprint'], missingFacts: [], minimumCoverage: 0.8, canCollectWithTargetedRun: true
+      }
     });
   }, { priority: 'Low', effort: 'M' });
 }
 
 function metaPatternIssue() {
   return templateCheck('template.meta_pattern_issue', 'Template meta description pattern issue', function run(ctx) {
-    const rows = patternRows(ctx.db, ctx.run.id, `
-      metaDescription IS NULL OR metaDescription = '' OR metaDescriptionLength > ${thresholds.descriptionTooLong} OR metaDescriptionLength < ${thresholds.descriptionTooShort}
-    `, {
-      extraSelect: 'AVG(metaDescriptionLength) AS avgMetaDescriptionLength',
-      minAffected: 3
-    });
+    const rows = headPatternRows(ctx, 'metaDescription', thresholds.descriptionTooShort, thresholds.descriptionTooLong);
     return patternResult(this, rows, {
       issueLabel: 'meta description generation pattern',
       finding: rows.length
         ? `${sumAffected(rows)} URL(s) across ${rows.length} template/page-type pattern(s) have systematic meta description issues.`
         : 'No systematic meta description pattern issue detected.',
-      recommendation: 'Adjust meta description generation at template level and validate representative pages.'
+      recommendation: 'Adjust meta description generation at template level and validate representative pages.',
+      findingType: 'opportunity',
+      rootCauseFamily: 'html_meta.description_pattern',
+      logicVersion: HEAD_CHECK_LOGIC_VERSION,
+      patternThreshold: 'evaluated >= 3; affected >= 3; homogeneous issue share >= 50%; evidence coverage >= 80%',
+      requirements: {
+        requiredFacts: ['successfulIndexableHtmlPages', 'completeEffectiveMetaDescriptionState', 'homogeneousTemplateOrPageTypeScope'],
+        optionalFacts: ['templateFingerprint'], missingFacts: [], minimumCoverage: 0.8, canCollectWithTargetedRun: true
+      }
     });
   }, { priority: 'Low', effort: 'M' });
+}
+
+function headPatternRows(ctx, field, minimumLength, maximumLength) {
+  const population = collectHeadMetadataPopulation(ctx.db, ctx.run.id, ctx.project.finalDomain, field);
+  const scopes = new Map();
+  for (const observation of population.observations.filter((row) => !row.consolidated)) {
+    const patternKey = observation.templateClusterKey || `${observation.pageType || 'other'}:unclustered`;
+    const key = `${patternKey}\n${observation.pageType || 'other'}`;
+    const group = scopes.get(key) || {
+      patternKey,
+      pageType: observation.pageType || 'other',
+      scopeSource: observation.templateClusterKey ? 'template_fingerprint' : 'page_type_fallback',
+      totalInPattern: 0,
+      evaluatedCount: 0,
+      issues: new Map()
+    };
+    group.totalInPattern += 1;
+    if (observation.evaluated) {
+      group.evaluatedCount += 1;
+      const issueType = !observation.value
+        ? `${field}_missing`
+        : observation.value.length < minimumLength
+          ? `${field}_too_short`
+          : observation.value.length > maximumLength
+            ? `${field}_too_long`
+            : null;
+      if (issueType) {
+        const issue = group.issues.get(issueType) || { affectedUrls: [], lengths: [] };
+        issue.affectedUrls.push(observation.url);
+        issue.lengths.push(observation.value?.length || 0);
+        group.issues.set(issueType, issue);
+      }
+    }
+    scopes.set(key, group);
+  }
+  const rows = [];
+  for (const group of scopes.values()) {
+    const evidenceCoverage = group.totalInPattern ? group.evaluatedCount / group.totalInPattern : 0;
+    for (const [issueType, issue] of group.issues) {
+      const affectedShare = group.evaluatedCount ? issue.affectedUrls.length / group.evaluatedCount : 0;
+      if (group.evaluatedCount < 3 || issue.affectedUrls.length < 3 || affectedShare < 0.5 || evidenceCoverage < 0.8) continue;
+      rows.push({
+        patternKey: group.patternKey,
+        pageType: group.pageType,
+        scopeSource: group.scopeSource,
+        issueType,
+        affectedCount: issue.affectedUrls.length,
+        affectedUrls: issue.affectedUrls,
+        totalInPattern: group.totalInPattern,
+        evaluatedCount: group.evaluatedCount,
+        evidenceCoverage: Number(evidenceCoverage.toFixed(3)),
+        affectedShare: Number(affectedShare.toFixed(3)),
+        confidence: group.evaluatedCount >= 5 && evidenceCoverage === 1 ? 'high' : 'medium',
+        rootCauseKey: `html_meta_pattern:${group.patternKey}:${issueType}`,
+        sampleUrls: issue.affectedUrls.slice(0, 10),
+        ...(field === 'title'
+          ? { avgTitleLength: issue.lengths.reduce((sum, value) => sum + value, 0) / issue.lengths.length }
+          : { avgMetaDescriptionLength: issue.lengths.reduce((sum, value) => sum + value, 0) / issue.lengths.length })
+      });
+    }
+  }
+  return rows.sort((left, right) => right.affectedCount - left.affectedCount || left.rootCauseKey.localeCompare(right.rootCauseKey));
 }
 
 function noindexPattern() {
@@ -382,7 +451,7 @@ function patternResult(check, rows, options = {}) {
       })),
       rootCauseCandidates: rows.map((row) => ({
         key: row.rootCauseKey || `template.pattern:${row.patternKey}`,
-        family: 'tech.canonical_pattern',
+        family: options.rootCauseFamily || 'template.pattern',
         occurrenceCount: Number(row.affectedCount || 0),
         affectedUrlCount: Number(row.affectedCount || 0),
         scopeType: 'template',

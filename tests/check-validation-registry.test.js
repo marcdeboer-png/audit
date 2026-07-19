@@ -16,7 +16,7 @@ test('every active audit check has one valid registry entry', () => {
   const summary = summarizeCheckValidationRegistry(registry);
   assert.equal(summary.activeChecks, activeChecks.length);
   assert.equal(summary.totalChecks, registry.checks.length);
-  assert.equal(summary.statusCounts.cross_domain_validated, 5);
+  assert.equal(summary.statusCounts.cross_domain_validated, 7);
 });
 
 test('registry validation fails closed for a new unregistered check', () => {
@@ -145,4 +145,37 @@ test('structured-data family records parser, page-type and optional GEO limits c
   assert.equal(template.finding_type, 'opportunity');
   assert.equal(template.score_effect, 'score_free');
   assert.equal(template.requirement_definition_status, 'declared');
+});
+
+test('HTML head and heading family records effective-state and editorial limits conservatively', () => {
+  const registry = loadCheckValidationRegistry();
+  const byId = new Map(registry.checks.map((entry) => [entry.check_id, entry]));
+  const title = byId.get('tech.title_missing');
+  assert.equal(title.validation_status, 'cross_domain_validated');
+  assert.equal(title.score_effect, 'score_capable');
+  assert.equal(title.recommended_trust_action, 'fully_automated');
+  assert.ok(title.positive_cases >= 2);
+
+  const lang = byId.get('tech.html_lang_missing');
+  assert.equal(lang.validation_status, 'cross_domain_validated');
+  assert.equal(lang.recommended_trust_action, 'fully_automated');
+  assert.ok(lang.tested_domains.length >= 12);
+
+  const rawH1 = byId.get('tech.raw_h1_missing_rendered_present');
+  assert.equal(rawH1.validation_status, 'validated_with_limits');
+  assert.equal(rawH1.score_effect, 'score_free');
+
+  for (const id of [
+    'tech.title_too_short', 'tech.title_too_long', 'tech.meta_description_missing',
+    'tech.meta_description_too_short', 'tech.meta_description_too_long',
+    'tech.duplicate_meta_descriptions', 'tech.h1_missing', 'tech.multiple_h1',
+    'tech.html_semantics_summary', 'template.title_pattern_issue', 'template.meta_pattern_issue'
+  ]) {
+    const entry = byId.get(id);
+    assert.equal(entry.validation_status, 'manual_review_required', id);
+    assert.equal(entry.score_effect, 'score_free', id);
+    assert.ok(entry.manual_review_reason.length > 20, id);
+  }
+  assert.equal(byId.get('tech.duplicate_titles').validation_status, 'manual_review_required');
+  assert.equal(byId.get('tech.duplicate_titles').score_effect, 'score_capable');
 });
