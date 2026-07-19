@@ -1,4 +1,4 @@
-# Audit check validation registry v3
+# Audit check validation registry v5
 
 Stand: 19. Juli 2026. Die maschinenlesbare Registry liegt in
 [`check-validation-registry.json`](check-validation-registry.json). Sie ist
@@ -22,7 +22,7 @@ Evidenzreferenzen, Fehlerhistorie, bekannte Grenzen und eine konkrete
 Vertrauensempfehlung. Wo ein Check seine Requirements in einem leeren Lauf
 nicht zentral deklariert, bleibt `required_facts` bewusst leer und
 `missing_central_requirement_definition` wird ausgewiesen. Das betrifft nach
-der Robots-/Sitemap-Validierung 42 Checks und ist selbst eine priorisierte
+der Structured-Data-Validierung 38 Checks und ist selbst eine priorisierte
 Architekturluecke; es wurde keine
 Anforderung erfunden.
 
@@ -38,9 +38,9 @@ aggregierten Ergebniszaehlern ohne Domain- oder Inhaltsdaten.
 | Status | Aktive Checks |
 | --- | ---: |
 | `cross_domain_validated` | 5 |
-| `validated_with_limits` | 10 |
-| `manual_review_required` | 90 |
-| `single_domain_validated` | 16 |
+| `validated_with_limits` | 13 |
+| `manual_review_required` | 89 |
+| `single_domain_validated` | 14 |
 | `fixture_validated` | 9 |
 | `unvalidated` | 7 |
 | `invalid` | 0 |
@@ -50,13 +50,13 @@ Alle 137 aktiven Checks besitzen damit einen dokumentierten Status
 (`status_assignment_coverage`: 100 %). Die strengere
 `check_validation_coverage` zaehlt nur `cross_domain_validated`,
 `validated_with_limits` und dauerhaft `manual_review_required` und liegt bei
-76,64 %. Weitere Kennzahlen:
+78,10 %. Weitere Kennzahlen:
 
-- scoregewichtete Validierungsabdeckung: 37,40 %;
+- scoregewichtete Validierungsabdeckung: 39,20 %;
 - Critical-/High-Abdeckung: 33,33 % (es gibt aktuell keine als Critical
   registrierte Default-Severity und neun High-Checks);
-- Primary-Evidence-Abdeckung: 52,46 %;
-- nach historischer Ausfuehrungshaeufigkeit gewichtete Abdeckung: 76,69 %;
+- Primary-Evidence-Abdeckung: 55,74 %;
+- nach historischer Ausfuehrungshaeufigkeit gewichtete Abdeckung: 78,55 %;
 - 44 `score_capable`; `tech.redirect_pages` ist nach der HTTP-Validierung ein
   scorefreies Inventar und kein eigenstaendiger Defekt.
 
@@ -77,7 +77,7 @@ Realvalidierung `cross_domain_validated`. Die Raw-/Rendered-Familie
 Client-Renderingmuster sowie technisch schwankende Browser- und
 Netzwerkantworten.
 
-Die 16 `single_domain_validated`-Checks stammen aus der unabhaengigen
+Die 14 `single_domain_validated`-Checks stammen aus der unabhaengigen
 Run-77-Forensik und den anschliessenden Regressionen. Sie gelten nicht als
 domainuebergreifend bewiesen. `manual_review_required` kennzeichnet Checks,
 deren Fakten automatisierbar sind, deren Schlussfolgerung aber Suchintent,
@@ -212,3 +212,26 @@ heute kein Finding. robots.txt-Abwesenheit ist ebenfalls keine Crawlblockade,
 und optionale Sitemap-Deklarationen sind scorefrei. Bot-Einzelinventare und
 die Frage, ob Textressourcen absichtlich blockiert werden, bleiben ebenfalls
 scorefrei, weil ihre Bewertung eine Geschaefts- und Contentpolitik voraussetzt.
+
+## Structured-data validation group
+
+Die Structured-Data-Gruppe umfasst `tech.json_ld_parse_errors`,
+`tech.article_coverage_on_article_like_pages`,
+`geo.article_blog_pages_article_schema`,
+`tech.product_coverage_on_product_like_pages`, das Schematyp-Inventar und die
+eng verwandten manuellen Opportunities. Methodik, 15 reale Architekturen,
+Run-77-Rekonstruktion, Korrekturen und Grenzen stehen in
+[`structured-data-check-validation-v1.md`](structured-data-check-validation-v1.md).
+
+Article- und Product-Coverage sind `validated_with_limits`: reale Missing- und
+Presence-Faelle sind domainuebergreifend belegt, die Seite muss fuer einen
+normalen Fail jedoch mit hoher Confidence als Detailseite klassifiziert sein.
+Die GEO-Article-Perspektive teilt Root Cause und Coverage-Unit, ist scorefrei
+und bleibt reviewpflichtig. Das Schematyp-Inventar ist scorefrei und
+`validated_with_limits`.
+
+`tech.json_ld_parse_errors` bleibt trotz 39 realen Negativfaellen und breiter
+Fixture-Abdeckung konservativ `fixture_validated`, weil kein organischer
+oeffentlicher Syntaxfehler beobachtet wurde. Browser-/Extraktionsfehler werden
+nun technisch getrennt. Neue Runs speichern kompakte Block-/Entityprovenienz,
+aber keine vollstaendigen fremden JSON-LD-Bodys.

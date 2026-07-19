@@ -1,5 +1,5 @@
 import { normalizeUrl } from '../utils/url.js';
-import { collectSchemaTypes } from '../extractors/htmlExtractor.js';
+import { collectSchemaTypes } from '../extractors/structuredData.js';
 
 export function pageRecordFromFact(runId, fact = {}) {
   const url = normalizeUrl(fact.url || fact.finalUrl) || String(fact.url || fact.finalUrl || '').trim();
@@ -79,6 +79,8 @@ export function pageRecordFromFact(runId, fact = {}) {
     manifest: nullableText(fact.manifest),
     featureFlagsJson: JSON.stringify(fact.featureFlags || {}),
     pageType: nullableText(fact.pageType) || inferPageType(url, schemaTypes),
+    pageTypeConfidence: nullableText(fact.pageTypeConfidence),
+    pageTypeSignalsJson: JSON.stringify(normalizeList(fact.pageTypeSignals)),
     hasTables: boolInt(fact.hasTables),
     hasLists: boolInt(fact.hasLists),
     hasFaqPattern: boolInt(fact.hasFaqPattern),

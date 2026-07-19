@@ -246,6 +246,7 @@ export function initDatabase(database = getDb()) {
       inlinkCount INTEGER,
       outlinkCount INTEGER,
       schemaTypesJson TEXT,
+      structuredDataFactsJson TEXT,
       imagesCount INTEGER,
       imagesWithoutAltCount INTEGER,
       responseHeadersJson TEXT,
@@ -292,6 +293,8 @@ export function initDatabase(database = getDb()) {
       manifest TEXT,
       featureFlagsJson TEXT,
       pageType TEXT DEFAULT 'other',
+      pageTypeConfidence TEXT,
+      pageTypeSignalsJson TEXT,
       hasTables INTEGER NOT NULL DEFAULT 0,
       hasLists INTEGER NOT NULL DEFAULT 0,
       hasFaqPattern INTEGER NOT NULL DEFAULT 0,
@@ -441,6 +444,23 @@ export function initDatabase(database = getDb()) {
       rawJsonBytes INTEGER,
       parseStatus TEXT NOT NULL,
       parseError TEXT,
+      blockIndex INTEGER,
+      entityIndex INTEGER,
+      entityPath TEXT,
+      entityId TEXT,
+      source TEXT,
+      scriptType TEXT,
+      bodyLength INTEGER,
+      snippetHash TEXT,
+      parseErrorType TEXT,
+      parseErrorPosition INTEGER,
+      technicalError TEXT,
+      propertiesJson TEXT,
+      referencedEntityIdsJson TEXT,
+      entityLinked INTEGER NOT NULL DEFAULT 0,
+      extractionStatesJson TEXT,
+      entityCompletenessStatus TEXT,
+      extractionVersion TEXT,
       createdAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (runId) REFERENCES runs(id)
     );
@@ -1017,7 +1037,10 @@ export function initDatabase(database = getDb()) {
     ['effectiveOgJson', 'TEXT'],
     ['effectiveTwitterJson', 'TEXT'],
     ['effectiveHreflangJson', 'TEXT'],
-    ['effectiveSchemaTypesJson', 'TEXT']
+    ['effectiveSchemaTypesJson', 'TEXT'],
+    ['structuredDataFactsJson', 'TEXT'],
+    ['pageTypeConfidence', 'TEXT'],
+    ['pageTypeSignalsJson', 'TEXT']
   ]);
 
   ensureColumns(database, 'runs', [
@@ -1190,7 +1213,24 @@ export function initDatabase(database = getDb()) {
 
   ensureColumns(database, 'schemas', [
     ['rawJsonHash', 'TEXT'],
-    ['rawJsonBytes', 'INTEGER']
+    ['rawJsonBytes', 'INTEGER'],
+    ['blockIndex', 'INTEGER'],
+    ['entityIndex', 'INTEGER'],
+    ['entityPath', 'TEXT'],
+    ['entityId', 'TEXT'],
+    ['source', 'TEXT'],
+    ['scriptType', 'TEXT'],
+    ['bodyLength', 'INTEGER'],
+    ['snippetHash', 'TEXT'],
+    ['parseErrorType', 'TEXT'],
+    ['parseErrorPosition', 'INTEGER'],
+    ['technicalError', 'TEXT'],
+    ['propertiesJson', 'TEXT'],
+    ['referencedEntityIdsJson', 'TEXT'],
+    ['entityLinked', 'INTEGER NOT NULL DEFAULT 0'],
+    ['extractionStatesJson', 'TEXT'],
+    ['entityCompletenessStatus', 'TEXT'],
+    ['extractionVersion', 'TEXT']
   ]);
 
   ensureColumns(database, 'check_results', [

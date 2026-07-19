@@ -1,5 +1,6 @@
-import { all, count, makeResult } from '../checks/helpers.js';
+import { all, count, makeResult, safeJson } from '../checks/helpers.js';
 import { thresholdBytes, thresholds } from '../checks/config/thresholds.js';
+import { hasSchemaFamily, SCHEMA_TYPE_HIERARCHY_VERSION } from '../extractors/structuredData.js';
 import {
   CANONICAL_VALIDATION_LOGIC_VERSION,
   canonicalTargetFacts,
@@ -97,38 +98,83 @@ function noindexPattern() {
 
 function schemaMissingPattern() {
   return templateCheck('template.schema_missing_pattern', 'Template schema missing pattern', function run(ctx) {
-    const where = `
-      (
-        pageType = 'article'
-        AND COALESCE(schemaTypesJson, '') NOT LIKE '%Article%'
-        AND COALESCE(schemaTypesJson, '') NOT LIKE '%BlogPosting%'
-        AND COALESCE(schemaTypesJson, '') NOT LIKE '%NewsArticle%'
-        AND COALESCE(schemaTypesJson, '') NOT LIKE '%Report%'
-        AND COALESCE(schemaTypesJson, '') NOT LIKE '%ScholarlyArticle%'
-        AND COALESCE(schemaTypesJson, '') NOT LIKE '%SocialMediaPosting%'
-        AND COALESCE(schemaTypesJson, '') NOT LIKE '%TechArticle%'
-      ) OR (
-        pageType = 'product' AND COALESCE(schemaTypesJson, '') NOT LIKE '%Product%'
-      ) OR (
-        pageType = 'location' AND COALESCE(schemaTypesJson, '') NOT LIKE '%LocalBusiness%'
-      ) OR (
-        COALESCE(pageType, 'other') IN ('article', 'product', 'category', 'location')
-        AND COALESCE(schemaTypesJson, '') NOT LIKE '%BreadcrumbList%'
-      )
-    `;
-    const rows = patternRows(ctx.db, ctx.run.id, where, {
-      extraSelect: 'GROUP_CONCAT(DISTINCT pageType) AS affectedPageTypes',
-      minAffected: 3
-    });
+    const rows = schemaMissingPatternRows(ctx.db, ctx.run.id);
     return patternResult(this, rows, {
       issueLabel: 'structured data coverage pattern',
       finding: rows.length
         ? `${sumAffected(rows)} URL(s) across ${rows.length} template/page-type pattern(s) miss expected schema coverage.`
         : 'No systematic schema-missing template pattern detected.',
       recommendation: 'Add schema at template level where visible content supports it.',
-      findingType: 'opportunity'
+      findingType: 'opportunity',
+      logicVersion: SCHEMA_TYPE_HIERARCHY_VERSION,
+      patternThreshold: 'high-confidence, successful, indexable HTML; evaluated >= 3; affected >= 3; affected share >= 50%; issue types evaluated separately',
+      requirements: {
+        requiredFacts: ['successfulIndexableHtmlPages', 'highConfidencePageType', 'effectiveSchemaTypes', 'homogeneousTemplateOrPageTypeScope'],
+        optionalFacts: ['templateFingerprint'],
+        missingFacts: [],
+        minimumCoverage: 1,
+        canCollectWithTargetedRun: true
+      }
     });
   }, { priority: 'Low', effort: 'M' });
+}
+
+function schemaMissingPatternRows(db, runId) {
+  const pages = all(db, `
+    SELECT id, url, pageType, pageTypeConfidence, templateClusterKey,
+           schemaTypesJson, effectiveSchemaTypesJson
+    FROM pages
+    WHERE runId = ?
+      AND statusCode >= 200 AND statusCode < 300
+      AND COALESCE(initialStatusCode, statusCode) >= 200 AND COALESCE(initialStatusCode, statusCode) < 300
+      AND (contentType LIKE '%text/html%' OR contentType LIKE '%application/xhtml%')
+      AND indexable = 1
+      AND pageTypeConfidence = 'high'
+      AND pageType IN ('article', 'product', 'category', 'location')
+    ORDER BY id
+  `, [runId]).map((page) => ({
+    ...page,
+    schemaTypes: safeJson(page.effectiveSchemaTypesJson, null) || safeJson(page.schemaTypesJson, [])
+  }));
+  const groups = new Map();
+  for (const page of pages) {
+    const patternKey = page.templateClusterKey || `${page.pageType}:unclustered`;
+    const key = `${patternKey}\n${page.pageType}`;
+    const group = groups.get(key) || { patternKey, pageType: page.pageType, pages: [] };
+    group.pages.push(page);
+    groups.set(key, group);
+  }
+  const rows = [];
+  for (const group of groups.values()) {
+    const definitions = [
+      ...(group.pageType === 'article' ? [{ issueType: 'article_schema_missing', family: 'Article' }] : []),
+      ...(group.pageType === 'product' ? [{ issueType: 'product_schema_missing', family: 'Product' }] : []),
+      ...(group.pageType === 'location' ? [{ issueType: 'localbusiness_schema_missing', family: 'LocalBusiness' }] : []),
+      { issueType: 'breadcrumblist_schema_missing', family: 'BreadcrumbList' }
+    ];
+    for (const definition of definitions) {
+      const affected = group.pages.filter((page) => !hasSchemaFamily(page.schemaTypes, definition.family));
+      const affectedShare = group.pages.length ? affected.length / group.pages.length : 0;
+      if (group.pages.length < 3 || affected.length < 3 || affectedShare < 0.5) continue;
+      rows.push({
+        patternKey: group.patternKey,
+        pageType: group.pageType,
+        issueType: definition.issueType,
+        affectedPageTypes: group.pageType,
+        affectedCount: affected.length,
+        totalInPattern: group.pages.length,
+        evaluatedCount: group.pages.length,
+        evidenceCoverage: 1,
+        affectedShare: Number(affectedShare.toFixed(3)),
+        confidence: group.pages.length >= 5 ? 'high' : 'medium',
+        scopeSource: group.pages[0].templateClusterKey ? 'template_fingerprint' : 'page_type_fallback',
+        rootCauseKey: `schema_pattern:${group.patternKey}:${definition.issueType}`,
+        affectedUrls: affected.map((page) => page.url),
+        sampleUrls: affected.slice(0, 10).map((page) => page.url)
+      });
+    }
+  }
+  return rows.sort((left, right) => right.affectedCount - left.affectedCount || left.rootCauseKey.localeCompare(right.rootCauseKey));
 }
 
 function largeHtmlPattern() {

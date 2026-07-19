@@ -9,9 +9,10 @@ import {
   resourceTypeFromUrl
 } from '../utils/url.js';
 import { selectedHeaders } from '../utils/http.js';
-import { detectPageType } from './pageType.js';
+import { classifyPageType } from './pageType.js';
 import { countVisibleWords, extractTextKinds, normalizeVisibleText, VISIBLE_TEXT_NORMALIZATION_VERSION } from './visibleText.js';
 import { createDocumentState } from './documentState.js';
+import { analyzeStructuredDataBlocks, collectSchemaTypes } from './structuredData.js';
 
 export function extractHtml(rawHtml, pageUrl, finalDomain, responseHeaders = {}) {
   const $ = cheerio.load(rawHtml || '');
@@ -42,15 +43,17 @@ export function extractHtml(rawHtml, pageUrl, finalDomain, responseHeaders = {})
   const links = extractLinks($, pageUrl, finalDomain);
   const images = extractImages($, pageUrl);
   const resources = extractVisibleResources($, pageUrl, finalDomain);
-  const schemas = extractSchemas($);
-  const schemaTypes = [...new Set(schemas.filter((item) => item.schemaType).map((item) => item.schemaType))].sort();
+  const structuredData = extractSchemas($, 'raw');
+  const schemas = structuredData.rows;
+  const schemaTypes = structuredData.types;
   const xRobotsTag = responseHeaders['x-robots-tag'] || null;
   const allRobots = `${metaRobots || ''} ${xRobotsTag || ''}`.toLowerCase();
   const noindex = allRobots.includes('noindex');
   const nofollow = allRobots.includes('nofollow');
   const indexable = !noindex;
   const semanticSignals = extractSemanticSignals($);
-  const pageType = detectPageType({ url: pageUrl, schemaTypes, title, h1, h2, bodyText, rawHtml, semanticSignals });
+  const pageTypeClassification = classifyPageType({ url: pageUrl, schemaTypes, title, h1, h2, bodyText, rawHtml, semanticSignals });
+  const pageType = pageTypeClassification.pageType;
   const featureFlags = extractFeatureFlags($, bodyText, links, h2.length, pageUrl, pageType, semanticSignals);
   const observedAt = new Date().toISOString();
   const mainRoot = $('main,[role="main"],article').first();
@@ -69,7 +72,7 @@ export function extractHtml(rawHtml, pageUrl, finalDomain, responseHeaders = {})
     visibleText: bodyText,
     mainText,
     links: links.filter((link) => link.linkType === 'internal').map((link) => link.normalizedTargetUrl),
-    structuredData: [...new Set(schemas.map((schema) => schema.rawJson).filter(Boolean))],
+    structuredData: structuredData.blockBodies,
     mainContentPresent: mainRoot.length > 0
   }, { url: pageUrl, source: 'raw_html', observedAt, snapshotId: 'raw' });
 
@@ -108,6 +111,16 @@ export function extractHtml(rawHtml, pageUrl, finalDomain, responseHeaders = {})
       internalLinksCount: links.filter((link) => link.linkType === 'internal').length,
       externalLinksCount: links.filter((link) => link.linkType === 'external').length,
       schemaTypesJson: JSON.stringify(schemaTypes),
+      structuredDataFactsJson: JSON.stringify({
+        version: structuredData.version,
+        source: structuredData.source,
+        blocksFound: structuredData.blocksFound,
+        parsedBlocks: structuredData.parsedBlocks,
+        failedBlocks: structuredData.failedBlocks,
+        emptyBlocks: structuredData.emptyBlocks,
+        entityRows: structuredData.entityRows,
+        schemaTypes
+      }),
       imagesCount: images.length,
       imagesWithoutAltCount: images.filter((image) => !image.altAttributePresent).length,
       responseHeadersJson: JSON.stringify(selectedHeaders(responseHeaders)),
@@ -116,6 +129,8 @@ export function extractHtml(rawHtml, pageUrl, finalDomain, responseHeaders = {})
       manifest,
       featureFlagsJson: JSON.stringify(featureFlags),
       pageType,
+      pageTypeConfidence: pageTypeClassification.confidence,
+      pageTypeSignalsJson: JSON.stringify(pageTypeClassification.signals),
       hasTables: featureFlags.hasTables ? 1 : 0,
       hasLists: featureFlags.hasLists ? 1 : 0,
       hasFaqPattern: featureFlags.hasFaqPattern ? 1 : 0,
@@ -323,68 +338,15 @@ function extractVisibleResources($, pageUrl, finalDomain) {
   return rows;
 }
 
-function extractSchemas($) {
-  const rows = [];
-  $('script[type="application/ld+json"]').each((_, element) => {
-    const raw = $(element).contents().text().trim();
-    if (!raw) return;
-    try {
-      const parsed = JSON.parse(raw);
-      const types = collectSchemaTypes(parsed);
-      if (!types.length) {
-        rows.push({
-          schemaType: null,
-          rawJson: raw.slice(0, 50000),
-          parseStatus: 'ok',
-          parseError: null
-        });
-      }
-      for (const schemaType of types) {
-        rows.push({
-          schemaType,
-          rawJson: raw.slice(0, 50000),
-          parseStatus: 'ok',
-          parseError: null
-        });
-      }
-    } catch (error) {
-      rows.push({
-        schemaType: null,
-        rawJson: raw.slice(0, 50000),
-        parseStatus: 'error',
-        parseError: error.message
-      });
-    }
-  });
-  return rows;
+function extractSchemas($, source = 'raw') {
+  const blocks = $('script').map((_, element) => ({
+    scriptType: String($(element).attr('type') || '').trim().toLowerCase(),
+    body: $(element).contents().text()
+  })).get();
+  return analyzeStructuredDataBlocks(blocks, { source });
 }
 
-export function collectSchemaTypes(value, output = new Set()) {
-  if (!value) return [...output];
-  if (Array.isArray(value)) {
-    for (const item of value) collectSchemaTypes(item, output);
-    return [...output];
-  }
-  if (typeof value !== 'object') return [...output];
-
-  const type = value['@type'];
-  if (Array.isArray(type)) {
-    for (const item of type) output.add(String(item));
-  } else if (type) {
-    output.add(String(type));
-  }
-
-  if (Array.isArray(value['@graph'])) {
-    for (const item of value['@graph']) collectSchemaTypes(item, output);
-  }
-
-  for (const [key, nestedValue] of Object.entries(value)) {
-    if (key === '@graph' || key === '@type') continue;
-    if (nestedValue && typeof nestedValue === 'object') collectSchemaTypes(nestedValue, output);
-  }
-
-  return [...output];
-}
+export { collectSchemaTypes };
 
 function extractFeatureFlags($, bodyText, links, h2Count, pageUrl, pageType, semanticSignals = extractSemanticSignals($)) {
   const externalLinks = links.filter((link) => link.linkType === 'external');
@@ -435,6 +397,8 @@ function extractFeatureFlags($, bodyText, links, h2Count, pageUrl, pageType, sem
     prefetch: $('link[rel~="prefetch"]').length
   };
   const searchSignals = extractSearchSignals($, bodyText, htmlSample);
+  const visiblePriceCount = (bodyText.match(/(?:€|\$|£|\b(?:EUR|USD|GBP)\b)/gi) || []).length;
+  const visibleSkuCount = (bodyText.match(/\b(?:sku|gtin|mpn|artikelnummer|product id)\b/gi) || []).length;
 
   return {
     tablesCount: $('table').length,
@@ -458,6 +422,8 @@ function extractFeatureFlags($, bodyText, links, h2Count, pageUrl, pageType, sem
     resourceHintCounts,
     ...searchSignals,
     ...semanticSignals,
+    visiblePriceCount,
+    visibleSkuCount,
     hreflangCount: hreflangLinks.length,
     hreflangLanguages: [...new Set(hreflangLinks.map((item) => item.hreflang.toLowerCase()))].slice(0, 50),
     hasHreflangXDefault: hreflangLinks.some((item) => item.hreflang.toLowerCase() === 'x-default'),
@@ -573,6 +539,12 @@ function extractSemanticSignals($) {
     navRegionCount: $('nav, [role="navigation"]').length,
     footerRegionCount: $('footer, [role="contentinfo"]').length,
     articleElementCount: $('article').length,
+    visibleBylineCount: $('article [rel="author"], article .author, article .byline, main [rel="author"], main .author, main .byline')
+      .filter((_, element) => isStaticallyVisible($, element)).length,
+    visibleDateCount: $('article time, main time, article [class*="date"], main [class*="date"]')
+      .filter((_, element) => isStaticallyVisible($, element)).length,
+    productDetailFormCount: $('main form[action*="cart" i], main form[action*="basket" i], main button[name*="cart" i], main [data-testid*="add-to-cart" i]')
+      .filter((_, element) => isStaticallyVisible($, element)).length,
     ariaLandmarkCount,
     emptyH1Count,
     emptyH2Count,

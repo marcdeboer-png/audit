@@ -20,8 +20,9 @@ import { isLikelyHtmlPage } from '../../utils/url.js';
 import { classifyHostRelation, classifyHttpStability, HTTP_STATUS_VALIDATION_VERSION, RETRY_SENSITIVE_HTTP_STATUSES } from '../../utils/httpStatus.js';
 import { thresholdBytes, thresholds } from '../config/thresholds.js';
 import { templatePatternChecks } from '../../analysis/templatePatternChecks.js';
-import { hasArticleSchema } from '../../extractors/pageType.js';
-import { hasVisibleTextProvenance, VISIBLE_TEXT_NORMALIZATION_VERSION } from '../../extractors/visibleText.js';
+import { evaluatePageTypeSchemaCoverage, STRUCTURED_DATA_COVERAGE_LOGIC_VERSION } from '../structuredDataCoverage.js';
+import { SCHEMA_TYPE_HIERARCHY_VERSION, STRUCTURED_DATA_EXTRACTION_VERSION } from '../../extractors/structuredData.js';
+import { VISIBLE_TEXT_NORMALIZATION_VERSION } from '../../extractors/visibleText.js';
 import {
   CANONICAL_VALIDATION_LOGIC_VERSION,
   canonicalTargetFacts,
@@ -3049,21 +3050,88 @@ function confidenceForTemplateRows(rows) {
 
 function jsonLdParseErrors() {
   return tech('json_ld_parse_errors', 'Structured Data', 'JSON-LD parse errors', function run(ctx) {
-    const rows = all(ctx.db, `
-      SELECT pageUrl AS url, parseError
-      FROM schemas
-      WHERE runId = ? AND parseStatus = 'error'
-      LIMIT 10
+    const schemaRows = all(ctx.db, `
+      SELECT s.pageUrl AS url, s.blockIndex, s.source, s.scriptType, s.bodyLength,
+             COALESCE(s.snippetHash, s.rawJsonHash) AS snippetHash,
+             s.parseStatus, s.parseErrorType, s.parseErrorPosition, s.parseError, s.technicalError,
+             p.structuredDataFactsJson, p.pageType
+      FROM schemas s
+      JOIN pages p ON p.runId = s.runId AND (p.finalUrl = s.pageUrl OR p.url = s.pageUrl OR p.normalizedUrl = s.pageUrl)
+      WHERE s.runId = ?
+      ORDER BY s.pageUrl, COALESCE(s.source, 'raw'), s.blockIndex, s.id
     `, [ctx.run.id]);
-    const affectedCount = count(ctx.db, "SELECT COUNT(*) AS count FROM schemas WHERE runId = ? AND parseStatus = 'error'", [ctx.run.id]);
-    return makeResult(this, affectedCount ? 'Error' : 'OK', {
-      affectedCount,
-      sampleUrls: rows.map((row) => row.url),
-      finding: affectedCount ? `${affectedCount} JSON-LD block(s) failed parsing.` : 'All detected JSON-LD blocks were parseable.',
-      recommendation: 'Fix invalid JSON-LD syntax.',
-      evidence: { samples: rows }
+    const technicalRows = schemaRows.filter((row) => row.parseStatus === 'technical_error' || row.technicalError);
+    const errorsByBlock = new Map();
+    for (const row of schemaRows.filter((item) => item.parseStatus === 'error')) {
+      const key = `${row.url}|${row.snippetHash || `${row.source || 'raw'}:${row.blockIndex ?? 'legacy'}`}`;
+      if (!errorsByBlock.has(key)) errorsByBlock.set(key, row);
+    }
+    const errors = [...errorsByBlock.values()];
+    const factsRows = all(ctx.db, `
+      SELECT structuredDataFactsJson FROM pages
+      WHERE runId = ? AND ${SUCCESSFUL_HTML_WHERE}
+    `, [ctx.run.id]).map((row) => safeJson(row.structuredDataFactsJson, null)).filter(Boolean);
+    const extractionKnown = factsRows.length > 0 || schemaRows.length > 0;
+    const blocksFound = structuredDataFactCount(factsRows, 'blocksFound');
+    const parsedBlocks = structuredDataFactCount(factsRows, 'parsedBlocks');
+    const emptyBlocks = structuredDataFactCount(factsRows, 'emptyBlocks');
+    if (!errors.length && technicalRows.length) return availabilityResult(this, 'technical_error', {
+      finding: 'JSON-LD syntax could not be evaluated because structured-data extraction failed technically.',
+      evidence: { technicalErrors: technicalRows.slice(0, 10).map(compactSchemaError), extractionVersion: STRUCTURED_DATA_EXTRACTION_VERSION },
+      requirements: { requiredFacts: ['successfulHtmlExtraction', 'jsonLdBlockExtraction'], missingFacts: ['successfulStructuredDataExtraction'], minimumCoverage: 1, canCollectWithTargetedRun: true }
+    });
+    if (!extractionKnown) return availabilityResult(this, 'insufficient_evidence', {
+      finding: 'No structured-data extraction provenance is available; absence of parse errors is not treated as a pass.',
+      evidence: { successfulHtmlPages: htmlPageCount(ctx.db, ctx.run.id), extractionVersion: null },
+      requirements: { requiredFacts: ['successfulHtmlExtraction', 'jsonLdBlockExtraction'], missingFacts: ['jsonLdBlockExtraction'], minimumCoverage: 1, canCollectWithTargetedRun: true }
+    });
+    if (!errors.length && parsedBlocks === 0 && !schemaRows.some((row) => row.parseStatus === 'ok')) return availabilityResult(this, 'not_applicable', {
+      finding: emptyBlocks
+        ? `${emptyBlocks} empty application/ld+json block(s) were observed; no authored JSON value existed to parse.`
+        : 'No JSON-LD blocks were present on successfully extracted HTML pages.',
+      evidence: { blocksFound, parsedBlocks, emptyBlocks, extractionVersion: STRUCTURED_DATA_EXTRACTION_VERSION },
+      requirements: { requiredFacts: ['successfulHtmlExtraction', 'jsonLdBlockExtraction'], missingFacts: [], reason: 'No JSON-LD block exists to parse.', canCollectWithTargetedRun: false }
+    });
+    const affectedPages = new Set(errors.map((row) => row.url)).size;
+    const totalHtmlPages = Math.max(1, htmlPageCount(ctx.db, ctx.run.id));
+    const affectedRatio = affectedPages / totalHtmlPages;
+    const relevantDetailPages = new Set(errors.filter((row) => ['article', 'product'].includes(row.pageType)).map((row) => row.url)).size;
+    const widespread = affectedPages >= 3 && affectedRatio >= 0.5;
+    const relevantTemplateFailure = affectedPages >= 3 && relevantDetailPages === affectedPages && affectedRatio >= 0.25;
+    const errorHashes = [...new Set(errors.map((row) => row.snippetHash).filter(Boolean))];
+    const commonAuthoredBlock = errorHashes.length === 1 ? errorHashes[0] : null;
+    return makeResult(this, errors.length ? 'Error' : 'OK', {
+      priority: errors.length && (widespread || relevantTemplateFailure) ? 'High' : 'Medium',
+      affectedCount: errors.length,
+      sampleUrls: [...new Set(errors.map((row) => row.url))].slice(0, 10),
+      finding: errors.length ? `${errors.length} unique JSON-LD block(s) on ${affectedPages} page(s) failed JSON parsing.` : `${Math.max(blocksFound, schemaRows.length)} observed JSON-LD block/entity observation(s) were parseable.`,
+      recommendation: 'Fix the authored JSON syntax in each affected application/ld+json block; do not treat browser or extraction failures as website syntax errors.',
+      evidence: { blocksFound, parsedBlocks, emptyBlocks, affectedPages, totalHtmlPages, affectedRatio, relevantDetailPages, severityBasis: widespread ? 'widespread_site_scope' : relevantTemplateFailure ? 'relevant_detail_template_scope' : 'isolated_or_mixed_scope', commonAuthoredBlockHash: commonAuthoredBlock, displayedSamples: Math.min(errors.length, 10), samples: errors.slice(0, 10).map(compactSchemaError), extractionVersion: STRUCTURED_DATA_EXTRACTION_VERSION },
+      requirements: { requiredFacts: ['successfulHtmlExtraction', 'jsonLdBlockExtraction', 'jsonParseOutcome'], optionalFacts: ['stableRenderedJsonLdWhenRenderRequired'], missingFacts: [], minimumCoverage: 1, canCollectWithTargetedRun: true },
+      rootCauseKey: commonAuthoredBlock ? `structured_data.json_ld_syntax.${commonAuthoredBlock.slice(0, 16)}` : 'structured_data.json_ld_syntax.mixed',
+      rootCauseFamily: 'structured_data.syntax',
+      scopeType: commonAuthoredBlock && affectedPages > 1 ? 'template' : 'url'
     });
   }, { priority: 'High' });
+}
+
+function structuredDataFactCount(factsRows, field) {
+  return factsRows.reduce((sum, row) => sum + Number(row.raw?.[field] ?? row[field] ?? 0) + Number(row.rendered?.[field] ?? 0), 0);
+}
+
+function compactSchemaError(row) {
+  return {
+    url: row.url,
+    block_index: row.blockIndex ?? null,
+    source: row.source || 'historical_unknown',
+    script_type: row.scriptType || 'application/ld+json',
+    body_length: row.bodyLength ?? null,
+    parse_error_type: row.parseErrorType || 'historical_json_parse_error',
+    parse_error_position: row.parseErrorPosition ?? null,
+    snippet_hash: row.snippetHash || null,
+    technical_error: row.technicalError || null,
+    message: row.parseError || null
+  };
 }
 
 function schemaCoverageSummary() {
@@ -3221,26 +3289,15 @@ function productCoverage() {
 }
 
 function pageTypeSchemaCoverage(check, ctx, pageType, schemaType) {
-  const candidates = all(ctx.db, `
-    SELECT url, schemaTypesJson, statusCode, contentType, indexable, pageType, textFactsJson, featureFlagsJson
-    FROM pages
-    WHERE runId = ? AND pageType = ? AND ${SUCCESSFUL_HTML_WHERE} AND COALESCE(indexable, 1) = 1
-    ORDER BY id ASC
-  `, [ctx.run.id, pageType]);
-  const classified = candidates.map((row) => {
-    const schemaMatches = schemaCoverageMatches(safeJson(row.schemaTypesJson, []), schemaType);
-    return { ...row, schemaMatches, classificationReliable: schemaMatches || reliableStoredPageType(row, pageType) };
-  });
-  const uncertain = classified.filter((row) => !row.classificationReliable);
-  const evaluable = classified.filter((row) => row.classificationReliable);
-  const missing = evaluable.filter((row) => !row.schemaMatches);
+  const { candidates, scopeUnavailable, uncertain, evaluable, missing } = evaluatePageTypeSchemaCoverage(ctx.db, ctx.run.id, pageType, schemaType);
   const rows = missing.slice(0, 10);
   const total = candidates.length;
   const affectedCount = missing.length;
-  if (total && uncertain.length && !affectedCount) return availabilityResult(check, 'insufficient_evidence', {
-    finding: `${evaluable.length}/${total} stored ${pageType} candidate(s) have reliable classification evidence; schema absence was not inferred for ${uncertain.length} legacy/ambiguous row(s).`,
-    evidence: { pageType, schemaType, totalCandidatePages: total, evaluableCandidates: evaluable.length, uncertainCandidates: uncertain.length, uncertainSamples: uncertain.slice(0, 10).map((row) => row.url) },
-    requirements: { requiredFacts: [`${pageType}PageClassification`, 'schemaTypeExtraction'], optionalFacts: [], missingFacts: ['reliablePageTypeEvidence'], minimumCoverage: 1, canCollectWithTargetedRun: true },
+  const incompleteCandidates = uncertain.length + scopeUnavailable.length;
+  if (incompleteCandidates && !affectedCount) return availabilityResult(check, 'insufficient_evidence', {
+    finding: `${evaluable.length}/${total + scopeUnavailable.length} stored ${pageType} candidate(s) have complete scope and classification evidence; schema absence was not inferred for ${incompleteCandidates} incomplete candidate(s).`,
+    evidence: { pageType, schemaType, totalCandidatePages: total, evaluableCandidates: evaluable.length, uncertainCandidates: uncertain.length, unknownIndexabilityCandidates: scopeUnavailable.length, uncertainSamples: [...uncertain, ...scopeUnavailable].slice(0, 10).map((row) => row.url), classificationVersion: 'structured-page-type-v2', coverageLogicVersion: STRUCTURED_DATA_COVERAGE_LOGIC_VERSION },
+    requirements: { requiredFacts: [`${pageType}PageClassification`, 'schemaTypeExtraction', 'indexability'], optionalFacts: [], missingFacts: [...(uncertain.length ? ['reliablePageTypeEvidence'] : []), ...(scopeUnavailable.length ? ['indexability'] : [])], minimumCoverage: 1, canCollectWithTargetedRun: true },
     reportGroupingKey: `schema.${schemaType.toLowerCase()}`,
     rootCauseKey: schemaType === 'Article' ? 'structured_data.article_coverage' : `structured_data.${schemaType.toLowerCase()}_coverage`,
     rootCauseFamily: `structured_data.${schemaType.toLowerCase()}`,
@@ -3251,41 +3308,26 @@ function pageTypeSchemaCoverage(check, ctx, pageType, schemaType) {
     evaluationState: !total ? 'not_applicable' : affectedCount ? 'fail' : 'pass',
     affectedCount,
     sampleUrls: rows.map((row) => row.url),
-    finding: total ? `${affectedCount}/${total} ${pageType} page(s) lack ${schemaType} schema.` : `No ${pageType} pages detected by stored heuristics.`,
+    finding: total ? `${affectedCount}/${evaluable.length} evaluable ${pageType} page(s) lack ${schemaType} schema.` : `No applicable ${pageType} pages with complete scope evidence were detected.`,
     recommendation: `Add ${schemaType} schema only to pages that visibly match the ${pageType} intent; review heuristic page-type samples before treating this as a template defect.`,
     details: `Evaluated only pages classified as pageType=${pageType}.`,
-    evidence: { pageType, schemaType, validArticleSubtypes: schemaType === 'Article' ? ['Article', 'BlogPosting', 'NewsArticle', 'Report', 'ScholarlyArticle', 'SocialMediaPosting', 'TechArticle'] : undefined, totalCandidatePages: total, evaluableCandidates: evaluable.length, uncertainCandidates: uncertain.length, affectedCount, displayedSamples: rows.length, sampleUrls: rows.map((row) => row.url) },
+    evidence: { pageType, schemaType, acceptedSchemaFamily: schemaType, typeHierarchyVersion: SCHEMA_TYPE_HIERARCHY_VERSION, propertyCompletenessEvaluated: false, totalCandidatePages: total, evaluableCandidates: evaluable.length, uncertainCandidates: uncertain.length, unknownIndexabilityCandidates: scopeUnavailable.length, affectedCount, displayedSamples: rows.length, sampleUrls: rows.map((row) => row.url), classificationVersion: 'structured-page-type-v2', coverageLogicVersion: STRUCTURED_DATA_COVERAGE_LOGIC_VERSION },
     reportGroupingKey: `schema.${schemaType.toLowerCase()}`,
     rootCauseKey: schemaType === 'Article' ? 'structured_data.article_coverage' : `structured_data.${schemaType.toLowerCase()}_coverage`,
     rootCauseFamily: `structured_data.${schemaType.toLowerCase()}`,
     scopeType: 'template',
     relatedCheckIds: schemaType === 'Article' ? ['geo.article_blog_pages_article_schema'] : [],
-    requirements: { requiredFacts: [`${pageType}PageClassification`, 'schemaTypeExtraction'], optionalFacts: [], missingFacts: [], minimumCoverage: 1, canCollectWithTargetedRun: true },
+    requirements: { requiredFacts: [`${pageType}PageClassification`, 'schemaTypeExtraction', 'indexability'], optionalFacts: [], missingFacts: [...(uncertain.length ? ['reliablePageTypeEvidence'] : []), ...(scopeUnavailable.length ? ['indexability'] : [])], minimumCoverage: 1, canCollectWithTargetedRun: true },
     findingType: 'opportunity',
-    confidence: total >= 20 ? 'high' : total ? 'medium' : 'low',
+    confidence: incompleteCandidates ? 'medium' : total >= 20 ? 'high' : total ? 'medium' : 'low',
     reviewRecommended: affectedCount > 0,
     reviewReason: affectedCount ? 'Schema eligibility depends on visible page content and template intent.' : null,
-    dataBasis: 'pageType heuristic and stored schema types',
+    dataBasis: 'high-confidence page-type classification and effective raw/rendered schema types',
     evidenceLevel: 'sample',
     automationCoverage: 'partial',
     maturityImpact: affectedCount ? 'low' : 'none',
-    limitations: 'Heuristic pageType classification can include edge-case utility or recall pages.'
+    limitations: 'This presence check does not assert Google rich-result eligibility or property completeness; medium/low page-type confidence is excluded from normal fail evaluation.'
   });
-}
-
-function reliableStoredPageType(row, pageType) {
-  if (!hasVisibleTextProvenance(row.textFactsJson)) return false;
-  const flags = safeJson(row.featureFlagsJson, {});
-  if (pageType === 'article') {
-    return Number(flags.articleElementCount || 0) > 0 || /\/(beitrag|post|posts|article|articles|artikel)\//i.test(String(row.url || ''));
-  }
-  if (pageType === 'product') return flags.productLike === true;
-  return true;
-}
-
-function schemaCoverageMatches(schemaTypes, schemaType) {
-  if (schemaType === 'Article') return hasArticleSchema(schemaTypes);
-  return schemaTypes.some((type) => String(type || '').toLowerCase() === String(schemaType || '').toLowerCase());
 }
 
 function breadcrumbCoverage() {
@@ -3437,7 +3479,7 @@ function localBusinessDomainHint() {
 
 function organizationSameAsMissing() {
   return tech('organization_sameas_missing', 'Structured Data', 'Organization sameAs missing', function run(ctx) {
-    const orgRows = all(ctx.db, "SELECT rawJson FROM schemas WHERE runId = ? AND schemaType = 'Organization' AND parseStatus = 'ok'", [ctx.run.id]);
+    const orgRows = all(ctx.db, "SELECT rawJson, propertiesJson FROM schemas WHERE runId = ? AND schemaType = 'Organization' AND parseStatus = 'ok'", [ctx.run.id]);
     if (!orgRows.length) {
       return availabilityResult(this, 'not_applicable', {
         finding: 'No Organization schema block was observed, so sameAs completeness was not assessed.',
@@ -3449,8 +3491,8 @@ function organizationSameAsMissing() {
         scoreDeduplicationKey: 'organization.same_as'
       });
     }
-    const rawAvailable = orgRows.some((row) => row.rawJson !== null && row.rawJson !== undefined);
-    if (!rawAvailable) {
+    const propertiesAvailable = orgRows.some((row) => safeJson(row.propertiesJson, []).length || row.rawJson !== null && row.rawJson !== undefined);
+    if (!propertiesAvailable) {
       return availabilityResult(this, 'insufficient_evidence', {
         finding: 'Organization schema was observed, but retained schema facts are insufficient to assess sameAs.',
         details: 'A missing retained rawJson field is not evidence that sameAs is absent.',
@@ -3461,7 +3503,7 @@ function organizationSameAsMissing() {
         scoreDeduplicationKey: 'organization.same_as'
       });
     }
-    const hasSameAs = orgRows.some((row) => /"sameAs"\s*:/.test(row.rawJson || ''));
+    const hasSameAs = orgRows.some((row) => safeJson(row.propertiesJson, []).includes('sameAs') || /"sameAs"\s*:/.test(row.rawJson || ''));
     return makeResult(this, hasSameAs ? 'OK' : 'Warning', {
       affectedCount: hasSameAs ? 0 : 1,
       finding: hasSameAs ? 'Organization schema includes sameAs.' : 'Organization schema with sameAs was not found.',

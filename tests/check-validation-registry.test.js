@@ -116,3 +116,33 @@ test('robots and sitemap family records XML, coverage and policy limits conserva
   assert.equal(byId.get('tech.orphan_like_sitemap_urls').validation_status, 'manual_review_required');
   assert.equal(byId.get('tech.orphan_like_sitemap_urls').score_effect, 'score_free');
 });
+
+test('structured-data family records parser, page-type and optional GEO limits conservatively', () => {
+  const registry = loadCheckValidationRegistry();
+  const byId = new Map(registry.checks.map((entry) => [entry.check_id, entry]));
+  const parser = byId.get('tech.json_ld_parse_errors');
+  assert.equal(parser.validation_status, 'fixture_validated');
+  assert.equal(parser.requirement_definition_status, 'declared');
+  assert.match(parser.validation_gap.missing_evidence.join(' '), /real positive case/);
+  assert.ok(parser.tested_domains.length >= 10);
+
+  for (const id of ['tech.article_coverage_on_article_like_pages', 'tech.product_coverage_on_product_like_pages']) {
+    const entry = byId.get(id);
+    assert.equal(entry.validation_status, 'validated_with_limits', id);
+    assert.equal(entry.recommended_trust_action, 'automated_with_limits', id);
+    assert.ok(entry.known_limits.length >= 2, id);
+  }
+  const techArticle = byId.get('tech.article_coverage_on_article_like_pages');
+  const geoArticle = byId.get('geo.article_blog_pages_article_schema');
+  assert.equal(techArticle.coverage_unit, geoArticle.coverage_unit);
+  assert.equal(techArticle.root_cause_family, geoArticle.root_cause_family);
+  assert.equal(geoArticle.validation_status, 'manual_review_required');
+  assert.equal(geoArticle.score_effect, 'score_free');
+  assert.equal(byId.get('tech.schema_types_coverage_summary').validation_status, 'validated_with_limits');
+  assert.equal(byId.get('tech.schema_types_coverage_summary').score_effect, 'score_free');
+  const template = byId.get('template.schema_missing_pattern');
+  assert.equal(template.validation_status, 'manual_review_required');
+  assert.equal(template.finding_type, 'opportunity');
+  assert.equal(template.score_effect, 'score_free');
+  assert.equal(template.requirement_definition_status, 'declared');
+});

@@ -156,19 +156,15 @@ export function filterArtifactsForStorage(run = {}, artifacts = {}) {
 }
 
 export function normalizeSchemasForStorage(runOrStorage = {}, schemas = []) {
-  const storage = runOrStorage.storageProfile ? normalizeStorageConfig(runOrStorage) : normalizeStorageConfig({ storageProfile: 'standard' });
-  const rawLimit = storage.storageProfile === 'debug'
-    ? DEFAULT_POLICY.maxDebugSchemaRawJsonBytes
-    : storage.storageProfile === 'lean'
-      ? 0
-      : DEFAULT_POLICY.maxStandardSchemaRawJsonBytes;
+  // Structured-data bodies can contain publisher/customer content. New runs retain
+  // compact provenance and property names, never the complete foreign JSON-LD body.
   return schemas.map((schema) => ({
     ...schema,
-    rawJson: rawLimit ? truncateText(schema.rawJson, rawLimit) : null,
-    rawJsonHash: schema.rawJson ? crypto.createHash('sha1').update(String(schema.rawJson)).digest('hex') : null,
+    rawJson: null,
+    rawJsonHash: schema.snippetHash || (schema.rawJson ? crypto.createHash('sha256').update(String(schema.rawJson)).digest('hex') : null),
     rawJsonBytes: schema.rawJson ? Buffer.byteLength(String(schema.rawJson), 'utf8') : null,
-    rawJsonTruncated: Boolean(schema.rawJson && rawLimit && String(schema.rawJson).length > rawLimit),
-    rawJsonStored: Boolean(schema.rawJson && rawLimit)
+    rawJsonTruncated: false,
+    rawJsonStored: false
   }));
 }
 

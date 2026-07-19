@@ -88,6 +88,7 @@ test('template schema roll-up accepts BlogPosting and remains score-free', () =>
   for (let index = 1; index <= 3; index += 1) {
     insertPage(fixture.db, fixture.runId, `https://articles.invalid/blog/post-${index}`, {
       pageType: 'article',
+      pageTypeConfidence: 'high',
       templateClusterKey: 'article:/blog/{slug}',
       schemaTypesJson: JSON.stringify(['BlogPosting', 'BreadcrumbList'])
     });
@@ -105,6 +106,24 @@ test('template schema roll-up accepts BlogPosting and remains score-free', () =>
   assert.equal(title.priority, 'Low');
   assert.equal(title.scoreEligible, false);
   assert.match(title.scoreExclusionReason, /derived template roll-up/i);
+});
+
+test('template schema roll-up uses exact hierarchy types and separates schema root causes', () => {
+  const fixture = makeFixture('https://exact-types.invalid');
+  for (let index = 1; index <= 3; index += 1) {
+    insertPage(fixture.db, fixture.runId, `https://exact-types.invalid/blog/post-${index}`, {
+      pageType: 'article',
+      pageTypeConfidence: 'high',
+      templateClusterKey: 'article:/blog/{slug}',
+      schemaTypesJson: JSON.stringify(['NotArticle', 'BreadcrumbList'])
+    });
+  }
+  const result = runTemplate('template.schema_missing_pattern', fixture);
+  assert.equal(result.status, 'Warning');
+  assert.equal(result.scoreEligible, false);
+  assert.equal(result.evidence.patterns.length, 1);
+  assert.equal(result.evidence.patterns[0].issueType, 'article_schema_missing');
+  assert.match(result.evidence.patterns[0].rootCauseKey, /article_schema_missing$/);
 });
 
 test('missing protocol measurements fail closed as insufficient evidence', () => {
@@ -279,8 +298,8 @@ function insertPage(db, runId, url, overrides = {}) {
     INSERT INTO pages (
       runId,url,normalizedUrl,finalUrl,depth,statusCode,initialStatusCode,contentType,indexable,
       title,titleLength,metaDescription,metaDescriptionLength,h1Json,h1Count,renderedH1Json,renderedH1Count,
-      canonical,htmlLang,rawHtmlSize,pageType,schemaTypesJson,templateClusterKey,renderStatus
-    ) VALUES (?,?,?,?,0,200,200,'text/html',1,?,30,?,120,'[]',?, '[]', ?, ?, 'en', 1024, ?, ?, ?, ?)
+      canonical,htmlLang,rawHtmlSize,pageType,pageTypeConfidence,schemaTypesJson,templateClusterKey,renderStatus
+    ) VALUES (?,?,?,?,0,200,200,'text/html',1,?,30,?,120,'[]',?, '[]', ?, ?, 'en', 1024, ?, ?, ?, ?, ?)
   `).run(
     runId, url, normalizeUrl(url), normalizeUrl(url),
     overrides.title ?? 'Representative page title',
@@ -289,6 +308,7 @@ function insertPage(db, runId, url, overrides = {}) {
     overrides.renderedH1Count ?? 0,
     overrides.canonical ?? normalizeUrl(url),
     overrides.pageType ?? 'other',
+    overrides.pageTypeConfidence ?? null,
     overrides.schemaTypesJson ?? '[]',
     overrides.templateClusterKey ?? null,
     overrides.renderStatus ?? 'not_executed'

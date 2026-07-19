@@ -10,9 +10,10 @@ import {
   sampleUrls
 } from '../helpers.js';
 import { blocksTxtFiles, summarizeAiBotRules } from '../../utils/robots.js';
-import { hasArticleSchema } from '../../extractors/pageType.js';
 import { hasVisibleTextProvenance, VISIBLE_TEXT_NORMALIZATION_VERSION } from '../../extractors/visibleText.js';
 import { analyzeRobotsAsset, ROBOTS_SITEMAP_VALIDATION_VERSION } from '../../utils/discoverySemantics.js';
+import { evaluatePageTypeSchemaCoverage, STRUCTURED_DATA_COVERAGE_LOGIC_VERSION } from '../structuredDataCoverage.js';
+import { SCHEMA_TYPE_HIERARCHY_VERSION } from '../../extractors/structuredData.js';
 
 const geo = (id, category, name, run, options = {}) => ({
   id: `geo.${id}`,
@@ -842,7 +843,7 @@ function internalNavLink(id, category, name, needles) {
 
 function organizationSameAs() {
   return geo('organization_schema_sameas', 'Structured Data', 'Organization Schema mit sameAs vorhanden', function run(ctx) {
-    const rows = all(ctx.db, "SELECT pageUrl AS url, rawJson FROM schemas WHERE runId = ? AND schemaType = 'Organization'", [ctx.run.id]);
+    const rows = all(ctx.db, "SELECT pageUrl AS url, rawJson, propertiesJson FROM schemas WHERE runId = ? AND schemaType = 'Organization'", [ctx.run.id]);
     if (!rows.length) {
       return availabilityResult(this, 'not_applicable', {
         finding: 'No Organization schema block was observed, so sameAs completeness was not assessed.',
@@ -854,7 +855,7 @@ function organizationSameAs() {
         scoreDeduplicationKey: 'organization.same_as'
       });
     }
-    if (!rows.some((row) => row.rawJson !== null && row.rawJson !== undefined)) {
+    if (!rows.some((row) => safeJson(row.propertiesJson, []).length || row.rawJson !== null && row.rawJson !== undefined)) {
       return availabilityResult(this, 'insufficient_evidence', {
         finding: 'Organization schema was observed, but retained schema properties are insufficient to assess sameAs.',
         details: 'Missing retained raw JSON is not evidence that the property is absent.',
@@ -865,7 +866,7 @@ function organizationSameAs() {
         scoreDeduplicationKey: 'organization.same_as'
       });
     }
-    const matches = rows.filter((row) => /"sameAs"\s*:/.test(row.rawJson || ''));
+    const matches = rows.filter((row) => safeJson(row.propertiesJson, []).includes('sameAs') || /"sameAs"\s*:/.test(row.rawJson || ''));
     return makeResult(this, matches.length ? 'OK' : 'Warning', {
       affectedCount: matches.length ? 0 : 1,
       sampleUrls: matches.map((row) => row.url),
@@ -968,32 +969,14 @@ function breadcrumbPresence() {
 
 function articleBlogWithArticleSchema() {
   return geo('article_blog_pages_article_schema', 'Structured Data', 'Article/Blog-Seiten mit Article Schema', function run(ctx) {
-    const candidates = all(ctx.db, `
-      SELECT url, schemaTypesJson, textFactsJson, featureFlagsJson
-      FROM pages
-      WHERE runId = ? AND pageType = 'article' AND statusCode >= 200 AND statusCode < 300
-        AND (contentType LIKE '%text/html%' OR contentType LIKE '%application/xhtml%')
-        AND COALESCE(indexable, 1) = 1
-      ORDER BY id ASC
-    `, [ctx.run.id]);
-    const classified = candidates.map((row) => {
-      const schemaMatches = hasArticleSchema(safeJson(row.schemaTypesJson, []));
-      const flags = safeJson(row.featureFlagsJson, {});
-      const classificationReliable = schemaMatches || hasVisibleTextProvenance(row.textFactsJson) && (
-        Number(flags.articleElementCount || 0) > 0 ||
-        /\/(beitrag|post|posts|article|articles|artikel)\//i.test(String(row.url || ''))
-      );
-      return { ...row, schemaMatches, classificationReliable };
-    });
-    const uncertain = classified.filter((row) => !row.classificationReliable);
-    const evaluable = classified.filter((row) => row.classificationReliable);
-    const missing = evaluable.filter((row) => !row.schemaMatches);
+    const { candidates, scopeUnavailable, uncertain, evaluable, missing } = evaluatePageTypeSchemaCoverage(ctx.db, ctx.run.id, 'article', 'Article');
     const rows = missing.slice(0, 10);
     const candidateCount = candidates.length;
-    if (candidateCount && uncertain.length && !missing.length) return availabilityResult(this, 'insufficient_evidence', {
-      finding: `${evaluable.length}/${candidateCount} stored article candidate(s) have reliable classification evidence; ${uncertain.length} ambiguous legacy row(s) were excluded.`,
-      evidence: { candidateCount, evaluableCandidates: evaluable.length, uncertainCandidates: uncertain.length, acceptedTypes: ['Article', 'BlogPosting', 'NewsArticle', 'Report', 'ScholarlyArticle', 'SocialMediaPosting', 'TechArticle'], uncertainSamples: uncertain.slice(0, 10).map((row) => row.url) },
-      requirements: { requiredFacts: ['reliableArticlePageClassification', 'schemaTypeExtraction'], missingFacts: ['reliableArticlePageClassification'], minimumCoverage: 1, canCollectWithTargetedRun: true },
+    const incompleteCandidates = uncertain.length + scopeUnavailable.length;
+    if (incompleteCandidates && !missing.length) return availabilityResult(this, 'insufficient_evidence', {
+      finding: `${evaluable.length}/${candidateCount + scopeUnavailable.length} stored article candidate(s) have complete scope and classification evidence; ${incompleteCandidates} incomplete candidate(s) were excluded.`,
+      evidence: { candidateCount, evaluableCandidates: evaluable.length, uncertainCandidates: uncertain.length, unknownIndexabilityCandidates: scopeUnavailable.length, acceptedSchemaFamily: 'Article', typeHierarchyVersion: SCHEMA_TYPE_HIERARCHY_VERSION, uncertainSamples: [...uncertain, ...scopeUnavailable].slice(0, 10).map((row) => row.url), coverageLogicVersion: STRUCTURED_DATA_COVERAGE_LOGIC_VERSION },
+      requirements: { requiredFacts: ['reliableArticlePageClassification', 'schemaTypeExtraction', 'indexability'], missingFacts: [...(uncertain.length ? ['reliableArticlePageClassification'] : []), ...(scopeUnavailable.length ? ['indexability'] : [])], minimumCoverage: 1, canCollectWithTargetedRun: true },
       reportGroupingKey: 'schema.article',
       rootCauseKey: 'structured_data.article_coverage',
       rootCauseFamily: 'structured_data.article',
@@ -1004,11 +987,18 @@ function articleBlogWithArticleSchema() {
     return makeResult(this, status, {
       affectedCount: missing.length,
       sampleUrls: rows.map((row) => row.url),
-      finding: candidateCount ? `${missing.length}/${candidateCount} article page(s) lack an Article-compatible schema type.` : 'No unambiguous, successful, indexable article pages were detected.',
+      finding: candidateCount ? `${missing.length}/${evaluable.length} evaluable article page(s) lack an Article-compatible schema type.` : 'No unambiguous, successful, indexable article pages were detected.',
       recommendation: 'Use Article schema on qualifying editorial pages.',
       details: "Evaluated only pages classified as pageType='article'.",
-      evidence: { candidateCount, evaluableCandidates: evaluable.length, uncertainCandidates: uncertain.length, affectedCount: missing.length, displayedSamples: rows.length, acceptedTypes: ['Article', 'BlogPosting', 'NewsArticle', 'Report', 'ScholarlyArticle', 'SocialMediaPosting', 'TechArticle'], missingArticleSchemaSamples: rows.map((row) => row.url) },
+      evidence: { candidateCount, evaluableCandidates: evaluable.length, uncertainCandidates: uncertain.length, unknownIndexabilityCandidates: scopeUnavailable.length, affectedCount: missing.length, displayedSamples: rows.length, acceptedSchemaFamily: 'Article', typeHierarchyVersion: SCHEMA_TYPE_HIERARCHY_VERSION, propertyCompletenessEvaluated: false, missingArticleSchemaSamples: rows.map((row) => row.url), coverageLogicVersion: STRUCTURED_DATA_COVERAGE_LOGIC_VERSION },
+      requirements: { requiredFacts: ['reliableArticlePageClassification', 'schemaTypeExtraction', 'indexability'], optionalFacts: ['stableRenderedSchemaWhenRenderRequired'], missingFacts: [...(uncertain.length ? ['reliableArticlePageClassification'] : []), ...(scopeUnavailable.length ? ['indexability'] : [])], minimumCoverage: 1, canCollectWithTargetedRun: true },
       findingType: 'opportunity',
+      scoreEligible: false,
+      scoreExclusionReason: 'The technical Article coverage check owns the shared scoring unit; GEO keeps a review perspective without a second penalty.',
+      evaluationState: !candidateCount ? 'not_applicable' : missing.length ? 'fail' : 'pass',
+      confidence: incompleteCandidates ? 'medium' : candidateCount >= 20 ? 'high' : candidateCount ? 'medium' : 'low',
+      reviewRecommended: missing.length > 0,
+      reviewReason: missing.length ? 'Article schema is optional for general indexing and its value depends on the editorial template and implementation goals.' : null,
       reportGroupingKey: 'schema.article',
       rootCauseKey: 'structured_data.article_coverage',
       rootCauseFamily: 'structured_data.article',

@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import * as cheerio from 'cheerio';
 import { thresholds } from '../checks/config/thresholds.js';
 import { normalizeUrl } from '../utils/url.js';
+import { collectSchemaTypes } from '../extractors/structuredData.js';
 
 const SUPPORTED_TARGETED_JOB_TYPES = new Set([
   'title_facts',
@@ -164,7 +165,7 @@ function schemaSummaryFacts($) {
     jsonLdHashes.push(hashText(raw));
     cappedJsonLdExcerpt = appendCappedExcerpt(cappedJsonLdExcerpt, raw, MAX_JSON_LD_EXCERPT_BYTES);
     try {
-      collectSchemaTypes(JSON.parse(raw), schemaTypes);
+      for (const schemaType of collectSchemaTypes(JSON.parse(raw))) schemaTypes.add(schemaType);
     } catch (error) {
       if (parseErrors.length < MAX_PARSE_ERRORS) {
         parseErrors.push({
@@ -318,31 +319,6 @@ function originOf(value) {
     return value ? new URL(value).origin : null;
   } catch {
     return null;
-  }
-}
-
-function collectSchemaTypes(value, output) {
-  if (!value) return;
-  if (Array.isArray(value)) {
-    for (const item of value) collectSchemaTypes(item, output);
-    return;
-  }
-  if (typeof value !== 'object') return;
-  const type = value['@type'] || value.type;
-  if (Array.isArray(type)) {
-    for (const item of type) {
-      const name = schemaTypeName(item);
-      if (name) output.add(name);
-    }
-  } else {
-    const name = schemaTypeName(type);
-    if (name) output.add(name);
-  }
-  for (const key of ['@graph', 'itemListElement', 'mainEntity', 'mainEntityOfPage', 'author', 'publisher', 'breadcrumb']) {
-    if (value[key]) collectSchemaTypes(value[key], output);
-  }
-  for (const nested of Object.values(value)) {
-    if (nested && typeof nested === 'object') collectSchemaTypes(nested, output);
   }
 }
 

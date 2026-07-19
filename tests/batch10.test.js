@@ -99,7 +99,7 @@ test('Batch 10 raw HTML snapshots stay separate and debug can store capped HTML'
   db.close();
 });
 
-test('Batch 10.3 storage caps schema rawJson, domain assets and page links by profile', () => {
+test('Batch 10.3 storage retains schema hashes but no foreign rawJson, and caps assets and links by profile', () => {
   const db = setupDb();
   const standardRunId = seedRun(db, { storageProfile: 'standard' });
   const leanRunId = seedRun(db, { storageProfile: 'lean' });
@@ -155,9 +155,9 @@ test('Batch 10.3 storage caps schema rawJson, domain assets and page links by pr
   const standardSchema = db.prepare('SELECT rawJson FROM schemas WHERE runId = ?').get(standardRunId);
   const leanSchema = db.prepare('SELECT rawJson FROM schemas WHERE runId = ?').get(leanRunId);
   const debugSchema = db.prepare('SELECT rawJson FROM schemas WHERE runId = ?').get(debugRunId);
-  assert.ok(standardSchema.rawJson.length < 5000);
+  assert.equal(standardSchema.rawJson, null);
   assert.equal(leanSchema.rawJson, null);
-  assert.ok(debugSchema.rawJson.length > 10000);
+  assert.equal(debugSchema.rawJson, null);
   assert.equal(db.prepare('SELECT COUNT(*) AS count FROM page_links WHERE runId = ?').get(standardRunId).count, 25);
   assert.equal(db.prepare('SELECT COUNT(*) AS count FROM page_links WHERE runId = ?').get(leanRunId).count, 0);
   assert.equal(db.prepare('SELECT COUNT(*) AS count FROM domain_assets WHERE runId = ?').get(standardRunId).count, 1);
@@ -276,10 +276,21 @@ test('Batch 10 template pattern checks detect title, noindex and missing schema 
       metaDescription: 'Short',
       h1Text: `Product ${index}`,
       pageType: 'product',
+      pageTypeConfidence: 'high',
       noindex: index <= 3,
       metaRobots: index <= 3 ? 'noindex' : '',
       schemaTypes: [],
       rawHtmlSize: 300 * 1024
+    }));
+    insertPage(db, pageRecordFromFact(runId, {
+      url: `https://example.com/catalog/${index}`,
+      statusCode: 200,
+      title: `Indexable product ${index}`,
+      metaDescription: 'A complete description for an indexable product detail fixture.',
+      h1Text: `Indexable product ${index}`,
+      pageType: 'product',
+      pageTypeConfidence: 'high',
+      schemaTypes: []
     }));
   }
   buildTemplateClusters(db, runId);

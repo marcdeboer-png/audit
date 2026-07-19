@@ -10,6 +10,7 @@ import { createHttpStatusError } from './retryPolicy.js';
 import { crawlerDefaults } from './defaults.js';
 import { filterArtifactsForStorage, snapshotHtml } from '../storage/retention.js';
 import { buildEffectiveDocumentState, RENDER_PROVENANCE_VERSION, SETTLING_POLICY_VERSION } from '../extractors/documentState.js';
+import { classifyPageType } from '../extractors/pageType.js';
 import { activeRenderCheckIdsForAuditType, classifierForRenderPlanningVersion, RENDER_NEEDS } from '../rendering/renderPlanner.js';
 import { serializedRenderProvenanceBytes } from '../runtime/renderMetrics.js';
 import { appendHttpAttemptHistory, compactHttpAttempt } from '../utils/httpStatus.js';
@@ -143,6 +144,18 @@ export async function processQueueItem(db, run, project, queueItem, browser, rob
   const effectiveDocumentState = buildEffectiveDocumentState(rawDocumentState, initialRenderedState, settledRenderedState, render);
   const effective = Object.fromEntries(Object.entries(effectiveDocumentState.fields || {}).map(([key, value]) => [key, value.effective]));
   const renderedMeasurementComplete = metadataProvenanceIsComplete(run, shouldRender && budget.allowed, render, renderNeed);
+  const rawPageTypeSignals = safeJson(extracted.page.pageTypeSignalsJson, []);
+  const effectivePageTypeClassification = classifyPageType({
+    url: normalizedFinalUrl,
+    schemaTypes: effective.structuredData?.types || [],
+    title: effective.title || extracted.page.title || '',
+    h1: effective.h1 || [],
+    semanticSignals: safeJson(extracted.page.featureFlagsJson, {})
+  });
+  const pageTypeClassification = extracted.page.pageType !== 'other'
+    ? { pageType: extracted.page.pageType, confidence: extracted.page.pageTypeConfidence, signals: rawPageTypeSignals }
+    : effectivePageTypeClassification;
+  const rawStructuredDataFacts = safeJson(extracted.page.structuredDataFactsJson, {});
   const pageRecord = {
     runId: run.id,
     url,
@@ -198,7 +211,18 @@ export async function processQueueItem(db, run, project, queueItem, browser, rob
     effectiveOgJson: JSON.stringify(effective.openGraph || {}),
     effectiveTwitterJson: JSON.stringify(effective.twitter || {}),
     effectiveHreflangJson: JSON.stringify(effective.hreflang || []),
-    effectiveSchemaTypesJson: JSON.stringify(effective.structuredData?.types || [])
+    effectiveSchemaTypesJson: JSON.stringify(effective.structuredData?.types || []),
+    structuredDataFactsJson: JSON.stringify({
+      version: rawStructuredDataFacts.version || null,
+      raw: rawStructuredDataFacts,
+      rendered: render.renderedStructuredDataFacts || null,
+      effectiveSource: effectiveDocumentState.effectiveSource,
+      effectiveSchemaTypes: effective.structuredData?.types || [],
+      renderMeasurementComplete: renderedMeasurementComplete
+    }),
+    pageType: pageTypeClassification.pageType,
+    pageTypeConfidence: pageTypeClassification.confidence || 'low',
+    pageTypeSignalsJson: JSON.stringify(pageTypeClassification.signals || [])
   };
 
   const persistenceStartedAt = performance.now();
@@ -207,7 +231,7 @@ export async function processQueueItem(db, run, project, queueItem, browser, rob
     links: extracted.links.map((link) => ({ ...link, sourceUrl: normalizedFinalUrl })),
     images: extracted.images.map((image) => ({ ...image, pageUrl: normalizedFinalUrl })),
     resources,
-    schemas: extracted.schemas
+    schemas: [...extracted.schemas, ...(render.renderedSchemas || [])]
   }));
 
   if (run.storeRawHtml || run.storeRenderedHtml) {

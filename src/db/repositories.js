@@ -398,10 +398,10 @@ export function insertPage(db, page) {
       renderedTextLength, visibleTextLength, renderedVisibleTextLength, textFactsJson, rawHtmlSize, internalLinksCount, externalLinksCount,
       uniqueInternalTargetsCount, uniqueExternalTargetsCount, nofollowLinksCount,
       imageLinksCount, storedLinkRowsCount, linkRowsTruncated, linkSamplesJson,
-      inlinkCount, outlinkCount, schemaTypesJson, imagesCount, imagesWithoutAltCount, responseHeadersJson,
+      inlinkCount, outlinkCount, schemaTypesJson, structuredDataFactsJson, imagesCount, imagesWithoutAltCount, responseHeadersJson,
       loadTimeMs, ttfbMs, consoleErrorsJson, pageErrorsJson, requestFailuresJson, cspViolationsJson, navigationError, renderStatus, renderedH1Json, renderedH1Count,
       renderedLinksCount, ogJson, favicon, manifest, featureFlagsJson,
-      pageType, hasTables, hasLists, hasFaqPattern, hasVisibleDate,
+      pageType, pageTypeConfidence, pageTypeSignalsJson, hasTables, hasLists, hasFaqPattern, hasVisibleDate,
       hasAuthorPattern, externalSourceLinksCount, hasVideoEmbed,
       cruxLcp, cruxInp, cruxCls, cruxFcp, psiPerformanceScore,
       lighthousePerformanceScore, lighthouseSeoScore, importedSourceTypesJson,
@@ -423,10 +423,10 @@ export function insertPage(db, page) {
       @renderedTextLength, @visibleTextLength, @renderedVisibleTextLength, @textFactsJson, @rawHtmlSize, @internalLinksCount, @externalLinksCount,
       @uniqueInternalTargetsCount, @uniqueExternalTargetsCount, @nofollowLinksCount,
       @imageLinksCount, @storedLinkRowsCount, @linkRowsTruncated, @linkSamplesJson,
-      @inlinkCount, @outlinkCount, @schemaTypesJson, @imagesCount, @imagesWithoutAltCount, @responseHeadersJson,
+      @inlinkCount, @outlinkCount, @schemaTypesJson, @structuredDataFactsJson, @imagesCount, @imagesWithoutAltCount, @responseHeadersJson,
       @loadTimeMs, @ttfbMs, @consoleErrorsJson, @pageErrorsJson, @requestFailuresJson, @cspViolationsJson, @navigationError, @renderStatus, @renderedH1Json, @renderedH1Count,
       @renderedLinksCount, @ogJson, @favicon, @manifest, @featureFlagsJson,
-      @pageType, @hasTables, @hasLists, @hasFaqPattern, @hasVisibleDate,
+      @pageType, @pageTypeConfidence, @pageTypeSignalsJson, @hasTables, @hasLists, @hasFaqPattern, @hasVisibleDate,
       @hasAuthorPattern, @externalSourceLinksCount, @hasVideoEmbed,
       @cruxLcp, @cruxInp, @cruxCls, @cruxFcp, @psiPerformanceScore,
       @lighthousePerformanceScore, @lighthouseSeoScore, @importedSourceTypesJson,
@@ -488,6 +488,7 @@ export function insertPage(db, page) {
       inlinkCount = excluded.inlinkCount,
       outlinkCount = excluded.outlinkCount,
       schemaTypesJson = excluded.schemaTypesJson,
+      structuredDataFactsJson = excluded.structuredDataFactsJson,
       imagesCount = excluded.imagesCount,
       imagesWithoutAltCount = excluded.imagesWithoutAltCount,
       responseHeadersJson = excluded.responseHeadersJson,
@@ -507,6 +508,8 @@ export function insertPage(db, page) {
       manifest = excluded.manifest,
       featureFlagsJson = excluded.featureFlagsJson,
       pageType = excluded.pageType,
+      pageTypeConfidence = excluded.pageTypeConfidence,
+      pageTypeSignalsJson = excluded.pageTypeSignalsJson,
       hasTables = excluded.hasTables,
       hasLists = excluded.hasLists,
       hasFaqPattern = excluded.hasFaqPattern,
@@ -615,6 +618,9 @@ export function insertPage(db, page) {
     effectiveTwitterJson: null,
     effectiveHreflangJson: null,
     effectiveSchemaTypesJson: null,
+    structuredDataFactsJson: null,
+    pageTypeConfidence: null,
+    pageTypeSignalsJson: null,
     ...page
   });
 }
@@ -737,9 +743,12 @@ export function replacePageArtifacts(db, runId, pageUrl, { links = [], images = 
 
     const insertSchema = db.prepare(`
       INSERT INTO schemas (
-        runId, pageUrl, schemaType, rawJson, rawJsonHash, rawJsonBytes, parseStatus, parseError
+        runId, pageUrl, schemaType, rawJson, rawJsonHash, rawJsonBytes, parseStatus, parseError,
+        blockIndex, entityIndex, entityPath, entityId, source, scriptType, bodyLength, snippetHash,
+        parseErrorType, parseErrorPosition, technicalError, propertiesJson, referencedEntityIdsJson,
+        entityLinked, extractionStatesJson, entityCompletenessStatus, extractionVersion
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     for (const schema of schemas) {
       insertSchema.run(
@@ -750,7 +759,24 @@ export function replacePageArtifacts(db, runId, pageUrl, { links = [], images = 
         schema.rawJsonHash || null,
         schema.rawJsonBytes || null,
         schema.parseStatus,
-        schema.parseError ? truncateText(schema.parseError, 2000) : null
+        schema.parseError ? truncateText(schema.parseError, 2000) : null,
+        schema.blockIndex ?? null,
+        schema.entityIndex ?? null,
+        schema.entityPath || null,
+        schema.entityId || null,
+        schema.source || null,
+        schema.scriptType || null,
+        schema.bodyLength ?? null,
+        schema.snippetHash || null,
+        schema.parseErrorType || null,
+        schema.parseErrorPosition ?? null,
+        schema.technicalError ? truncateText(schema.technicalError, 2000) : null,
+        schema.propertiesJson || JSON.stringify([]),
+        schema.referencedEntityIdsJson || JSON.stringify([]),
+        schema.entityLinked ? 1 : 0,
+        schema.extractionStatesJson || JSON.stringify([]),
+        schema.entityCompletenessStatus || 'not_evaluated',
+        schema.extractionVersion || null
       );
     }
   });

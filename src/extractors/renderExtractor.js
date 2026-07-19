@@ -10,6 +10,7 @@ import {
   RENDER_PROVENANCE_VERSION,
   SETTLING_POLICY_VERSION
 } from './documentState.js';
+import { analyzeStructuredDataBlocks } from './structuredData.js';
 
 export async function launchBrowser(log = null) {
   try {
@@ -184,6 +185,32 @@ export async function renderPage(browser, url, finalDomain, timeoutMs = 15000, u
   phase = settling.stable ? 'settled' : 'settling_complete';
   const browserEvents = normalizeBrowserEvents(events, settledState);
   const renderedHtml = options.captureHtml ? await page.content().catch(() => null) : null;
+  let renderedStructuredData = { rows: [], types: [], blocksFound: 0, parsedBlocks: 0, failedBlocks: 0, emptyBlocks: 0 };
+  try {
+    const blocks = await page.$$eval('script', (nodes) => nodes.map((node) => ({
+      scriptType: String(node.getAttribute('type') || '').trim().toLowerCase(),
+      body: node.textContent || ''
+    })));
+    renderedStructuredData = analyzeStructuredDataBlocks(blocks, { source: 'rendered' });
+  } catch (error) {
+    observe('runner_error', `Rendered structured-data extraction failed: ${error.message}`);
+    renderedStructuredData = {
+      rows: [{
+        schemaType: null,
+        parseStatus: 'technical_error',
+        source: 'rendered',
+        scriptType: 'application/ld+json',
+        technicalError: String(error.message || 'Rendered structured-data extraction failed.').slice(0, 2000),
+        extractionStatesJson: JSON.stringify([]),
+        entityCompletenessStatus: 'not_evaluated'
+      }],
+      types: [],
+      blocksFound: 0,
+      parsedBlocks: 0,
+      failedBlocks: 0,
+      emptyBlocks: 0
+    };
+  }
   await page.close().catch(() => {});
 
   const finalLinks = settledState?.internalLinks || [];
@@ -216,7 +243,18 @@ export async function renderPage(browser, url, finalDomain, timeoutMs = 15000, u
     failedRequestCount: requestFailures.length,
     effectiveRenderedStateJson: JSON.stringify(effective),
     resources,
-    renderedHtml
+    renderedHtml,
+    renderedSchemas: renderedStructuredData.rows,
+    renderedStructuredDataFacts: {
+      version: renderedStructuredData.version || null,
+      source: 'rendered',
+      blocksFound: renderedStructuredData.blocksFound,
+      parsedBlocks: renderedStructuredData.parsedBlocks,
+      failedBlocks: renderedStructuredData.failedBlocks,
+      emptyBlocks: renderedStructuredData.emptyBlocks,
+      entityRows: renderedStructuredData.entityRows || 0,
+      schemaTypes: renderedStructuredData.types || []
+    }
   };
 }
 
@@ -344,7 +382,9 @@ function emptyRenderResult() {
     renderedHtml: null,
     browserNavigationDurationMs: null,
     networkRequestCount: null,
-    failedRequestCount: null
+    failedRequestCount: null,
+    renderedSchemas: [],
+    renderedStructuredDataFacts: null
   };
 }
 

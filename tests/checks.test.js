@@ -132,7 +132,7 @@ function insertPage(db, runId, {
       externalLinksCount, schemaTypesJson, imagesCount, imagesWithoutAltCount,
       responseHeadersJson, loadTimeMs, ttfbMs, consoleErrorsJson,
       renderedH1Json, renderedH1Count, renderedLinksCount, ogJson,
-      featureFlagsJson, textFactsJson, pageType, hasFaqPattern
+      featureFlagsJson, textFactsJson, pageType, pageTypeConfidence, hasFaqPattern
     )
     VALUES (
       @runId, @url, @url, @url, 1, 200, 'text/html; charset=utf-8',
@@ -141,7 +141,7 @@ function insertPage(db, runId, {
       0, @schemaTypesJson, 0, 0,
       '{"content-type":"text/html; charset=utf-8"}', 10, 20, '[]',
       '[]', 0, 1, '{}',
-      @featureFlagsJson, '{"normalization_version":"visible_text_v1","visible_text":{"length":1500}}', @pageType, @hasFaqPattern
+      @featureFlagsJson, '{"normalization_version":"visible_text_v1","visible_text":{"length":1500}}', @pageType, 'high', @hasFaqPattern
     )
   `).run({
     runId,

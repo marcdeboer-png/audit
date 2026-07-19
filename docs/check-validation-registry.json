@@ -1,9 +1,10 @@
 {
-  "registry_version": "check-validation-registry-v4",
-  "generated_at": "2026-07-19T22:15:00.000Z",
-  "source_commit": "496247f1f8b8e21cd45fd9081d85e1210489c56c",
+  "registry_version": "check-validation-registry-v5",
+  "generated_at": "2026-07-19T23:15:00.000Z",
+  "source_commit": "0b73e0fdb1f3851e01a575dcc18d5535dfb3b806",
   "check_logic_version": "csr-render-provenance-v1",
   "http_status_validation_version": "http-status-validation-v1",
+  "structured_data_validation_version": "structured-data-validation-v1",
   "status_values": [
     "unvalidated",
     "fixture_validated",
@@ -28,15 +29,15 @@
     "total_checks": 137,
     "total_active_checks": 137,
     "historical_checks": 0,
-    "validated_active_checks": 105,
+    "validated_active_checks": 107,
     "status_assignment_coverage": 100,
     "status_counts": {
       "unvalidated": 7,
       "fixture_validated": 9,
-      "single_domain_validated": 16,
+      "single_domain_validated": 14,
       "cross_domain_validated": 5,
-      "validated_with_limits": 10,
-      "manual_review_required": 90,
+      "validated_with_limits": 13,
+      "manual_review_required": 89,
       "invalid": 0,
       "deprecated": 0
     },
@@ -80,12 +81,12 @@
       "secondary_diagnostic": 10
     },
     "score_capable_checks": 44,
-    "checks_without_central_requirement_definition": 42,
-    "check_validation_coverage": 76.64,
-    "score_weighted_validation_coverage": 37.4,
+    "checks_without_central_requirement_definition": 38,
+    "check_validation_coverage": 78.1,
+    "score_weighted_validation_coverage": 39.2,
     "critical_high_validation_coverage": 33.33,
-    "primary_evidence_validation_coverage": 52.46,
-    "usage_weighted_validation_coverage": 76.69,
+    "primary_evidence_validation_coverage": 55.74,
+    "usage_weighted_validation_coverage": 78.55,
     "historical_usage_snapshot": {
       "result_observations": 6895,
       "distinct_runs_with_results": 64,
@@ -240,59 +241,74 @@
       "finding_type": "opportunity",
       "default_severity": "Medium",
       "active": true,
-      "score_effect": "conditional",
+      "score_effect": "score_free",
       "evidence_class": "primary_conditional",
       "coverage_unit": "site:structured_data:article_coverage",
-      "required_facts": [],
-      "requirement_definition_status": "missing",
-      "inventory_issues": [
-        "missing_central_requirement_definition"
+      "required_facts": [
+        "highConfidenceArticlePageClassification",
+        "effectiveSchemaTypeExtraction",
+        "successfulIndexableHtmlScope"
       ],
+      "requirement_definition_status": "declared",
+      "inventory_issues": [],
       "data_sources": [
         "pages",
         "schemas",
         "visible_text_facts"
       ],
       "scope": "url_aggregate",
-      "root_cause_family": "geo.article_blog",
+      "root_cause_family": "structured_data.article",
       "current_validation_status": "manual_review_required",
       "validation_status": "manual_review_required",
       "validation_confidence": "medium",
       "tested_domains": [
-        "anonymized_run_77_site"
+        "marcdeboer.de",
+        "trinkgut-zierles.de",
+        "react.dev",
+        "web.dev",
+        "nextjs.org",
+        "theguardian.com"
       ],
       "tested_archetypes": [
-        "small_local_business_website"
+        "small_static_expert_site",
+        "local_business_editorial_site",
+        "ssr_hydration_documentation",
+        "large_editorial_site"
       ],
-      "positive_cases": 1,
-      "negative_cases": 0,
+      "positive_cases": 3,
+      "negative_cases": 8,
       "fixture_tests": [
         "tests/batch41.test.js",
         "tests/batch82.test.js",
         "tests/evidence-coverage-v3.test.js",
-        "tests/scoring-v2.test.js"
+        "tests/scoring-v2.test.js",
+        "tests/structured-data-validation.test.js"
       ],
       "real_world_runs": [
-        "run-77-forensic-validation"
+        "run-77-forensic-validation",
+        "structured-data-validation-v1-independent-live-probes"
       ],
       "false_positives": 0,
       "false_negatives": 0,
       "severity_errors": 0,
       "scope_errors": 0,
-      "stability_runs": 1,
+      "stability_runs": 3,
       "known_limits": [
         "Automated facts do not determine business relevance, search intent, editorial quality, or implementation priority without human context.",
-        "Only one real domain has independent historical validation; the automated facts remain subject to manual contextual interpretation."
+        "Article schema is optional for ordinary indexing; business value and implementation priority remain contextual.",
+        "Medium- or low-confidence page-type candidates remain review-only and do not create a normal missing-schema fail."
       ],
       "manual_review_reason": "Article/Blog-Seiten mit Article Schema can collect technical facts automatically, but the conclusion depends on page purpose, search intent, business context, editorial judgment, or implementation trade-offs.",
-      "last_validated_at": "2026-07-18",
-      "last_validated_commit": "ca4055eaef7623e9604684065e873815353b21f9",
+      "last_validated_at": "2026-07-19",
+      "last_validated_commit": "0b73e0fdb1f3851e01a575dcc18d5535dfb3b806",
       "evidence_references": [
         "tests/batch41.test.js",
         "tests/batch82.test.js",
         "tests/evidence-coverage-v3.test.js",
         "tests/scoring-v2.test.js",
-        "tests/run77-resilience.test.js"
+        "tests/run77-resilience.test.js",
+        "tests/structured-data-validation.test.js",
+        "docs/structured-data-check-validation-v1.md"
       ],
       "recommended_trust_action": "manual_review_before_scoring",
       "historical_observations": 64,
@@ -2226,7 +2242,8 @@
       "coverage_unit": "site:structured_data:article_coverage",
       "required_facts": [
         "articlePageClassification",
-        "schemaTypeExtraction"
+        "schemaTypeExtraction",
+        "successfulIndexableHtmlScope"
       ],
       "requirement_definition_status": "declared",
       "inventory_issues": [],
@@ -2236,18 +2253,26 @@
         "visible_text_facts"
       ],
       "scope": "site_aggregate",
-      "root_cause_family": "tech.article",
-      "current_validation_status": "single_domain_validated",
-      "validation_status": "single_domain_validated",
-      "validation_confidence": "medium",
+      "root_cause_family": "structured_data.article",
+      "current_validation_status": "validated_with_limits",
+      "validation_status": "validated_with_limits",
+      "validation_confidence": "high",
       "tested_domains": [
-        "anonymized_run_77_site"
+        "marcdeboer.de",
+        "trinkgut-zierles.de",
+        "react.dev",
+        "web.dev",
+        "nextjs.org",
+        "theguardian.com"
       ],
       "tested_archetypes": [
-        "small_local_business_website"
+        "small_static_expert_site",
+        "local_business_editorial_site",
+        "ssr_hydration_documentation",
+        "large_editorial_site"
       ],
-      "positive_cases": 1,
-      "negative_cases": 0,
+      "positive_cases": 3,
+      "negative_cases": 8,
       "fixture_tests": [
         "tests/batch41.test.js",
         "tests/batch62.test.js",
@@ -2255,23 +2280,26 @@
         "tests/checks.test.js",
         "tests/evidence-coverage-v3.test.js",
         "tests/run77-resilience.test.js",
-        "tests/scoring-v2.test.js"
+        "tests/scoring-v2.test.js",
+        "tests/structured-data-validation.test.js"
       ],
       "real_world_runs": [
-        "run-77-forensic-validation"
+        "run-77-forensic-validation",
+        "structured-data-validation-v1-independent-live-probes"
       ],
       "false_positives": 0,
       "false_negatives": 0,
       "severity_errors": 0,
       "scope_errors": 0,
-      "stability_runs": 1,
+      "stability_runs": 3,
       "known_limits": [
-        "Only one real domain has independent historical validation; cross-domain behavior remains unproven.",
-        "Historical reconstruction uses stored Run 77 evidence and does not substitute current live state."
+        "Article schema is not required for ordinary indexing; this Low finding remains an implementation opportunity rather than proof of an indexing defect.",
+        "Page-type confidence is conservative; unfamiliar editorial templates can remain insufficient_evidence until targeted review.",
+        "Property completeness and rich-result eligibility are outside this presence check."
       ],
       "manual_review_reason": "",
-      "last_validated_at": "2026-07-18",
-      "last_validated_commit": "ca4055eaef7623e9604684065e873815353b21f9",
+      "last_validated_at": "2026-07-19",
+      "last_validated_commit": "0b73e0fdb1f3851e01a575dcc18d5535dfb3b806",
       "evidence_references": [
         "tests/batch41.test.js",
         "tests/batch62.test.js",
@@ -2280,29 +2308,13 @@
         "tests/evidence-coverage-v3.test.js",
         "tests/run77-resilience.test.js",
         "tests/scoring-v2.test.js",
-        "tests/run77-resilience.test.js"
+        "tests/structured-data-validation.test.js",
+        "docs/structured-data-check-validation-v1.md"
       ],
-      "recommended_trust_action": "diagnostic_with_disclosure_until_cross_domain_validation",
+      "recommended_trust_action": "automated_with_limits",
       "historical_observations": 64,
       "historical_run_count": 44,
-      "validation_gap": {
-        "missing_evidence": [
-          "second real domain",
-          "second website archetype",
-          "independent positive and negative case pair",
-          "repeatability confirmation"
-        ],
-        "needed_real_positive_cases": 1,
-        "needed_real_negative_cases": 1,
-        "suitable_archetypes": [
-          "editorial_site",
-          "documentation_site"
-        ],
-        "needed_fixture": "",
-        "manual_method": "Parse delivered JSON-LD independently and compare it with visible content and page type.",
-        "expected_effort": "S",
-        "risk_if_unchanged": "Low: diagnostic or optional output may be misleading until independently validated."
-      }
+      "validation_gap": null
     },
     {
       "check_id": "tech.breadcrumb_missing_low_coverage",
@@ -4779,54 +4791,87 @@
       "active": true,
       "score_effect": "score_capable",
       "evidence_class": "primary_required",
-      "coverage_unit": "check:tech.json_ld_parse_errors",
-      "required_facts": [],
-      "requirement_definition_status": "missing",
-      "inventory_issues": [
-        "missing_central_requirement_definition"
+      "coverage_unit": "site:structured_data:json_ld_syntax",
+      "required_facts": [
+        "successfulHtmlExtraction",
+        "jsonLdBlockExtraction",
+        "jsonParseOutcome"
       ],
+      "requirement_definition_status": "declared",
+      "inventory_issues": [],
       "data_sources": [
         "pages",
         "schemas",
         "visible_text_facts"
       ],
       "scope": "url_aggregate",
-      "root_cause_family": "tech.json_ld_parse_errors",
+      "root_cause_family": "structured_data.syntax",
       "current_validation_status": "fixture_validated",
       "validation_status": "fixture_validated",
       "validation_confidence": "medium",
-      "tested_domains": [],
-      "tested_archetypes": [],
+      "tested_domains": [
+        "marcdeboer.de",
+        "trinkgut-zierles.de",
+        "react.dev",
+        "web.dev",
+        "developer.mozilla.org",
+        "www.ikea.com",
+        "app.uniswap.org",
+        "nextjs.org",
+        "theguardian.com",
+        "lego.com",
+        "apple.com",
+        "store.google.com",
+        "microsoft.com",
+        "samsung.com",
+        "nike.com"
+      ],
+      "tested_archetypes": [
+        "small_static_expert_site",
+        "local_business_editorial_site",
+        "documentation",
+        "large_editorial_site",
+        "ecommerce",
+        "csr_application"
+      ],
       "positive_cases": 0,
-      "negative_cases": 0,
+      "negative_cases": 39,
       "fixture_tests": [
         "tests/batch106.test.js",
-        "tests/batch85.test.js"
+        "tests/batch85.test.js",
+        "tests/structured-data-validation.test.js"
       ],
-      "real_world_runs": [],
+      "real_world_runs": [
+        "structured-data-validation-v1-independent-live-probes",
+        "structured-data-validation-v1-rendered-probes",
+        "run-77-structured-data-reconstruction"
+      ],
       "false_positives": 0,
       "false_negatives": 0,
       "severity_errors": 0,
       "scope_errors": 0,
-      "stability_runs": 0,
-      "known_limits": [],
+      "stability_runs": 3,
+      "known_limits": [
+        "No organic real-domain authored JSON-LD syntax error was observed; positive syntax-error validation remains fixture-based.",
+        "A browser, response-decoding or extraction failure is technical_error and not a website JSON syntax finding.",
+        "A single invalid block alongside valid entities is reported block-locally; impact still needs schema-purpose context."
+      ],
       "manual_review_reason": "",
       "last_validated_at": "2026-07-19",
-      "last_validated_commit": "020e13c8fc2cc16c689ec01eed415c4e0b2950ad",
+      "last_validated_commit": "0b73e0fdb1f3851e01a575dcc18d5535dfb3b806",
       "evidence_references": [
         "tests/batch106.test.js",
-        "tests/batch85.test.js"
+        "tests/batch85.test.js",
+        "tests/structured-data-validation.test.js",
+        "docs/structured-data-check-validation-v1.md"
       ],
       "recommended_trust_action": "diagnostic_with_disclosure_until_real_validation",
       "historical_observations": 64,
       "historical_run_count": 44,
       "validation_gap": {
         "missing_evidence": [
-          "independent real-domain validation",
           "real positive case",
-          "real negative case",
-          "severity and scope review",
-          "repeatability confirmation"
+          "organic invalid Article or Product JSON-LD block on a public site"
         ],
         "needed_real_positive_cases": 1,
         "needed_real_negative_cases": 1,
@@ -5954,10 +5999,11 @@
       "active": true,
       "score_effect": "score_capable",
       "evidence_class": "primary_conditional",
-      "coverage_unit": "check:tech.product_coverage_on_product_like_pages",
+      "coverage_unit": "site:structured_data:product_coverage",
       "required_facts": [
         "productPageClassification",
-        "schemaTypeExtraction"
+        "schemaTypeExtraction",
+        "successfulIndexableHtmlScope"
       ],
       "requirement_definition_status": "declared",
       "inventory_issues": [],
@@ -5967,18 +6013,28 @@
         "visible_text_facts"
       ],
       "scope": "site_aggregate",
-      "root_cause_family": "tech.product",
-      "current_validation_status": "single_domain_validated",
-      "validation_status": "single_domain_validated",
-      "validation_confidence": "medium",
+      "root_cause_family": "structured_data.product",
+      "current_validation_status": "validated_with_limits",
+      "validation_status": "validated_with_limits",
+      "validation_confidence": "high",
       "tested_domains": [
-        "anonymized_run_77_site"
+        "trinkgut-zierles.de",
+        "www.ikea.com",
+        "lego.com",
+        "apple.com",
+        "store.google.com",
+        "microsoft.com",
+        "samsung.com",
+        "nike.com"
       ],
       "tested_archetypes": [
-        "small_local_business_website"
+        "small_local_business_ecommerce",
+        "large_multilingual_ecommerce",
+        "direct_to_consumer_ecommerce",
+        "retail_product_configurator"
       ],
-      "positive_cases": 1,
-      "negative_cases": 0,
+      "positive_cases": 3,
+      "negative_cases": 12,
       "fixture_tests": [
         "tests/batch101.test.js",
         "tests/batch41.test.js",
@@ -5986,23 +6042,27 @@
         "tests/batch85.test.js",
         "tests/checks.test.js",
         "tests/evidence-coverage-v3.test.js",
-        "tests/run77-resilience.test.js"
+        "tests/run77-resilience.test.js",
+        "tests/structured-data-validation.test.js"
       ],
       "real_world_runs": [
-        "run-77-forensic-validation"
+        "run-77-forensic-validation",
+        "structured-data-validation-v1-independent-live-probes"
       ],
       "false_positives": 0,
       "false_negatives": 0,
       "severity_errors": 0,
       "scope_errors": 0,
-      "stability_runs": 1,
+      "stability_runs": 3,
       "known_limits": [
-        "Only one real domain has independent historical validation; cross-domain behavior remains unproven.",
-        "Historical reconstruction uses stored Run 77 evidence and does not substitute current live state."
+        "ProductGroup, IndividualProduct and ProductModel establish Product-family presence but do not by themselves prove Google product rich-result eligibility.",
+        "Offer/property completeness is outside this presence check and remains a separate manual or future validated evaluation.",
+        "Product configurators, bundles and unfamiliar commerce templates can remain insufficient_evidence when page-type confidence is not high.",
+        "Some large commerce sites block automated clients; blocked pages were not treated as website schema failures."
       ],
       "manual_review_reason": "",
-      "last_validated_at": "2026-07-18",
-      "last_validated_commit": "ca4055eaef7623e9604684065e873815353b21f9",
+      "last_validated_at": "2026-07-19",
+      "last_validated_commit": "0b73e0fdb1f3851e01a575dcc18d5535dfb3b806",
       "evidence_references": [
         "tests/batch101.test.js",
         "tests/batch41.test.js",
@@ -6011,29 +6071,13 @@
         "tests/checks.test.js",
         "tests/evidence-coverage-v3.test.js",
         "tests/run77-resilience.test.js",
-        "tests/run77-resilience.test.js"
+        "tests/structured-data-validation.test.js",
+        "docs/structured-data-check-validation-v1.md"
       ],
-      "recommended_trust_action": "diagnostic_with_disclosure_until_cross_domain_validation",
+      "recommended_trust_action": "automated_with_limits",
       "historical_observations": 64,
       "historical_run_count": 44,
-      "validation_gap": {
-        "missing_evidence": [
-          "second real domain",
-          "second website archetype",
-          "independent positive and negative case pair",
-          "repeatability confirmation"
-        ],
-        "needed_real_positive_cases": 1,
-        "needed_real_negative_cases": 1,
-        "suitable_archetypes": [
-          "ecommerce",
-          "content_site"
-        ],
-        "needed_fixture": "",
-        "manual_method": "Parse delivered JSON-LD independently and compare it with visible content and page type.",
-        "expected_effort": "S",
-        "risk_if_unchanged": "Low: diagnostic or optional output may be misleading until independently validated."
-      }
+      "validation_gap": null
     },
     {
       "check_id": "tech.raw_h1_missing_rendered_present",
@@ -6592,11 +6636,12 @@
       "score_effect": "score_free",
       "evidence_class": "inventory",
       "coverage_unit": "check:tech.schema_types_coverage_summary",
-      "required_facts": [],
-      "requirement_definition_status": "missing",
-      "inventory_issues": [
-        "missing_central_requirement_definition"
+      "required_facts": [
+        "successfulHtmlExtraction",
+        "effectiveSchemaTypeExtraction"
       ],
+      "requirement_definition_status": "declared",
+      "inventory_issues": [],
       "data_sources": [
         "pages",
         "schemas",
@@ -6604,32 +6649,57 @@
       ],
       "scope": "site_aggregate",
       "root_cause_family": "tech.schema_types",
-      "current_validation_status": "manual_review_required",
-      "validation_status": "manual_review_required",
-      "validation_confidence": "medium",
-      "tested_domains": [],
-      "tested_archetypes": [],
-      "positive_cases": 0,
-      "negative_cases": 0,
-      "fixture_tests": [
-        "tests/batch106.test.js"
+      "current_validation_status": "validated_with_limits",
+      "validation_status": "validated_with_limits",
+      "validation_confidence": "high",
+      "tested_domains": [
+        "marcdeboer.de",
+        "trinkgut-zierles.de",
+        "react.dev",
+        "web.dev",
+        "developer.mozilla.org",
+        "www.ikea.com",
+        "app.uniswap.org",
+        "nextjs.org",
+        "theguardian.com",
+        "apple.com"
       ],
-      "real_world_runs": [],
+      "tested_archetypes": [
+        "small_static_expert_site",
+        "local_business_editorial_site",
+        "documentation",
+        "large_editorial_site",
+        "ecommerce",
+        "csr_application"
+      ],
+      "positive_cases": 29,
+      "negative_cases": 10,
+      "fixture_tests": [
+        "tests/batch106.test.js",
+        "tests/structured-data-validation.test.js"
+      ],
+      "real_world_runs": [
+        "structured-data-validation-v1-independent-live-probes",
+        "structured-data-validation-v1-rendered-probes"
+      ],
       "false_positives": 0,
       "false_negatives": 0,
       "severity_errors": 0,
       "scope_errors": 0,
-      "stability_runs": 0,
+      "stability_runs": 3,
       "known_limits": [
-        "Automated facts do not determine business relevance, search intent, editorial quality, or implementation priority without human context."
+        "The inventory covers JSON-LD types; Microdata and RDFa remain separate targeted-fact signals and are not merged into this JSON-LD table.",
+        "Schema-type presence is inventory only and does not prove validity, visible-content consistency or rich-result eligibility."
       ],
-      "manual_review_reason": "Schema types coverage summary can collect technical facts automatically, but the conclusion depends on page purpose, search intent, business context, editorial judgment, or implementation trade-offs.",
+      "manual_review_reason": "",
       "last_validated_at": "2026-07-19",
-      "last_validated_commit": "020e13c8fc2cc16c689ec01eed415c4e0b2950ad",
+      "last_validated_commit": "0b73e0fdb1f3851e01a575dcc18d5535dfb3b806",
       "evidence_references": [
-        "tests/batch106.test.js"
+        "tests/batch106.test.js",
+        "tests/structured-data-validation.test.js",
+        "docs/structured-data-check-validation-v1.md"
       ],
-      "recommended_trust_action": "manual_review_before_scoring",
+      "recommended_trust_action": "fully_automated",
       "historical_observations": 64,
       "historical_run_count": 44,
       "validation_gap": null
@@ -8737,31 +8807,34 @@
       "check_id": "template.schema_missing_pattern",
       "name": "Template schema missing pattern",
       "category": "Template Pattern Analysis",
-      "finding_type": "core_issue",
+      "finding_type": "opportunity",
       "default_severity": "Low",
       "active": true,
-      "score_effect": "conditional",
+      "score_effect": "score_free",
       "evidence_class": "primary_conditional",
-      "coverage_unit": "check:template.schema_missing_pattern",
-      "required_facts": [],
-      "requirement_definition_status": "missing",
-      "inventory_issues": [
-        "missing_central_requirement_definition"
+      "coverage_unit": "template:structured_data:coverage_pattern",
+      "required_facts": [
+        "successfulIndexableHtmlPages",
+        "highConfidencePageType",
+        "effectiveSchemaTypes",
+        "homogeneousTemplateOrPageTypeScope"
       ],
+      "requirement_definition_status": "declared",
+      "inventory_issues": [],
       "data_sources": [
+        "pages",
         "template_clusters",
-        "template_sample_results",
-        "playwright_results"
+        "schema_type_extraction"
       ],
       "scope": "template",
-      "root_cause_family": "tech.schema_missing_pattern",
+      "root_cause_family": "structured_data.template_coverage",
       "current_validation_status": "manual_review_required",
       "validation_status": "manual_review_required",
       "validation_confidence": "medium",
       "tested_domains": [],
       "tested_archetypes": [],
-      "positive_cases": 0,
-      "negative_cases": 0,
+      "positive_cases": 2,
+      "negative_cases": 1,
       "fixture_tests": [
         "tests/batch10.test.js",
         "tests/calibration-v2.test.js"
@@ -8773,14 +8846,17 @@
       "scope_errors": 0,
       "stability_runs": 0,
       "known_limits": [
-        "Automated facts do not determine business relevance, search intent, editorial quality, or implementation priority without human context."
+        "Automated facts do not determine business relevance, search intent, editorial quality, or implementation priority without human context.",
+        "The roll-up is score-free and requires high-confidence page types; it does not turn an optional schema opportunity into a technical indexing defect.",
+        "Template fallback without a fingerprint is reported separately and remains review-dependent."
       ],
       "manual_review_reason": "Template schema missing pattern can collect technical facts automatically, but the conclusion depends on page purpose, search intent, business context, editorial judgment, or implementation trade-offs.",
       "last_validated_at": "2026-07-19",
-      "last_validated_commit": "020e13c8fc2cc16c689ec01eed415c4e0b2950ad",
+      "last_validated_commit": "0b73e0fdb1f3851e01a575dcc18d5535dfb3b806",
       "evidence_references": [
         "tests/batch10.test.js",
-        "tests/calibration-v2.test.js"
+        "tests/calibration-v2.test.js",
+        "docs/structured-data-check-validation-v1.md"
       ],
       "recommended_trust_action": "manual_review_before_scoring",
       "historical_observations": 1,
