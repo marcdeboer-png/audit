@@ -21,6 +21,11 @@ import { thresholdBytes, thresholds } from '../config/thresholds.js';
 import { templatePatternChecks } from '../../analysis/templatePatternChecks.js';
 import { hasArticleSchema } from '../../extractors/pageType.js';
 import { hasVisibleTextProvenance, VISIBLE_TEXT_NORMALIZATION_VERSION } from '../../extractors/visibleText.js';
+import {
+  CANONICAL_VALIDATION_LOGIC_VERSION,
+  canonicalTargetFacts,
+  evaluateCanonicalPage
+} from '../canonicalSemantics.js';
 
 const tech = (id, category, name, run, options = {}) => ({
   id: id.startsWith('template.') ? id : `tech.${id}`,
@@ -942,7 +947,29 @@ function lengthCheck(id, category, name, where, status = 'Warning', priority = '
 }
 
 function canonicalMissing() {
-  return effectiveMetadataMissing('canonical_missing', 'Crawling & Indexing', 'Canonical missing', 'canonical', 'effectiveCanonical', 'Warning');
+  return tech('canonical_missing', 'Crawling & Indexing', 'Canonical missing', function run(ctx) {
+    const context = canonicalPageContext(ctx);
+    if (!context.eligible) return availabilityResult(this, 'not_applicable', {
+      finding: 'Canonical missing: no eligible successful indexable HTML page is in scope.',
+      evidence: { eligiblePages: 0, logicVersion: CANONICAL_VALIDATION_LOGIC_VERSION },
+      requirements: canonicalRequirements([], [])
+    });
+    const affected = context.evaluations.filter((row) => row.missing);
+    if (!affected.length && context.incomplete) return canonicalIncompleteResult(this, 'Canonical missing', context);
+    const samples = affected.slice(0, 10).map(canonicalEvaluationSample);
+    return makeResult(this, affected.length ? 'Warning' : 'OK', {
+      priority: 'Medium',
+      affectedCount: affected.length,
+      sampleUrls: samples.map((row) => row.url),
+      finding: affected.length
+        ? `${affected.length} eligible page(s) have no canonical in the complete effective document state.`
+        : `All ${context.evaluations.length} evaluated eligible page(s) expose an effective canonical.`,
+      recommendation: 'Add one stable canonical to the effective document head for each affected indexable page.',
+      evidence: { logicVersion: CANONICAL_VALIDATION_LOGIC_VERSION, fieldSource: context.current ? 'effective_document_state' : 'legacy_raw_html', eligiblePages: context.eligible, evaluatedPages: context.evaluations.length, incompleteEffectiveStates: context.incomplete, samples },
+      facts: { sourceModel: context.current ? 'effective_document_state' : 'legacy_raw_html', affectedCount: affected.length, incomplete: context.incomplete },
+      requirements: canonicalRequirements(context.incomplete ? ['stableEffectiveDocumentState'] : [], [])
+    });
+  }, { priority: 'Medium' });
 }
 
 function contentMissingField(id, category, name, field, status = 'Warning', priority = 'Medium') {
@@ -1097,17 +1124,28 @@ function effectiveMetadataLength(id, category, name, legacyField, effectiveField
 
 function effectiveCanonicalNonSelf() {
   return tech('canonical_non_self', 'Crawling & Indexing', 'Canonical non-self', function run(ctx) {
-    const eligible = count(ctx.db, `SELECT COUNT(*) AS count FROM pages WHERE runId = ? AND ${INDEXABLE_CONTENT_HTML_WHERE}`, [ctx.run.id]);
-    if (!eligible) return availabilityResult(this, 'not_applicable', { finding: 'Canonical non-self: no eligible successful indexable HTML page is in scope.', evidence: { eligiblePages: 0 }, requirements: { requiredFacts: ['eligibleSuccessfulHtmlPage'], missingFacts: [], minimumCoverage: 1, canCollectWithTargetedRun: true } });
-    const current = count(ctx.db, `SELECT COUNT(*) AS count FROM pages WHERE runId = ? AND ${INDEXABLE_CONTENT_HTML_WHERE} AND rawDocumentStateJson IS NOT NULL`, [ctx.run.id]);
-    const field = current ? 'effectiveCanonical' : 'canonical';
-    const complete = current ? 'AND COALESCE(metadataProvenanceComplete, 0) = 1' : '';
-    const incomplete = current ? count(ctx.db, `SELECT COUNT(*) AS count FROM pages WHERE runId = ? AND ${INDEXABLE_CONTENT_HTML_WHERE} AND COALESCE(metadataProvenanceComplete, 0) = 0`, [ctx.run.id]) : 0;
-    const where = `${INDEXABLE_CONTENT_HTML_WHERE} ${complete} AND ${field} IS NOT NULL AND ${field} <> normalizedUrl`;
-    const affectedCount = count(ctx.db, `SELECT COUNT(*) AS count FROM pages WHERE runId = ? AND ${where}`, [ctx.run.id]);
-    const rows = all(ctx.db, `SELECT url, normalizedUrl, canonical AS rawCanonical, effectiveCanonical, settlingStatus FROM pages WHERE runId = ? AND ${where} LIMIT 10`, [ctx.run.id]);
-    if (!affectedCount && incomplete) return availabilityResult(this, 'insufficient_evidence', { finding: `Canonical non-self: ${incomplete} page(s) lack a stable effective canonical state.`, evidence: { incomplete }, requirements: { requiredFacts: ['effectiveCanonical'], missingFacts: ['stableEffectiveDocumentState'], minimumCoverage: 1, canCollectWithTargetedRun: true } });
-    return makeResult(this, affectedCount ? 'Warning' : 'OK', { priority: 'Low', affectedCount, sampleUrls: rows.map((row) => row.url), finding: affectedCount ? `${affectedCount} effective canonical value(s) are not self-referential.` : 'No effective non-self canonical found.', recommendation: 'Confirm that each non-self canonical intentionally consolidates an equivalent page.', evidence: { fieldSource: current ? 'effective_document_state' : 'legacy_raw_html', incomplete, samples: rows } });
+    const context = canonicalPageContext(ctx);
+    if (!context.eligible) return availabilityResult(this, 'not_applicable', { finding: 'Canonical non-self: no eligible successful indexable HTML page is in scope.', evidence: { eligiblePages: 0 }, requirements: canonicalRequirements([], []) });
+    const affected = context.evaluations.filter((row) => !row.missing && (!row.isSelf || row.conflict));
+    if (!affected.length && context.incomplete) return canonicalIncompleteResult(this, 'Canonical non-self', context);
+    const samples = affected.slice(0, 10).map(canonicalEvaluationSample);
+    return makeResult(this, affected.length ? 'Warning' : 'OK', {
+      priority: 'Low',
+      affectedCount: affected.length,
+      sampleUrls: samples.map((row) => row.url),
+      finding: affected.length
+        ? `${affected.length} eligible page(s) use an effective canonical that differs from the final served URL or expose conflicting canonical tags.`
+        : 'All evaluated effective canonicals match the final served URL.',
+      recommendation: 'Review whether each consolidation is intentional; redirects, filters, pagination and syndication can require a non-self canonical.',
+      findingType: 'best_practice',
+      scoreEligible: false,
+      scoreExclusionReason: 'A non-self canonical is an objective fact but can be intentional; manual intent review owns the conclusion.',
+      reviewRecommended: affected.length > 0,
+      reviewReason: affected.length ? 'The equivalence and consolidation intent cannot be inferred from URL inequality alone.' : null,
+      automationCoverage: 'requires_human_review',
+      evidence: { logicVersion: CANONICAL_VALIDATION_LOGIC_VERSION, fieldSource: context.current ? 'effective_document_state' : 'legacy_raw_html', eligiblePages: context.eligible, evaluatedPages: context.evaluations.length, incompleteEffectiveStates: context.incomplete, samples },
+      requirements: canonicalRequirements(context.incomplete ? ['stableEffectiveDocumentState'] : [], ['canonicalIntent'])
+    });
   }, { priority: 'Low' });
 }
 
@@ -1419,61 +1457,116 @@ function consentTechnicalSignals() {
 
 function canonicalOtherDomain() {
   return tech('canonical_to_other_domain', 'Crawling & Indexing', 'Canonical to other domain', function run(ctx) {
-    const host = new URL(ctx.project.finalDomain).hostname.replace(/^www\./, '');
-    const current = count(ctx.db, `SELECT COUNT(*) AS count FROM pages WHERE runId = ? AND ${HTML_WHERE} AND rawDocumentStateJson IS NOT NULL`, [ctx.run.id]);
-    const canonicalField = current ? 'effectiveCanonical' : 'canonical';
-    const where = `${HTML_WHERE} ${current ? 'AND COALESCE(metadataProvenanceComplete, 0) = 1' : ''} AND ${canonicalField} IS NOT NULL AND ${canonicalField} <> '' AND
-      ${canonicalField} NOT LIKE 'https://${host}%' AND ${canonicalField} NOT LIKE 'http://${host}%' AND
-      ${canonicalField} NOT LIKE 'https://www.${host}%' AND ${canonicalField} NOT LIKE 'http://www.${host}%'`;
-    const affectedCount = count(ctx.db, `SELECT COUNT(*) AS count FROM pages WHERE runId = ? AND (${where})`, [ctx.run.id]);
-    const samples = affectedCount ? sampleUrls(ctx.db, ctx.run.id, where) : [];
-    const incomplete = current ? count(ctx.db, `SELECT COUNT(*) AS count FROM pages WHERE runId = ? AND ${HTML_WHERE} AND COALESCE(metadataProvenanceComplete, 0) = 0`, [ctx.run.id]) : 0;
-    if (!affectedCount && incomplete) return availabilityResult(this, 'insufficient_evidence', {
-      finding: `Canonical to other domain: ${incomplete} page(s) lack a stable effective canonical state.`,
-      evidence: { incompleteEffectiveStates: incomplete, acceptedHost: host },
-      requirements: { requiredFacts: ['effectiveCanonical'], missingFacts: ['stableEffectiveDocumentState'], minimumCoverage: 1, canCollectWithTargetedRun: true }
-    });
-    return makeResult(this, affectedCount ? 'Warning' : 'OK', {
-      affectedCount,
-      sampleUrls: samples,
-      finding: affectedCount ? `${affectedCount} page(s) canonicalize to another domain.` : 'No cross-domain canonicals found.',
-      recommendation: 'Verify cross-domain canonicals are intentional.',
-      evidence: { affectedCount, sampleUrls: samples, acceptedHost: host }
+    const context = canonicalPageContext(ctx);
+    if (!context.eligible) return availabilityResult(this, 'not_applicable', { finding: 'Canonical to other domain: no eligible successful indexable HTML page is in scope.', evidence: { eligiblePages: 0 }, requirements: canonicalRequirements([], []) });
+    const affected = context.evaluations.filter((row) => row.crossDomainValues.length > 0);
+    if (!affected.length && context.incomplete) return canonicalIncompleteResult(this, 'Canonical to other domain', context);
+    const samples = affected.slice(0, 10).map(canonicalEvaluationSample);
+    return makeResult(this, affected.length ? 'Warning' : 'OK', {
+      affectedCount: affected.length,
+      sampleUrls: samples.map((row) => row.url),
+      finding: affected.length ? `${affected.length} eligible page(s) canonicalize to another registrable domain.` : 'No canonical to another registrable domain was found.',
+      recommendation: 'Verify cross-domain canonicals against syndication, migration and consolidation intent before changing them.',
+      findingType: 'best_practice',
+      scoreEligible: false,
+      scoreExclusionReason: 'The cross-domain fact is automatable; whether it is erroneous requires publishing and migration context.',
+      reviewRecommended: affected.length > 0,
+      reviewReason: affected.length ? 'Cross-domain canonicals can be correct for syndicated or deliberately consolidated content.' : null,
+      automationCoverage: 'requires_human_review',
+      evidence: { logicVersion: CANONICAL_VALIDATION_LOGIC_VERSION, primaryUrl: ctx.project.finalDomain, eligiblePages: context.eligible, evaluatedPages: context.evaluations.length, incompleteEffectiveStates: context.incomplete, samples },
+      requirements: canonicalRequirements(context.incomplete ? ['stableEffectiveDocumentState'] : [], ['canonicalPublishingIntent'])
     });
   });
 }
 
 function canonicalTargetNon200() {
   return tech('canonical_target_non_200', 'Crawling & Indexing', 'Canonical target non-200 if known', function run(ctx) {
-    const current = count(ctx.db, `SELECT COUNT(*) AS count FROM pages WHERE runId = ? AND ${HTML_WHERE} AND rawDocumentStateJson IS NOT NULL`, [ctx.run.id]);
-    const canonicalField = current ? 'effectiveCanonical' : 'canonical';
-    const rows = all(ctx.db, `
-      SELECT source.url, source.${canonicalField} AS canonical, target.statusCode
-      FROM pages source
-      JOIN pages target ON target.runId = source.runId AND target.normalizedUrl = source.${canonicalField}
-      WHERE source.runId = ? ${current ? 'AND COALESCE(source.metadataProvenanceComplete, 0) = 1' : ''} AND source.${canonicalField} IS NOT NULL AND COALESCE(target.statusCode, 0) <> 200
-      ORDER BY source.id
-      LIMIT 10
-    `, [ctx.run.id]);
-    const affectedCount = count(ctx.db, `
-      SELECT COUNT(*) AS count
-      FROM pages source
-        JOIN pages target ON target.runId = source.runId AND target.normalizedUrl = source.${canonicalField}
-        WHERE source.runId = ? ${current ? 'AND COALESCE(source.metadataProvenanceComplete, 0) = 1' : ''} AND source.${canonicalField} IS NOT NULL AND COALESCE(target.statusCode, 0) <> 200
-    `, [ctx.run.id]);
-    const incomplete = current ? count(ctx.db, `SELECT COUNT(*) AS count FROM pages WHERE runId = ? AND ${HTML_WHERE} AND COALESCE(metadataProvenanceComplete, 0) = 0`, [ctx.run.id]) : 0;
-    if (!affectedCount && incomplete) return availabilityResult(this, 'insufficient_evidence', {
-      finding: `Canonical target status: ${incomplete} page(s) lack a stable effective canonical state.`,
-      evidence: { incompleteEffectiveStates: incomplete },
-      requirements: { requiredFacts: ['effectiveCanonical', 'knownCanonicalTargetStatus'], missingFacts: ['stableEffectiveDocumentState'], minimumCoverage: 1, canCollectWithTargetedRun: true }
+    const context = canonicalPageContext(ctx);
+    if (!context.eligible) return availabilityResult(this, 'not_applicable', { finding: 'Canonical target status: no eligible successful indexable HTML page is in scope.', evidence: { eligiblePages: 0 }, requirements: canonicalRequirements([], []) });
+    const targets = all(ctx.db, `SELECT url, normalizedUrl, finalUrl, statusCode, initialStatusCode, redirectChainJson, contentType FROM pages WHERE runId = ?`, [ctx.run.id]);
+    const targetEvaluations = context.evaluations
+      .filter((row) => !row.missing)
+      .map((source) => ({ source, targets: canonicalTargetFacts(source, targets) }));
+    const affected = targetEvaluations.flatMap(({ source, targets: facts }) => facts
+      .filter((target) => target.known && (target.initialRedirect || target.finalNon200 || target.finalNonHtml))
+      .map((target) => ({ ...target, sourceUrl: source.url, expectedUrl: source.expectedUrl })));
+    const unmeasuredTargets = targetEvaluations.flatMap(({ source, targets: facts }) => facts
+      .filter((target) => !target.measurementComplete)
+      .map((target) => ({
+        sourceUrl: source.url,
+        canonical: target.canonical,
+        targetKnown: target.known,
+        initialStatusKnown: target.initialStatusKnown,
+        finalContentTypeKnown: target.finalContentTypeKnown,
+        reason: !target.known
+          ? 'canonical target was not measured'
+          : !target.initialStatusKnown
+            ? 'initial target status was not retained'
+            : 'final target content type was not retained'
+      })));
+    const knownTargetCount = targetEvaluations.reduce((sum, item) => sum + item.targets.filter((target) => target.known).length, 0);
+    if (!affected.length && (context.incomplete || unmeasuredTargets.length)) return availabilityResult(this, 'insufficient_evidence', {
+      finding: `Canonical target status is not fully evaluable: ${context.incomplete} incomplete document state(s), ${unmeasuredTargets.length} incomplete target measurement(s).`,
+      evidence: { logicVersion: CANONICAL_VALIDATION_LOGIC_VERSION, eligiblePages: context.eligible, knownTargetCount, unmeasuredTargets: unmeasuredTargets.slice(0, 10), incompleteEffectiveStates: context.incomplete },
+      requirements: canonicalRequirements([
+        ...(context.incomplete ? ['stableEffectiveDocumentState'] : []),
+        ...(unmeasuredTargets.length ? ['completeCanonicalTargetGetMeasurement'] : [])
+      ], [])
     });
-    return makeResult(this, affectedCount ? 'Warning' : 'OK', {
-      affectedCount,
-      sampleUrls: rows.map((row) => row.url),
-      finding: affectedCount ? `${affectedCount} known canonical target(s) are non-200.` : 'Known canonical targets are 200.',
-      recommendation: 'Point canonicals to indexable 200 URLs.',
-      evidence: { samples: rows }
+    const samples = affected.slice(0, 10);
+    return makeResult(this, affected.length ? 'Warning' : 'OK', {
+      affectedCount: affected.length,
+      sampleUrls: [...new Set(samples.map((row) => row.sourceUrl))],
+      finding: affected.length
+        ? `${affected.length} known canonical target reference(s) redirect initially, finish non-200, or return a non-HTML representation.`
+        : `All ${knownTargetCount} known canonical target reference(s) resolve directly to an HTML 200 response.`,
+      recommendation: 'Point canonicals directly to indexable HTML URLs returning 200; inspect initial and final status separately.',
+      evidence: { logicVersion: CANONICAL_VALIDATION_LOGIC_VERSION, eligiblePages: context.eligible, knownTargetCount, incompleteTargetMeasurementCount: unmeasuredTargets.length, unmeasuredTargets: unmeasuredTargets.slice(0, 10), incompleteEffectiveStates: context.incomplete, samples },
+      requirements: canonicalRequirements([
+        ...(context.incomplete ? ['stableEffectiveDocumentState'] : []),
+        ...(unmeasuredTargets.length ? ['completeCanonicalTargetGetMeasurement'] : [])
+      ], [])
     });
+  });
+}
+
+function canonicalPageContext(ctx) {
+  const eligible = count(ctx.db, `SELECT COUNT(*) AS count FROM pages WHERE runId = ? AND ${INDEXABLE_CONTENT_HTML_WHERE}`, [ctx.run.id]);
+  const current = count(ctx.db, `SELECT COUNT(*) AS count FROM pages WHERE runId = ? AND ${INDEXABLE_CONTENT_HTML_WHERE} AND rawDocumentStateJson IS NOT NULL`, [ctx.run.id]) > 0;
+  const incomplete = current ? count(ctx.db, `SELECT COUNT(*) AS count FROM pages WHERE runId = ? AND ${INDEXABLE_CONTENT_HTML_WHERE} AND COALESCE(metadataProvenanceComplete, 0) = 0`, [ctx.run.id]) : 0;
+  const complete = current ? 'AND COALESCE(metadataProvenanceComplete, 0) = 1' : '';
+  const rows = all(ctx.db, `SELECT id, url, normalizedUrl, finalUrl, canonical, effectiveCanonical, rawDocumentStateJson, effectiveDocumentStateJson, renderStatus, settlingStatus, pageType FROM pages WHERE runId = ? AND ${INDEXABLE_CONTENT_HTML_WHERE} ${complete} ORDER BY id`, [ctx.run.id]);
+  return { eligible, current, incomplete, rows, evaluations: rows.map((row) => evaluateCanonicalPage(row, ctx.project.finalDomain, current)) };
+}
+
+function canonicalEvaluationSample(row) {
+  return {
+    url: row.url,
+    finalUrl: row.finalUrl,
+    expectedUrl: row.expectedUrl,
+    canonicalValues: row.uniqueValues,
+    issueType: row.issueType,
+    conflictingCanonicalTags: row.conflict,
+    duplicateEquivalentTags: row.duplicateEquivalentTags,
+    hostRelationships: row.relationships
+  };
+}
+
+function canonicalRequirements(missingFacts = [], optionalFacts = []) {
+  return {
+    requiredFacts: ['successfulIndexableHtmlPage', 'completeEffectiveCanonicalState'],
+    optionalFacts,
+    missingFacts,
+    minimumCoverage: 1,
+    canCollectWithTargetedRun: true
+  };
+}
+
+function canonicalIncompleteResult(check, label, context) {
+  return availabilityResult(check, 'insufficient_evidence', {
+    finding: `${label}: ${context.incomplete}/${context.eligible} eligible page(s) lack a stable effective canonical state.`,
+    evidence: { logicVersion: CANONICAL_VALIDATION_LOGIC_VERSION, eligiblePages: context.eligible, evaluatedPages: context.evaluations.length, incompleteEffectiveStates: context.incomplete },
+    requirements: canonicalRequirements(['stableEffectiveDocumentState'], [])
   });
 }
 

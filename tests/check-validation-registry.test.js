@@ -16,7 +16,7 @@ test('every active audit check has one valid registry entry', () => {
   const summary = summarizeCheckValidationRegistry(registry);
   assert.equal(summary.activeChecks, activeChecks.length);
   assert.equal(summary.totalChecks, registry.checks.length);
-  assert.equal(summary.statusCounts.cross_domain_validated, 1);
+  assert.equal(summary.statusCounts.cross_domain_validated, 2);
 });
 
 test('registry validation fails closed for a new unregistered check', () => {
@@ -61,4 +61,17 @@ test('invalid checks cannot remain score-capable and removed checks must be depr
   assert.ok(errors.some((error) => error.includes('invalid checks must be score_free')));
   assert.ok(errors.some((error) => error.includes('invalid checks must disable scoring')));
   assert.ok(errors.some((error) => error.includes('removed checks must be deprecated')));
+});
+
+test('canonical family records automation limits without inflating trust', () => {
+  const registry = loadCheckValidationRegistry();
+  const byId = new Map(registry.checks.map((entry) => [entry.check_id, entry]));
+  assert.equal(byId.get('tech.canonical_missing').validation_status, 'cross_domain_validated');
+  assert.equal(byId.get('tech.canonical_target_non_200').validation_status, 'fixture_validated');
+  assert.match(byId.get('tech.canonical_target_non_200').validation_gap.missing_evidence.join(' '), /real positive case/);
+  for (const id of ['tech.canonical_non_self', 'tech.canonical_to_other_domain', 'template.canonical_pattern_issue']) {
+    assert.equal(byId.get(id).validation_status, 'manual_review_required', id);
+    assert.equal(byId.get(id).score_effect, 'score_free', id);
+    assert.ok(byId.get(id).manual_review_reason.length > 20, id);
+  }
 });

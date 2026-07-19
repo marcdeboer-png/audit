@@ -1,4 +1,4 @@
-# Audit check validation registry v1
+# Audit check validation registry v2
 
 Stand: 19. Juli 2026. Die maschinenlesbare Registry liegt in
 [`check-validation-registry.json`](check-validation-registry.json). Sie ist
@@ -35,12 +35,12 @@ aggregierten Ergebniszaehlern ohne Domain- oder Inhaltsdaten.
 
 | Status | Aktive Checks |
 | --- | ---: |
-| `cross_domain_validated` | 1 |
+| `cross_domain_validated` | 2 |
 | `validated_with_limits` | 5 |
-| `manual_review_required` | 87 |
-| `single_domain_validated` | 16 |
-| `fixture_validated` | 14 |
-| `unvalidated` | 14 |
+| `manual_review_required` | 90 |
+| `single_domain_validated` | 15 |
+| `fixture_validated` | 12 |
+| `unvalidated` | 13 |
 | `invalid` | 0 |
 | `deprecated` | 0 |
 
@@ -48,14 +48,14 @@ Alle 137 aktiven Checks besitzen damit einen dokumentierten Status
 (`status_assignment_coverage`: 100 %). Die strengere
 `check_validation_coverage` zaehlt nur `cross_domain_validated`,
 `validated_with_limits` und dauerhaft `manual_review_required` und liegt bei
-67,88 %. Weitere Kennzahlen:
+70,80 %. Weitere Kennzahlen:
 
-- scoregewichtete Validierungsabdeckung: 20,77 %;
-- Critical-/High-Abdeckung: 11,11 % (es gibt aktuell keine als Critical
+- scoregewichtete Validierungsabdeckung: 23,91 %;
+- Critical-/High-Abdeckung: 22,22 % (es gibt aktuell keine als Critical
   registrierte Default-Severity und neun High-Checks);
-- Primary-Evidence-Abdeckung: 38,81 %;
-- nach historischer Ausfuehrungshaeufigkeit gewichtete Abdeckung: 66,47 %;
-- 49 `score_capable`, 79 konditionale und neun scorefreie Checks.
+- Primary-Evidence-Abdeckung: 42,19 %;
+- nach historischer Ausfuehrungshaeufigkeit gewichtete Abdeckung: 69,27 %;
+- 46 `score_capable`, 79 konditionale und zwoelf scorefreie Checks.
 
 Die scoregewichtete Registry-Kennzahl ist kein Audit-Score. Sie verwendet nur
 die bestehenden Severity-Gewichte als Priorisierungsfaktor, gewichtet
@@ -84,10 +84,8 @@ Zuverlaessigkeit.
 
 ## Priorisierte Luecken
 
-Die hoechsten offenen Risiken sind die High-Checks:
+Die hoechsten offenen Risiken sind die verbleibenden High-Checks:
 
-- `template.canonical_pattern_issue` ist `unvalidated` und besitzt noch keine
-  zentrale Requirement-Definition;
 - `tech.5xx_pages`, `tech.https_reachable`,
   `tech.internal_links_to_4xx_5xx`, `tech.json_ld_parse_errors` und
   `template.noindex_pattern` sind nur fixture-validiert;
@@ -166,3 +164,21 @@ dadurch nachvollziehbar.
 Bekannte Grenze: Die Registry dokumentiert den belegten Stand. Sie ersetzt
 weder eine neue manuelle Validierung nach wesentlichen Logikaenderungen noch
 den Nachweis bislang unbekannter Websiteimplementierungen.
+
+## Canonical validation group
+
+Die zweite Validierungsgruppe umfasst `tech.canonical_missing`,
+`tech.canonical_non_self`, `tech.canonical_to_other_domain`,
+`tech.canonical_target_non_200` und `template.canonical_pattern_issue`.
+Methodik, reale Positiv-/Negativfaelle, Run-77-Rekonstruktion, Korrekturen und
+Grenzen stehen in
+[`canonical-check-validation-v1.md`](canonical-check-validation-v1.md).
+
+`tech.canonical_missing` ist nach realen positiven Faellen auf Aave und
+Next.js, dem gerenderten Uniswap-Gegenfall und negativen Faellen auf mehreren
+Archetypen `cross_domain_validated`. Non-Self, Fremddomain und Pattern sind
+bewusst `manual_review_required` und scorefrei: Ihre technischen Fakten sind
+messbar, die Fehleraussage benoetigt aber Konsolidierungs-, Syndication- oder
+Migrationskontext. `tech.canonical_target_non_200` bleibt konservativ
+`fixture_validated`, bis ein realer positiver Zielstatusfall unabhaengig
+beobachtet wurde.

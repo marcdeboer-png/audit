@@ -34,6 +34,7 @@ export function createDocumentState(input = {}, context = {}) {
   const title = normalizeScalar(input.title);
   const metaDescription = normalizeScalar(input.metaDescription);
   const canonical = normalizeAbsoluteUrl(input.canonical, context.url);
+  const canonicalValues = normalizeCanonicalValues(input.canonicalValues ?? (canonical ? [canonical] : []), context.url);
   const htmlLang = normalizeLanguage(input.htmlLang);
   const robots = normalizeRobots(input.robots);
   const h1 = normalizeStringArray(input.h1);
@@ -53,6 +54,7 @@ export function createDocumentState(input = {}, context = {}) {
     title,
     metaDescription,
     canonical,
+    canonicalValues,
     htmlLang,
     robots,
     hreflang,
@@ -80,6 +82,7 @@ export function createRawDocumentState(extractedPage = {}, facts = {}, url = nul
     title: extractedPage.title,
     metaDescription: extractedPage.metaDescription,
     canonical: extractedPage.canonical,
+    canonicalValues: rawState.canonicalValues ?? (extractedPage.canonical ? [extractedPage.canonical] : []),
     htmlLang: extractedPage.htmlLang,
     robots: extractedPage.metaRobots,
     hreflang: rawState.hreflang,
@@ -103,7 +106,7 @@ export function buildEffectiveDocumentState(raw, initial, settled, render = {}) 
       ? 'Browser rendering was not executed; raw HTML is the available document state.'
       : 'No stable rendered state is available; raw HTML is retained and rendered-dependent checks must gate on availability.';
   const fields = {};
-  for (const field of ['title', 'metaDescription', 'canonical', 'htmlLang', 'robots', 'hreflang', 'openGraph', 'twitter', 'h1', 'visibleText', 'mainText', 'internalLinks', 'structuredData']) {
+  for (const field of ['title', 'metaDescription', 'canonical', 'canonicalValues', 'htmlLang', 'robots', 'hreflang', 'openGraph', 'twitter', 'h1', 'visibleText', 'mainText', 'internalLinks', 'structuredData']) {
     fields[field] = {
       raw: raw?.[field] ?? null,
       initial: initial?.[field] ?? null,
@@ -136,6 +139,7 @@ export function semanticFingerprint(state = {}) {
     title: state.title || null,
     metaDescription: state.metaDescription || null,
     canonical: state.canonical || null,
+    canonicalValues: state.canonicalValues || [],
     htmlLang: state.htmlLang || null,
     robots: state.robots || [],
     hreflang: state.hreflang || [],
@@ -253,6 +257,9 @@ export function browserDocumentStateEvaluator() {
     title: document.title || null,
     metaDescription: content('meta[name="description" i]'),
     canonical: content('link[rel~="canonical" i]', 'href'),
+    canonicalValues: [...document.querySelectorAll('link[rel~="canonical" i]')]
+      .map((node) => node.getAttribute('href'))
+      .filter(Boolean),
     htmlLang: document.documentElement.getAttribute('lang'),
     robots: content('meta[name="robots" i]'),
     hreflang: [...document.querySelectorAll('link[rel~="alternate" i][hreflang]')].map((node) => ({
@@ -360,6 +367,12 @@ function normalizeAbsoluteUrl(value, base) {
 
 function normalizeUrlArray(value, base) {
   return [...new Set((Array.isArray(value) ? value : []).map((item) => normalizeAbsoluteUrl(item, base)).filter(Boolean))].sort();
+}
+
+function normalizeCanonicalValues(value, base) {
+  return (Array.isArray(value) ? value : [])
+    .map((item) => normalizeAbsoluteUrl(item, base))
+    .filter(Boolean);
 }
 
 function normalizeHreflang(value, base) {

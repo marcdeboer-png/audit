@@ -1,7 +1,7 @@
 {
-  "registry_version": "check-validation-registry-v1",
-  "generated_at": "2026-07-19T13:50:00.000Z",
-  "source_commit": "020e13c8fc2cc16c689ec01eed415c4e0b2950ad",
+  "registry_version": "check-validation-registry-v2",
+  "generated_at": "2026-07-19T16:45:00.000Z",
+  "source_commit": "43ea99ad781b84ba69b79018b639c28cda80dc5b",
   "check_logic_version": "csr-render-provenance-v1",
   "status_values": [
     "unvalidated",
@@ -27,15 +27,15 @@
     "total_checks": 137,
     "total_active_checks": 137,
     "historical_checks": 0,
-    "validated_active_checks": 93,
+    "validated_active_checks": 97,
     "status_assignment_coverage": 100,
     "status_counts": {
-      "unvalidated": 14,
-      "fixture_validated": 14,
-      "single_domain_validated": 16,
-      "cross_domain_validated": 1,
+      "unvalidated": 13,
+      "fixture_validated": 12,
+      "single_domain_validated": 15,
+      "cross_domain_validated": 2,
       "validated_with_limits": 5,
-      "manual_review_required": 87,
+      "manual_review_required": 90,
       "invalid": 0,
       "deprecated": 0
     },
@@ -75,16 +75,16 @@
       "inventory": 9,
       "optional_opportunity": 54,
       "primary_conditional": 19,
-      "primary_required": 48,
-      "secondary_diagnostic": 7
+      "primary_required": 45,
+      "secondary_diagnostic": 10
     },
-    "score_capable_checks": 49,
-    "checks_without_central_requirement_definition": 54,
-    "check_validation_coverage": 67.88,
-    "score_weighted_validation_coverage": 20.77,
-    "critical_high_validation_coverage": 11.11,
-    "primary_evidence_validation_coverage": 38.81,
-    "usage_weighted_validation_coverage": 66.47,
+    "score_capable_checks": 46,
+    "checks_without_central_requirement_definition": 51,
+    "check_validation_coverage": 70.8,
+    "score_weighted_validation_coverage": 23.91,
+    "critical_high_validation_coverage": 22.22,
+    "primary_evidence_validation_coverage": 42.19,
+    "usage_weighted_validation_coverage": 69.27,
     "historical_usage_snapshot": {
       "result_observations": 6895,
       "distinct_runs_with_results": 64,
@@ -2104,7 +2104,8 @@
       "evidence_class": "primary_required",
       "coverage_unit": "check:tech.canonical_missing",
       "required_facts": [
-        "successfulHtmlExtraction"
+        "successfulIndexableHtmlPage",
+        "completeEffectiveCanonicalState"
       ],
       "requirement_definition_status": "declared",
       "inventory_issues": [],
@@ -2114,72 +2115,83 @@
       ],
       "scope": "url_aggregate",
       "root_cause_family": "tech.canonical",
-      "current_validation_status": "fixture_validated",
-      "validation_status": "fixture_validated",
-      "validation_confidence": "medium",
-      "tested_domains": [],
-      "tested_archetypes": [],
-      "positive_cases": 0,
-      "negative_cases": 0,
+      "current_validation_status": "cross_domain_validated",
+      "validation_status": "cross_domain_validated",
+      "validation_confidence": "high",
+      "tested_domains": [
+        "marcdeboer.de",
+        "trinkgut-zierles.de",
+        "react.dev",
+        "web.dev",
+        "developer.mozilla.org",
+        "www.ikea.com",
+        "app.uniswap.org",
+        "app.aave.com",
+        "nextjs.org"
+      ],
+      "tested_archetypes": [
+        "small_static_expert",
+        "local_commerce_dynamic",
+        "ssr_documentation",
+        "large_ecommerce",
+        "csr_application",
+        "hybrid_ssr_hydration"
+      ],
+      "positive_cases": 7,
+      "negative_cases": 38,
       "fixture_tests": [
         "tests/batch81.test.js",
         "tests/batch82.test.js",
         "tests/batch85.test.js",
         "tests/evidence-coverage-v3.test.js",
-        "tests/render-provenance.test.js"
+        "tests/render-provenance.test.js",
+        "tests/canonical-validation.test.js"
       ],
-      "real_world_runs": [],
+      "real_world_runs": [
+        "canonical-validation-v1-2026-07-19",
+        "render-gate-v2-browser-all-runs",
+        "run-77-forensic-validation"
+      ],
       "false_positives": 0,
       "false_negatives": 0,
       "severity_errors": 0,
       "scope_errors": 0,
-      "stability_runs": 0,
-      "known_limits": [],
+      "stability_runs": 2,
+      "known_limits": [
+        "A required but unstable or technically failed rendered state remains insufficient evidence rather than pass or fail.",
+        "Applicability depends on successful indexable HTML and the existing page-type/indexability classification."
+      ],
       "manual_review_reason": "",
       "last_validated_at": "2026-07-19",
-      "last_validated_commit": "020e13c8fc2cc16c689ec01eed415c4e0b2950ad",
+      "last_validated_commit": "43ea99ad781b84ba69b79018b639c28cda80dc5b",
       "evidence_references": [
         "tests/batch81.test.js",
         "tests/batch82.test.js",
         "tests/batch85.test.js",
         "tests/evidence-coverage-v3.test.js",
-        "tests/render-provenance.test.js"
+        "tests/render-provenance.test.js",
+        "tests/canonical-validation.test.js",
+        "docs/canonical-check-validation-v1.md"
       ],
-      "recommended_trust_action": "diagnostic_with_disclosure_until_real_validation",
+      "recommended_trust_action": "fully_automated_with_availability_gates",
       "historical_observations": 64,
       "historical_run_count": 44,
-      "validation_gap": {
-        "missing_evidence": [
-          "independent real-domain validation",
-          "real positive case",
-          "real negative case",
-          "severity and scope review",
-          "repeatability confirmation"
-        ],
-        "needed_real_positive_cases": 1,
-        "needed_real_negative_cases": 1,
-        "suitable_archetypes": [
-          "small_static_site",
-          "large_dynamic_site"
-        ],
-        "needed_fixture": "",
-        "manual_method": "Parse delivered HTML independently and verify scope, positive/negative facts, severity, and repeatability.",
-        "expected_effort": "M",
-        "risk_if_unchanged": "Medium: a primary-evidence conclusion remains insufficiently demonstrated on real implementations."
-      }
+      "validation_gap": null
     },
     {
       "check_id": "tech.canonical_non_self",
       "name": "Canonical non-self",
       "category": "Crawling & Indexing",
-      "finding_type": "core_issue",
+      "finding_type": "best_practice",
       "default_severity": "Low",
       "active": true,
-      "score_effect": "score_capable",
-      "evidence_class": "primary_required",
-      "coverage_unit": "check:tech.canonical_non_self",
+      "score_effect": "score_free",
+      "evidence_class": "secondary_diagnostic",
+      "coverage_unit": "url:canonical_relationship",
       "required_facts": [
-        "eligibleSuccessfulHtmlPage"
+        "successfulIndexableHtmlPage",
+        "completeEffectiveCanonicalState",
+        "finalServedUrl"
       ],
       "requirement_definition_status": "declared",
       "inventory_issues": [],
@@ -2189,66 +2201,66 @@
       ],
       "scope": "url_aggregate",
       "root_cause_family": "tech.canonical_non_self",
-      "current_validation_status": "single_domain_validated",
-      "validation_status": "single_domain_validated",
-      "validation_confidence": "medium",
+      "current_validation_status": "manual_review_required",
+      "validation_status": "manual_review_required",
+      "validation_confidence": "high",
       "tested_domains": [
-        "anonymized_run_77_site"
+        "trinkgut-zierles.de",
+        "dev.to",
+        "marcdeboer.de",
+        "react.dev",
+        "developer.mozilla.org",
+        "www.ikea.com",
+        "app.uniswap.org"
       ],
       "tested_archetypes": [
-        "small_local_business_website"
+        "local_commerce_dynamic",
+        "syndicated_editorial",
+        "small_static_expert",
+        "ssr_documentation",
+        "large_ecommerce",
+        "csr_application"
       ],
-      "positive_cases": 1,
-      "negative_cases": 0,
+      "positive_cases": 2,
+      "negative_cases": 37,
       "fixture_tests": [
         "tests/batch101.test.js",
         "tests/batch85.test.js",
         "tests/batch851.test.js",
-        "tests/calibration-v2.test.js"
+        "tests/calibration-v2.test.js",
+        "tests/canonical-validation.test.js"
       ],
       "real_world_runs": [
-        "run-77-forensic-validation"
+        "run-77-forensic-validation",
+        "canonical-validation-v1-2026-07-19",
+        "render-gate-v2-browser-all-runs"
       ],
-      "false_positives": 0,
+      "false_positives": 8,
       "false_negatives": 0,
       "severity_errors": 0,
-      "scope_errors": 0,
-      "stability_runs": 1,
+      "scope_errors": 8,
+      "stability_runs": 2,
       "known_limits": [
-        "Only one real domain has independent historical validation; cross-domain behavior remains unproven.",
-        "Historical reconstruction uses stored Run 77 evidence and does not substitute current live state."
+        "A non-self canonical can be intentional for filters, pagination, migrations, language variants or syndication.",
+        "Protocol, host and path differences remain observable facts; business equivalence is not inferred automatically.",
+        "Historical Run 77 did not retain initial status codes and cannot reconstruct every redirect distinction."
       ],
-      "manual_review_reason": "",
-      "last_validated_at": "2026-07-18",
-      "last_validated_commit": "ca4055eaef7623e9604684065e873815353b21f9",
+      "manual_review_reason": "URL inequality is measurable, but consolidation intent and content equivalence require publishing, migration and search-intent context.",
+      "last_validated_at": "2026-07-19",
+      "last_validated_commit": "43ea99ad781b84ba69b79018b639c28cda80dc5b",
       "evidence_references": [
         "tests/batch101.test.js",
         "tests/batch85.test.js",
         "tests/batch851.test.js",
         "tests/calibration-v2.test.js",
-        "tests/run77-resilience.test.js"
+        "tests/run77-resilience.test.js",
+        "tests/canonical-validation.test.js",
+        "docs/canonical-check-validation-v1.md"
       ],
-      "recommended_trust_action": "diagnostic_with_disclosure_until_cross_domain_validation",
+      "recommended_trust_action": "manual_review_before_reporting_and_scoring",
       "historical_observations": 64,
       "historical_run_count": 44,
-      "validation_gap": {
-        "missing_evidence": [
-          "second real domain",
-          "second website archetype",
-          "independent positive and negative case pair",
-          "repeatability confirmation"
-        ],
-        "needed_real_positive_cases": 1,
-        "needed_real_negative_cases": 1,
-        "suitable_archetypes": [
-          "small_static_site",
-          "large_dynamic_site"
-        ],
-        "needed_fixture": "",
-        "manual_method": "Parse delivered HTML independently and verify scope, positive/negative facts, severity, and repeatability.",
-        "expected_effort": "M",
-        "risk_if_unchanged": "Medium: a primary-evidence conclusion remains insufficiently demonstrated on real implementations."
-      }
+      "validation_gap": null
     },
     {
       "check_id": "tech.canonical_target_non_200",
@@ -2258,135 +2270,179 @@
       "default_severity": "Medium",
       "active": true,
       "score_effect": "score_capable",
-      "evidence_class": "primary_required",
+      "evidence_class": "primary_conditional",
       "coverage_unit": "check:tech.canonical_target_non_200",
-      "required_facts": [],
-      "requirement_definition_status": "missing",
-      "inventory_issues": [
-        "missing_central_requirement_definition"
+      "required_facts": [
+        "successfulIndexableHtmlPage",
+        "completeEffectiveCanonicalState",
+        "canonicalTargetGetMeasurement"
       ],
+      "requirement_definition_status": "declared",
+      "inventory_issues": [],
       "data_sources": [
         "pages",
-        "extracted_html_facts"
+        "extracted_html_facts",
+        "initial_and_final_get_status"
       ],
       "scope": "url_aggregate",
       "root_cause_family": "tech.canonical_target_non_200",
       "current_validation_status": "fixture_validated",
       "validation_status": "fixture_validated",
       "validation_confidence": "medium",
-      "tested_domains": [],
-      "tested_archetypes": [],
-      "positive_cases": 0,
-      "negative_cases": 0,
+      "tested_domains": [
+        "marcdeboer.de",
+        "trinkgut-zierles.de",
+        "react.dev",
+        "web.dev",
+        "developer.mozilla.org",
+        "www.ikea.com",
+        "app.uniswap.org",
+        "app.aave.com",
+        "nextjs.org"
+      ],
+      "tested_archetypes": [
+        "small_static_expert",
+        "local_commerce_dynamic",
+        "ssr_documentation",
+        "large_ecommerce",
+        "csr_application",
+        "hybrid_ssr_hydration"
+      ],
+      "positive_cases": 5,
+      "negative_cases": 39,
       "fixture_tests": [
         "tests/batch85.test.js",
-        "tests/render-provenance.test.js"
+        "tests/render-provenance.test.js",
+        "tests/canonical-validation.test.js"
       ],
-      "real_world_runs": [],
+      "real_world_runs": [
+        "canonical-validation-v1-2026-07-19",
+        "render-gate-v2-browser-all-runs",
+        "run-77-forensic-validation"
+      ],
       "false_positives": 0,
       "false_negatives": 0,
       "severity_errors": 0,
       "scope_errors": 0,
-      "stability_runs": 0,
-      "known_limits": [],
+      "stability_runs": 2,
+      "known_limits": [
+        "No independently observed real-world positive target-status defect was available; positive 308, 404, 410, 500 and non-HTML cases remain fixture validated.",
+        "Timeout, redirect-loop and WAF cases must remain insufficient evidence or technical error rather than a website finding.",
+        "Legacy runs without initial status and redirect-chain provenance cannot reconstruct whether a canonical target initially redirected."
+      ],
       "manual_review_reason": "",
       "last_validated_at": "2026-07-19",
-      "last_validated_commit": "020e13c8fc2cc16c689ec01eed415c4e0b2950ad",
+      "last_validated_commit": "43ea99ad781b84ba69b79018b639c28cda80dc5b",
       "evidence_references": [
         "tests/batch85.test.js",
-        "tests/render-provenance.test.js"
+        "tests/render-provenance.test.js",
+        "tests/canonical-validation.test.js",
+        "docs/canonical-check-validation-v1.md"
       ],
       "recommended_trust_action": "diagnostic_with_disclosure_until_real_validation",
       "historical_observations": 64,
       "historical_run_count": 44,
       "validation_gap": {
         "missing_evidence": [
-          "independent real-domain validation",
           "real positive case",
-          "real negative case",
-          "severity and scope review",
-          "repeatability confirmation"
+          "real redirect-target case",
+          "real terminal 4xx or 5xx canonical-target case"
         ],
         "needed_real_positive_cases": 1,
-        "needed_real_negative_cases": 1,
+        "needed_real_negative_cases": 0,
         "suitable_archetypes": [
-          "small_static_site",
-          "large_dynamic_site"
+          "large_dynamic_site",
+          "editorial_syndication",
+          "ecommerce"
         ],
         "needed_fixture": "",
-        "manual_method": "Parse delivered HTML independently and verify scope, positive/negative facts, severity, and repeatability.",
+        "manual_method": "Use curl GET to retain initial status, full redirect chain, final status, final URL and Content-Type for a naturally occurring broken or redirecting canonical target.",
         "expected_effort": "M",
-        "risk_if_unchanged": "Medium: a primary-evidence conclusion remains insufficiently demonstrated on real implementations."
+        "risk_if_unchanged": "Medium: objective mechanics are fixture-covered, but the positive production path has not yet been observed independently."
       }
     },
     {
       "check_id": "tech.canonical_to_other_domain",
       "name": "Canonical to other domain",
       "category": "Crawling & Indexing",
-      "finding_type": "core_issue",
+      "finding_type": "best_practice",
       "default_severity": "Medium",
       "active": true,
-      "score_effect": "score_capable",
-      "evidence_class": "primary_required",
-      "coverage_unit": "check:tech.canonical_to_other_domain",
-      "required_facts": [],
-      "requirement_definition_status": "missing",
-      "inventory_issues": [
-        "missing_central_requirement_definition"
+      "score_effect": "score_free",
+      "evidence_class": "secondary_diagnostic",
+      "coverage_unit": "url:canonical_host_relationship",
+      "required_facts": [
+        "successfulIndexableHtmlPage",
+        "completeEffectiveCanonicalState",
+        "publicSuffixRegistrableDomainComparison"
       ],
+      "requirement_definition_status": "declared",
+      "inventory_issues": [],
       "data_sources": [
         "pages",
         "extracted_html_facts"
       ],
       "scope": "url_aggregate",
       "root_cause_family": "tech.canonical_to_other_domain",
-      "current_validation_status": "fixture_validated",
-      "validation_status": "fixture_validated",
-      "validation_confidence": "medium",
-      "tested_domains": [],
-      "tested_archetypes": [],
-      "positive_cases": 0,
-      "negative_cases": 0,
+      "current_validation_status": "manual_review_required",
+      "validation_status": "manual_review_required",
+      "validation_confidence": "high",
+      "tested_domains": [
+        "dev.to",
+        "marcdeboer.de",
+        "trinkgut-zierles.de",
+        "react.dev",
+        "web.dev",
+        "developer.mozilla.org",
+        "www.ikea.com",
+        "app.uniswap.org",
+        "app.aave.com",
+        "nextjs.org"
+      ],
+      "tested_archetypes": [
+        "syndicated_editorial",
+        "small_static_expert",
+        "local_commerce_dynamic",
+        "ssr_documentation",
+        "large_ecommerce",
+        "csr_application",
+        "hybrid_ssr_hydration"
+      ],
+      "positive_cases": 1,
+      "negative_cases": 45,
       "fixture_tests": [
         "tests/batch85.test.js",
-        "tests/render-provenance.test.js"
+        "tests/render-provenance.test.js",
+        "tests/canonical-validation.test.js"
       ],
-      "real_world_runs": [],
-      "false_positives": 0,
-      "false_negatives": 0,
+      "real_world_runs": [
+        "canonical-validation-v1-2026-07-19",
+        "render-gate-v2-browser-all-runs",
+        "run-77-forensic-validation"
+      ],
+      "false_positives": 1,
+      "false_negatives": 1,
       "severity_errors": 0,
-      "scope_errors": 0,
-      "stability_runs": 0,
-      "known_limits": [],
-      "manual_review_reason": "",
+      "scope_errors": 2,
+      "stability_runs": 2,
+      "known_limits": [
+        "A canonical on another registrable domain can be correct for syndication, migration or deliberate consolidation.",
+        "A same-registrable-domain subdomain is recorded separately and is not treated as a cross-domain result.",
+        "Public-suffix classification establishes host relationship, not publishing intent or content equivalence."
+      ],
+      "manual_review_reason": "The registrable-domain relationship is objective, but intentional syndication and migration cannot be classified as defects without editorial or business context.",
       "last_validated_at": "2026-07-19",
-      "last_validated_commit": "020e13c8fc2cc16c689ec01eed415c4e0b2950ad",
+      "last_validated_commit": "43ea99ad781b84ba69b79018b639c28cda80dc5b",
       "evidence_references": [
         "tests/batch85.test.js",
-        "tests/render-provenance.test.js"
+        "tests/render-provenance.test.js",
+        "tests/canonical-validation.test.js",
+        "docs/canonical-check-validation-v1.md"
       ],
-      "recommended_trust_action": "diagnostic_with_disclosure_until_real_validation",
+      "recommended_trust_action": "manual_review_before_reporting_and_scoring",
       "historical_observations": 64,
       "historical_run_count": 44,
-      "validation_gap": {
-        "missing_evidence": [
-          "independent real-domain validation",
-          "real positive case",
-          "real negative case",
-          "severity and scope review",
-          "repeatability confirmation"
-        ],
-        "needed_real_positive_cases": 1,
-        "needed_real_negative_cases": 1,
-        "suitable_archetypes": [
-          "small_static_site",
-          "large_dynamic_site"
-        ],
-        "needed_fixture": "",
-        "manual_method": "Parse delivered HTML independently and verify scope, positive/negative facts, severity, and repeatability.",
-        "expected_effort": "M",
-        "risk_if_unchanged": "Medium: a primary-evidence conclusion remains insufficiently demonstrated on real implementations."
-      }
+      "validation_gap": null
     },
     {
       "check_id": "tech.cdn_cache_signals",
@@ -7394,64 +7450,79 @@
       "finding_type": "core_issue",
       "default_severity": "High",
       "active": true,
-      "score_effect": "score_capable",
-      "evidence_class": "primary_conditional",
-      "coverage_unit": "check:template.canonical_pattern_issue",
-      "required_facts": [],
-      "requirement_definition_status": "missing",
-      "inventory_issues": [
-        "missing_central_requirement_definition"
+      "score_effect": "score_free",
+      "evidence_class": "secondary_diagnostic",
+      "coverage_unit": "template:canonical_pattern",
+      "required_facts": [
+        "successfulIndexableHtmlPages",
+        "completeEffectiveCanonicalState",
+        "homogeneousTemplateOrPageTypeScope"
       ],
+      "requirement_definition_status": "declared",
+      "inventory_issues": [],
       "data_sources": [
+        "pages",
         "template_clusters",
-        "template_sample_results",
-        "playwright_results"
+        "effective_document_state",
+        "initial_and_final_get_status"
       ],
-      "scope": "template",
-      "root_cause_family": "tech.canonical_pattern_issue",
-      "current_validation_status": "unvalidated",
-      "validation_status": "unvalidated",
-      "validation_confidence": "low",
-      "tested_domains": [],
-      "tested_archetypes": [],
-      "positive_cases": 0,
-      "negative_cases": 0,
-      "fixture_tests": [],
-      "real_world_runs": [],
-      "false_positives": 0,
-      "false_negatives": 0,
+      "scope": "template_or_site_aggregate",
+      "root_cause_family": "tech.canonical_pattern",
+      "current_validation_status": "manual_review_required",
+      "validation_status": "manual_review_required",
+      "validation_confidence": "medium",
+      "tested_domains": [
+        "trinkgut-zierles.de",
+        "app.aave.com",
+        "marcdeboer.de",
+        "react.dev",
+        "web.dev",
+        "developer.mozilla.org",
+        "www.ikea.com",
+        "app.uniswap.org",
+        "nextjs.org"
+      ],
+      "tested_archetypes": [
+        "local_commerce_dynamic",
+        "csr_application",
+        "small_static_expert",
+        "ssr_documentation",
+        "large_ecommerce",
+        "hybrid_ssr_hydration"
+      ],
+      "positive_cases": 2,
+      "negative_cases": 7,
+      "fixture_tests": [
+        "tests/canonical-validation.test.js"
+      ],
+      "real_world_runs": [
+        "run-77-temporary-reconstruction",
+        "canonical-validation-v1-2026-07-19",
+        "render-gate-v2-browser-all-runs"
+      ],
+      "false_positives": 1,
+      "false_negatives": 1,
       "severity_errors": 0,
-      "scope_errors": 0,
-      "stability_runs": 0,
-      "known_limits": [],
-      "manual_review_reason": "",
-      "last_validated_at": "",
-      "last_validated_commit": "",
-      "evidence_references": [],
-      "recommended_trust_action": "validation_required_score_free",
+      "scope_errors": 2,
+      "stability_runs": 2,
+      "known_limits": [
+        "Template fingerprints are structural approximations; a page-type fallback is weaker than a confirmed template fingerprint.",
+        "The threshold requires at least three evaluated and affected URLs, at least 50 percent affected share and at least 80 percent evidence coverage.",
+        "Sitewide patterns are emitted only when no qualifying specific template pattern already owns the same issue family.",
+        "A repeated non-self or cross-domain pattern can still be intentional and requires business or migration context."
+      ],
+      "manual_review_reason": "The aggregate can prove a repeated homogeneous observation, but whether that pattern is an erroneous template rule requires intent and template-ownership review.",
+      "last_validated_at": "2026-07-19",
+      "last_validated_commit": "43ea99ad781b84ba69b79018b639c28cda80dc5b",
+      "evidence_references": [
+        "tests/canonical-validation.test.js",
+        "docs/canonical-check-validation-v1.md",
+        "docs/render-gate-calibration-v2.md"
+      ],
+      "recommended_trust_action": "manual_review_before_reporting_and_scoring",
       "historical_observations": 1,
       "historical_run_count": 1,
-      "validation_gap": {
-        "missing_evidence": [
-          "direct regression fixture",
-          "independent real-domain validation",
-          "real positive case",
-          "real negative case",
-          "severity and scope review",
-          "repeatability confirmation"
-        ],
-        "needed_real_positive_cases": 1,
-        "needed_real_negative_cases": 1,
-        "suitable_archetypes": [
-          "server_rendered_site",
-          "hydrated_site",
-          "csr_app"
-        ],
-        "needed_fixture": "Add controlled positive and negative fixtures for template.canonical_pattern_issue.",
-        "manual_method": "Parse delivered HTML independently and verify scope, positive/negative facts, severity, and repeatability.",
-        "expected_effort": "M",
-        "risk_if_unchanged": "High: an unconfirmed high-impact conclusion can materially distort audit prioritization."
-      }
+      "validation_gap": null
     },
     {
       "check_id": "template.console_errors",

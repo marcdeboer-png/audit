@@ -179,22 +179,26 @@ export const legitCheckExpectations = [
     detailHandlerExpected: true
   }),
   expectation('tech.canonical_missing', {
-    expectedScope: 'HTML pages without a stored canonical URL.',
+    expectedScope: 'Successful indexable non-legal HTML pages with complete effective metadata provenance and no effective canonical URL.',
     allowedStatuses: ['OK', 'Warning', 'NA'],
     detailHandlerExpected: true
   }),
   expectation('tech.canonical_non_self', {
-    expectedScope: 'HTML pages whose canonical differs from the normalized URL.',
+    expectedScope: 'Successful indexable non-legal HTML pages whose effective canonical differs from the final served URL or has conflicting canonical tags; intent remains manual.',
     allowedStatuses: ['OK', 'Warning', 'NA'],
+    allowedFindingTypes: BEST_PRACTICE_TYPES,
+    hardIssueAllowed: false,
     detailHandlerExpected: true
   }),
   expectation('tech.canonical_to_other_domain', {
-    expectedScope: 'Canonical URLs outside the accepted host variants.',
+    expectedScope: 'Successful indexable non-legal HTML pages with an effective canonical on another registrable domain; intent remains manual.',
     allowedStatuses: ['OK', 'Warning', 'NA'],
+    allowedFindingTypes: BEST_PRACTICE_TYPES,
+    hardIssueAllowed: false,
     detailHandlerExpected: true
   }),
   expectation('tech.canonical_target_non_200', {
-    expectedScope: 'Canonical targets with a known stored non-200 target page.',
+    expectedScope: 'Known canonical targets whose initial GET redirects, whose final GET is non-200, or whose final representation is non-HTML.',
     allowedStatuses: ['OK', 'Warning', 'NA'],
     detailHandlerExpected: true
   }),

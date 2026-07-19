@@ -3,6 +3,7 @@ import { applyDisplaySemantics } from '../reviews/displaySemantics.js';
 import { thresholds } from '../checks/config/thresholds.js';
 import { retentionPolicyFromRun } from '../storage/retention.js';
 import { createRunScope, requireRunId, scopeSafeCheckResult } from '../scope/runScope.js';
+import { canonicalTargetFacts, evaluateCanonicalPage } from '../checks/canonicalSemantics.js';
 
 const DETAIL_LIMIT = 10000;
 const NON_DECORATIVE_IMAGE_DETAIL_WHERE = `
@@ -268,51 +269,70 @@ function metaDescriptionDetails({ db, runId, checkResult, recommendation }) {
 
 function canonicalDetails({ db, runId, checkResult, recommendation }) {
   const current = hasRenderProvenance(db, runId);
-  const canonical = current ? 'effectiveCanonical' : 'canonical';
-  const acceptedHost = checkResult.evidence?.acceptedHost || null;
-  const otherDomainCondition = acceptedHost
-    ? `source.${canonical} IS NOT NULL AND source.${canonical} <> '' AND
-      source.${canonical} NOT LIKE 'https://${escapeSqlLike(acceptedHost)}%' AND source.${canonical} NOT LIKE 'http://${escapeSqlLike(acceptedHost)}%' AND
-      source.${canonical} NOT LIKE 'https://www.${escapeSqlLike(acceptedHost)}%' AND source.${canonical} NOT LIKE 'http://www.${escapeSqlLike(acceptedHost)}%'`
-    : `source.${canonical} IS NOT NULL AND source.${canonical} <> source.normalizedUrl`;
-  const where = pageCondition(checkResult.checkId, {
-    'tech.canonical_missing': `${htmlWhere('source')} ${current ? 'AND COALESCE(source.metadataProvenanceComplete, 0) = 1' : ''} AND (source.${canonical} IS NULL OR source.${canonical} = '')`,
-    'tech.canonical_non_self': `source.${canonical} IS NOT NULL AND source.${canonical} <> source.normalizedUrl`,
-    'tech.canonical_to_other_domain': otherDomainCondition,
-    'tech.canonical_target_non_200': `source.${canonical} IS NOT NULL`
-  });
-  const rows = db.prepare(`
-    SELECT
-      source.url,
-      source.canonical AS rawCanonical,
-      source.${canonical} AS canonical,
-      source.effectiveCanonical,
-      source.renderStatus,
-      source.settlingStatus,
-      source.finalUrl,
-      source.statusCode,
-      target.statusCode AS canonicalTargetStatus,
-      CASE
-        WHEN source.${canonical} IS NULL OR source.${canonical} = '' THEN 'missing'
-        WHEN source.${canonical} <> source.normalizedUrl AND target.statusCode IS NOT NULL AND target.statusCode <> 200 THEN 'target_non_200'
-        WHEN source.${canonical} <> source.normalizedUrl THEN 'non_self_or_external'
-        ELSE 'canonical_present'
-      END AS issueType
+  const run = db.prepare(`SELECT r.id, p.finalDomain FROM runs r JOIN projects p ON p.id=r.projectId WHERE r.id=?`).get(runId) || {};
+  const sourceRows = db.prepare(`
+    SELECT source.id, source.url, source.normalizedUrl, source.finalUrl, source.statusCode,
+      source.initialStatusCode, source.redirectChainJson, source.contentType, source.indexable,
+      source.pageType, source.canonical, source.effectiveCanonical, source.rawDocumentStateJson,
+      source.effectiveDocumentStateJson, source.metadataProvenanceComplete,
+      source.renderStatus, source.settlingStatus
     FROM pages source
-    LEFT JOIN pages target ON target.runId = source.runId AND target.normalizedUrl = source.${canonical}
-    WHERE source.runId = ? ${current ? 'AND COALESCE(source.metadataProvenanceComplete, 0) = 1' : ''} AND (${where})
+    WHERE source.runId = ? AND ${indexableContentHtmlWhere('source')}
+      ${current ? 'AND COALESCE(source.metadataProvenanceComplete, 0) = 1' : ''}
     ORDER BY source.id ASC
-  `).all(runId).filter((row) => {
-    if (checkResult.checkId === 'tech.canonical_target_non_200') return row.canonicalTargetStatus !== null && row.canonicalTargetStatus !== 200;
-    return true;
-  }).map((row) => ({ ...row, recommendation }));
+  `).all(runId);
+  const targetRows = db.prepare(`SELECT url, normalizedUrl, finalUrl, statusCode, initialStatusCode, redirectChainJson, contentType FROM pages WHERE runId=?`).all(runId);
+  const rows = [];
+  for (const source of sourceRows) {
+    const evaluation = evaluateCanonicalPage(source, run.finalDomain, current);
+    const base = {
+      url: source.url,
+      rawCanonical: source.canonical,
+      canonical: evaluation.canonical,
+      canonicalValues: evaluation.uniqueValues,
+      expectedCanonical: evaluation.expectedUrl,
+      effectiveCanonical: source.effectiveCanonical,
+      renderStatus: source.renderStatus,
+      settlingStatus: source.settlingStatus,
+      finalUrl: source.finalUrl,
+      statusCode: source.statusCode,
+      canonicalTargetInitialStatus: null,
+      canonicalTargetStatus: null,
+      canonicalTargetFinalUrl: null,
+      canonicalTargetRedirectChain: [],
+      issueType: evaluation.issueType,
+      recommendation
+    };
+    if (checkResult.checkId === 'tech.canonical_missing' && evaluation.missing) rows.push({ ...base, issueType: 'missing' });
+    if (checkResult.checkId === 'tech.canonical_non_self' && !evaluation.missing && (!evaluation.isSelf || evaluation.conflict)) rows.push(base);
+    if (checkResult.checkId === 'tech.canonical_to_other_domain' && evaluation.crossDomainValues.length) rows.push({ ...base, issueType: 'cross_registrable_domain' });
+    if (checkResult.checkId === 'tech.canonical_target_non_200') {
+      for (const target of canonicalTargetFacts(evaluation, targetRows)) {
+        if (!target.known || (!target.initialRedirect && !target.finalNon200 && !target.finalNonHtml)) continue;
+        rows.push({
+          ...base,
+          canonical: target.canonical,
+          canonicalTargetInitialStatus: target.initialStatus,
+          canonicalTargetStatus: target.finalStatus,
+          canonicalTargetFinalUrl: target.finalUrl,
+          canonicalTargetRedirectChain: target.redirectChain,
+          issueType: target.issueType
+        });
+      }
+    }
+  }
   return {
     columns: [
       ['url', 'URL'],
       ['canonical', 'Canonical'],
+      ['canonicalValues', 'Canonical Values'],
+      ['expectedCanonical', 'Expected Self Canonical'],
       ['finalUrl', 'Final URL'],
       ['statusCode', 'Status Code'],
-      ['canonicalTargetStatus', 'Canonical Target Status'],
+      ['canonicalTargetInitialStatus', 'Canonical Target Initial Status'],
+      ['canonicalTargetStatus', 'Canonical Target Final Status'],
+      ['canonicalTargetFinalUrl', 'Canonical Target Final URL'],
+      ['canonicalTargetRedirectChain', 'Canonical Target Redirect Chain'],
       ['issueType', 'Issue Type'],
       ['recommendation', 'Recommendation']
     ],
@@ -928,7 +948,7 @@ function htmlWhere(alias = '') {
 
 function indexableContentHtmlWhere(alias = '') {
   const prefix = alias ? `${alias}.` : '';
-  return `${htmlWhere(alias)} AND ${prefix}statusCode >= 200 AND ${prefix}statusCode < 300 AND COALESCE(${prefix}indexable, 1) = 1 AND COALESCE(${prefix}pageType, 'other') <> 'legal'`;
+  return `${htmlWhere(alias)} AND ${prefix}statusCode >= 200 AND ${prefix}statusCode < 300 AND COALESCE(${prefix}initialStatusCode, ${prefix}statusCode) >= 200 AND COALESCE(${prefix}initialStatusCode, ${prefix}statusCode) < 300 AND COALESCE(${prefix}indexable, 1) = 1 AND COALESCE(${prefix}pageType, 'other') <> 'legal'`;
 }
 
 function withReviewColumns(columns) {

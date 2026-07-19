@@ -22,7 +22,11 @@ export function extractHtml(rawHtml, pageUrl, finalDomain, responseHeaders = {})
   const title = cleanText($('head > title').first().text()) || null;
   const metaDescription = attrContent($, 'meta[name="description"]') || null;
   const metaRobots = attrContent($, 'meta[name="robots"]') || null;
-  const canonical = absoluteUrl($('link[rel~="canonical"]').first().attr('href'), pageUrl);
+  const canonicalValues = $('link[rel~="canonical"]')
+    .map((_, element) => absoluteUrl($(element).attr('href'), pageUrl))
+    .get()
+    .filter(Boolean);
+  const canonical = canonicalValues[0] || null;
   const htmlLang = $('html').attr('lang')?.trim() || null;
   const viewport = attrContent($, 'meta[name="viewport"]') || null;
   const charsetSignals = detectCharsetSignals($, responseHeaders);
@@ -55,6 +59,7 @@ export function extractHtml(rawHtml, pageUrl, finalDomain, responseHeaders = {})
     title,
     metaDescription,
     canonical,
+    canonicalValues,
     htmlLang,
     robots: metaRobots,
     hreflang: extractHreflang($),
