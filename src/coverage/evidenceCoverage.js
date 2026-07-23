@@ -57,6 +57,25 @@ const LLMS_TXT_CHECKS = new Set([
   'geo.llms_txt_http_status'
 ]);
 
+const HTTP_HOST_SECURITY_PRIMARY_CHECKS = new Set([
+  'tech.https_reachable',
+  'tech.http_to_https_redirect',
+  'tech.www_non_www_consistency',
+  'tech.http_version_support',
+  'tech.content_security_policy',
+  'tech.permissions_policy',
+  'tech.referrer_policy',
+  'tech.x_content_type_options',
+  'tech.x_frame_options',
+  'tech.hsts_header'
+]);
+
+const HTTP_INFRASTRUCTURE_CONDITIONAL_CHECKS = new Set([
+  'tech.compression_header',
+  'tech.cache_control_header',
+  'tech.cdn_cache_signals'
+]);
+
 const INVENTORY_PATTERNS = [
   /(?:^|\.)(?:noindex_pages|nofollow_pages|schema_types_coverage_summary|status_code_distribution|security_headers_inventory)$/,
   /(?:inventory|distribution|summary)$/,
@@ -200,6 +219,12 @@ function definitionFor(checkId, result, context) {
   }
   if (checkId === 'geo.ai_bots_policy_summary') {
     return definition(EVIDENCE_CLASSES.inventory, checkId, 'site:ai_policy:summary');
+  }
+  if (HTTP_HOST_SECURITY_PRIMARY_CHECKS.has(checkId)) {
+    return definition(EVIDENCE_CLASSES.primaryRequired, checkId, result.coverageUnitKey || `site:http_host_security:${checkId}`);
+  }
+  if (HTTP_INFRASTRUCTURE_CONDITIONAL_CHECKS.has(checkId)) {
+    return definition(EVIDENCE_CLASSES.primaryConditional, checkId, result.coverageUnitKey || `site:http_infrastructure:${checkId}`);
   }
   if (BROWSER_DIAGNOSTICS.has(checkId)) return definition(EVIDENCE_CLASSES.secondaryDiagnostic, checkId);
   if (LIGHTHOUSE_CHECKS.has(checkId)) return definition(EVIDENCE_CLASSES.primaryConditional, checkId);

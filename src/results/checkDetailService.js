@@ -727,37 +727,58 @@ function charsetDetails({ db, runId, recommendation }) {
 
 function headerPresenceDetails({ db, runId, checkResult, recommendation }) {
   const headerKey = headerKeyForCheck(checkResult.checkId);
-  const rows = db.prepare(`
-    SELECT url, pageType, statusCode, responseHeadersJson
-    FROM pages
-    WHERE runId = ?
-      AND ${htmlWhere()}
-      AND (responseHeadersJson IS NULL OR responseHeadersJson NOT LIKE ?)
-    ORDER BY id ASC
-  `).all(runId, `%"${headerKey}"%`).map((row) => {
-    const headers = safeJson(row.responseHeadersJson, {});
+  const evidenceSamples = Array.isArray(checkResult.evidence?.samples) ? checkResult.evidence.samples : [];
+  const rows = evidenceSamples.map((sample) => {
+    const policy = sample.policy || {};
     return {
-      url: row.url,
-      pageType: row.pageType,
-      statusCode: row.statusCode,
-      missingHeader: headerKey,
-      headerValue: headers[headerKey] || headers[headerKey.toLowerCase()] || '',
-      storedHeadersCount: Object.keys(headers).length,
+      url: sample.url || sample.pageUrl || '',
+      finalUrl: sample.finalUrl || '',
+      missingHeader: policy.pass ? '' : headerKey,
+      headerValue: '',
+      policyState: policy.state || '',
+      severity: policy.severity || '',
+      reason: policy.reason || '',
+      policyVersion: policy.logicVersion || checkResult.evidence?.logicVersion || '',
+      supportingEvidence: formatValue(sample.supportingEvidence || {}),
       recommendation
     };
   });
+  if (!rows.length) {
+    rows.push(...db.prepare(`
+      SELECT url, finalUrl, responseHeadersJson
+      FROM pages
+      WHERE runId = ?
+        AND ${htmlWhere()}
+        AND (responseHeadersJson IS NULL OR responseHeadersJson NOT LIKE ?)
+      ORDER BY id ASC
+    `).all(runId, `%"${headerKey}"%`).map((row) => ({
+      url: row.url,
+      finalUrl: row.finalUrl || '',
+      missingHeader: headerKey,
+      headerValue: '',
+      policyState: 'historical_presence_only',
+      severity: '',
+      reason: 'Historical result has no versioned policy-parser evidence.',
+      policyVersion: '',
+      supportingEvidence: '',
+      recommendation
+    })));
+  }
   return {
     columns: [
       ['url', 'URL'],
-      ['pageType', 'Page Type'],
-      ['statusCode', 'Status Code'],
+      ['finalUrl', 'Final URL'],
       ['missingHeader', 'Missing Header'],
       ['headerValue', 'Header Value'],
-      ['storedHeadersCount', 'Stored Headers Count'],
+      ['policyState', 'Policy State'],
+      ['severity', 'Severity'],
+      ['reason', 'Evaluation Reason'],
+      ['policyVersion', 'Policy Version'],
+      ['supportingEvidence', 'Supporting Header Evidence'],
       ['recommendation', 'Recommendation']
     ],
     rows,
-    dataSource: 'pages.responseHeadersJson'
+    dataSource: rows.length ? 'check_results.evidence.samples' : 'pages.responseHeadersJson'
   };
 }
 

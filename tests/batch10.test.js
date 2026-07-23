@@ -239,7 +239,7 @@ test('Batch 10.4 Screaming Frog folder import maps enterprise header, hreflang a
   assert.equal(flags.hasGoogleConsentMode, true);
   const checks = db.prepare('SELECT checkId, status FROM check_results WHERE runId = ?').all(runId);
   const byId = new Map(checks.map((row) => [row.checkId, row.status]));
-  assert.equal(byId.get('tech.http_version_support'), 'OK');
+  assert.equal(byId.get('tech.http_version_support'), 'NA');
   assert.equal(byId.get('tech.hreflang_x_default_missing'), 'OK');
   fs.rmSync(dir, { recursive: true, force: true });
   db.close();

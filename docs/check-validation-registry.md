@@ -1,10 +1,10 @@
-# Audit check validation registry v8
+# Audit check validation registry v9
 
 Stand: 23. Juli 2026. Die maschinenlesbare Registry liegt in
 [`check-validation-registry.json`](check-validation-registry.json). Sie ist
-eine interne Vertrauens-, Gap- und Standard-Metadatendokumentation. Batch 12.2
-validiert und implementiert die finale Robots-, AI-Bot- und llms.txt-Familie
-aus `audit-standard-v1`. Andere Checkfamilien, globale Scoringparameter und
+eine interne Vertrauens-, Gap- und Standard-Metadatendokumentation. Batch 12.3
+validiert und implementiert die finale HTTP-, Host- und
+Security-Header-Familie aus `audit-standard-v1`. Globale Scoringparameter und
 historische Runs bleiben unveraendert.
 
 ## Inventar und Methodik
@@ -22,7 +22,7 @@ historische Checks fehlklassifiziert.
 Jeder Eintrag enthaelt Inventarmetadaten, Evidence-Klasse, Coverage-Unit,
 benoetigte Fakten, Datenquellen, Scope, Root-Cause-Familie, Validierungsstatus,
 Evidenzreferenzen, Fehlerhistorie, bekannte Grenzen und eine konkrete
-Vertrauensempfehlung. Die 39 standard-ausgerichteten Eintraege enthalten
+Vertrauensempfehlung. Die 52 standard-ausgerichteten Eintraege enthalten
 zusaetzlich versionierte `standard_*`-Felder fuer Severity, Scorewirkung,
 Nutzungsentscheidung, Applicability, Review-, Roll-up- und Patternstatus.
 `validation_status` dokumentiert weiterhin ausschliesslich die vorhandene
@@ -31,7 +31,7 @@ unabhaengige Validierungsevidenz; `standard_usage` und
 Check seine Requirements in einem leeren Lauf
 nicht zentral deklariert, bleibt `required_facts` bewusst leer und
 `missing_central_requirement_definition` wird ausgewiesen. Das betrifft
-weiterhin 26 aktive Checks und ist selbst eine priorisierte
+weiterhin 25 aktive Checks und ist selbst eine priorisierte
 Architekturluecke; es wurde keine
 Anforderung erfunden.
 
@@ -47,8 +47,8 @@ aggregierten Ergebniszaehlern ohne Domain- oder Inhaltsdaten.
 | Status | Aktive Checks |
 | --- | ---: |
 | `cross_domain_validated` | 17 |
-| `validated_with_limits` | 17 |
-| `manual_review_required` | 76 |
+| `validated_with_limits` | 27 |
+| `manual_review_required` | 66 |
 | `single_domain_validated` | 9 |
 | `fixture_validated` | 8 |
 | `unvalidated` | 7 |
@@ -73,6 +73,26 @@ Die scoregewichtete Registry-Kennzahl ist kein Audit-Score. Sie verwendet nur
 die bestehenden Severity-Gewichte als Priorisierungsfaktor, gewichtet
 konditionale Schlussfolgerungen mit 0,25 und scorefreie Inventare mit 0. Es
 wurde kein Scoringparameter des Produkts veraendert.
+
+## HTTP, host and security-header validation group
+
+Batch 12.3 umfasst die aktiven HTTP-/HTTPS- und Apex/www-Checks, das
+Redirectinventar, sechs Security-Header-Checks sowie Kompression, tatsächliche
+HTTP-Protokollverhandlung und die beiden Cacheperspektiven. Alle 13
+scorewirksamen Familienmitglieder sind nach Parser-/Fixture- und
+domainübergreifender GET-Gegenprüfung `validated_with_limits`. Die
+Familienabdeckung beträgt damit 100 Prozent; die Grenzen bleiben explizit:
+HTTP/3 wird bis zu einer QUIC-Messung nur additiv über Alt-Svc inventarisiert,
+Resource-Header müssen vollständig gespeichert sein und repräsentative
+Hostpfade beweisen keine unbekannten individuellen Edge-Regeln.
+
+`tech.cache_control_header` und `tech.cdn_cache_signals` teilen eine
+scorewirksame Root Cause. `tech.redirect_pages` bleibt Info,
+`diagnostic_only` und scorefrei. COEP, COOP, CORP, Server und X-Powered-By
+werden nur als Sub-Evidence erfasst, weil sie keine eigenständigen aktiven
+Checks der 137er-Registry sind. Methodik, Live-Matrix, Run-77-Rekonstruktion
+und bekannte Grenzen stehen in
+[`http-host-security-check-validation-v1.md`](http-host-security-check-validation-v1.md).
 
 ## Belastbare Familien und Grenzen
 

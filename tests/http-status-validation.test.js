@@ -360,7 +360,10 @@ function candidate(startUrl, initialStatusCode, finalUrl, redirectStatuses = [])
     permanentRedirect: redirectStatuses.length > 0 && redirectStatuses.every((status) => [301, 308].includes(status)),
     pathPreserved: start.pathname === final.pathname,
     queryPreserved: start.search === final.search,
-    hostRelation: classifyHostRelation(start.hostname, final.hostname)
+    hostRelation: classifyHostRelation(start.hostname, final.hostname),
+    tls: start.protocol === 'https:'
+      ? { state: 'connected', authorized: true, negotiatedProtocol: 'h2', tlsProtocol: 'TLSv1.3' }
+      : null
   };
 }
 

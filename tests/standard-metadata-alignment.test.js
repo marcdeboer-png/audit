@@ -31,13 +31,13 @@ const expectedDisabled = [
   'tech.speakable_missing'
 ];
 
-test('the runtime registry applies 36 metadata alignments and exactly three deactivations', () => {
+test('the runtime registry applies 49 metadata alignments and exactly three deactivations', () => {
   const checks = [...techChecks(), ...geoChecks()];
-  assert.equal(STANDARD_ALIGNED_CHECK_IDS.length, 39);
+  assert.equal(STANDARD_ALIGNED_CHECK_IDS.length, 52);
   assert.deepEqual([...DISABLED_CHECK_IDS].sort(), expectedDisabled);
   assert.equal(checks.length, 134);
   for (const id of expectedDisabled) assert.equal(checks.some((check) => check.id === id), false, id);
-  assert.equal(checks.filter((check) => check.standardVersion === AUDIT_STANDARD_VERSION).length, 36);
+  assert.equal(checks.filter((check) => check.standardVersion === AUDIT_STANDARD_VERSION).length, 49);
 
   const byId = new Map(checks.map((check) => [check.id, check]));
   assert.equal(byId.get('tech.duplicate_titles').priority, 'Medium');
@@ -45,6 +45,9 @@ test('the runtime registry applies 36 metadata alignments and exactly three deac
   assert.equal(byId.get('tech.internal_links_to_3xx').priority, 'Low');
   assert.equal(byId.get('tech.redirect_pages').priority, 'Info');
   assert.equal(byId.get('tech.redirect_pages').diagnosticOnly, true);
+  assert.equal(byId.get('tech.content_security_policy').standardUsage, 'automated_with_limits');
+  assert.equal(byId.get('tech.http_to_https_redirect').scoreDeduplicationKey, 'host.redirect_configuration');
+  assert.equal(byId.get('tech.cache_control_header').scoreDeduplicationKey, 'http_cache.configuration');
   assert.equal(byId.get('tech.canonical_non_self').standardUsage, 'automated_with_limits');
   assert.equal(
     byId.get('geo.article_blog_pages_article_schema').standardScoreOwnerCheckId,

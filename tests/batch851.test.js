@@ -119,6 +119,18 @@ test('Cache-Control and lazy loading exports are best-practice findings, not cor
   const runId = createSeedRun(db);
   insertSeedPage(db, runId, 'https://fixture.local/');
   replacePageArtifacts(db, runId, 'https://fixture.local/', {
+    resources: [
+      {
+        pageUrl: 'https://fixture.local/',
+        resourceUrl: 'https://fixture.local/assets/site.css',
+        resourceType: 'stylesheet',
+        statusCode: 200,
+        sizeBytes: 24000,
+        contentType: 'text/css',
+        responseHeadersJson: JSON.stringify({ 'content-type': 'text/css' }),
+        sizeMeasurementKind: 'decoded_response_bytes'
+      }
+    ],
     images: [
       contentImage('https://fixture.local/assets/eager-content.jpg', { loading: null, width: '640', height: '360' }),
       contentImage('https://fixture.local/assets/hero-banner.jpg', { loading: null, width: '1200', height: '600', imageRole: 'hero' }),

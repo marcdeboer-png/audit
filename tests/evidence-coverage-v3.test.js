@@ -27,11 +27,11 @@ test('primary evidence controls headline status while optional diagnostics stay 
   assert.equal(computeScores([{ ...primary[0], coverageWeight: null }]).breakdown.eligibleWeight, 1);
 });
 
-test('best practices are optional and missing required facts cannot earn coverage or score', () => {
-  const optional = applyEvidenceAvailability(row('tech.cache_control_header', 'pass', {
+test('standard-aligned best practices can require conditional evidence and missing facts cannot earn coverage or score', () => {
+  const cachePolicy = applyEvidenceAvailability(row('tech.cache_control_header', 'pass', {
     findingType: 'best_practice'
   }));
-  assert.equal(optional.evidenceClass, EVIDENCE_CLASSES.optionalOpportunity);
+  assert.equal(cachePolicy.evidenceClass, EVIDENCE_CLASSES.primaryConditional);
 
   const measuredPerformance = applyEvidenceAvailability(row('tech.high_ttfb', 'pass', {
     findingType: 'best_practice'

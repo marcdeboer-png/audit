@@ -1,4 +1,4 @@
-import { detectDomain } from './domainDetector.js';
+import { detectDomain, probeRepresentativeHostPaths } from './domainDetector.js';
 import crypto from 'node:crypto';
 import { performance } from 'node:perf_hooks';
 import { discoverDomainAssets, fetchTextAsset } from './sitemap.js';
@@ -326,6 +326,8 @@ async function executeAudit(runId) {
       syncRunCounters(db, runId);
     }
 
+    await enrichHostPathEvidence(db, run);
+
     updateRun(db, runId, { currentPhase: 'clustering' });
     const clusterSummary = buildTemplateClusters(db, runId, {
       sampleUrlsPerTemplate: run.sampleUrlsPerTemplate || crawlerDefaults.sampleUrlsPerTemplate,
@@ -379,6 +381,73 @@ async function executeAudit(runId) {
     clearInterval(heartbeatTimer);
     releaseRunLock(db, runId, lockToken);
     logRun(db, runId, 'info', 'Run lock released', { lockToken });
+  }
+}
+
+async function enrichHostPathEvidence(db, run) {
+  if (run.sourceType !== 'crawl') return;
+  const rows = db.prepare(`
+    SELECT url, COALESCE(pageType, 'other') AS pageType, COALESCE(indexable, 0) AS indexable
+    FROM pages
+    WHERE runId = ?
+      AND statusCode >= 200 AND statusCode < 300
+      AND (contentType LIKE '%text/html%' OR contentType LIKE '%application/xhtml%')
+      AND COALESCE(pageType, 'other') NOT IN ('login', 'search', 'error')
+    ORDER BY indexable DESC, pageType ASC, url ASC
+  `).all(run.id);
+  const representatives = [];
+  const pageTypes = new Set();
+  for (const row of rows) {
+    let parsed;
+    try { parsed = new URL(row.url); } catch { continue; }
+    const pathAndQuery = `${parsed.pathname || '/'}${parsed.search || ''}`;
+    if (pathAndQuery === '/' || pageTypes.has(row.pageType)) continue;
+    representatives.push({ sourceUrl: row.url, pageType: row.pageType, pathAndQuery });
+    pageTypes.add(row.pageType);
+    if (representatives.length >= 5) break;
+  }
+  const queryRepresentative = rows.find((row) => {
+    try { return Boolean(new URL(row.url).search); } catch { return false; }
+  });
+  if (queryRepresentative && !representatives.some((row) => row.sourceUrl === queryRepresentative.url)) {
+    const parsed = new URL(queryRepresentative.url);
+    representatives.push({
+      sourceUrl: queryRepresentative.url,
+      pageType: queryRepresentative.pageType,
+      pathAndQuery: `${parsed.pathname}${parsed.search}`
+    });
+  }
+  if (!representatives.length) return;
+
+  const probes = await probeRepresentativeHostPaths(run.inputDomain, representatives, { userAgent: run.userAgent });
+  const protocol = parseStoredJson(run.protocolBehaviorJson, []).filter((item) => item.probeRole !== 'representative_public_path');
+  const www = parseStoredJson(run.wwwBehaviorJson, { candidates: [] });
+  const wwwCandidates = (www.candidates || []).filter((item) => item.probeRole !== 'representative_public_path');
+  updateProject(db, run.projectId, {
+    protocolBehaviorJson: JSON.stringify([...protocol, ...probes]),
+    wwwBehaviorJson: JSON.stringify({
+      ...www,
+      candidates: [...wwwCandidates, ...probes],
+      representativePathCoverage: {
+        version: 'host-path-coverage-v1',
+        selectedRepresentatives: representatives,
+        measuredCandidatePaths: probes.length,
+        originVariantsPerPath: probes.length / representatives.length
+      }
+    })
+  });
+  logRun(db, run.id, 'info', 'Representative host path evidence collected', {
+    representatives: representatives.length,
+    measuredCandidatePaths: probes.length
+  });
+}
+
+function parseStoredJson(value, fallback) {
+  try {
+    const parsed = JSON.parse(value || '');
+    return parsed ?? fallback;
+  } catch {
+    return fallback;
   }
 }
 

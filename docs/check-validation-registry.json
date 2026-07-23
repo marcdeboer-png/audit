@@ -1,8 +1,8 @@
 {
-  "registry_version": "check-validation-registry-v8",
-  "generated_at": "2026-07-23T14:10:00.000Z",
-  "source_commit": "9bba3647f1022170422b56c6a904c52942b2603c",
-  "check_logic_version": "csr-render-provenance-v1",
+  "registry_version": "check-validation-registry-v9",
+  "generated_at": "2026-07-23T17:15:00.000Z",
+  "source_commit": "84304f3d5b7546cacc246337bd57429cd3edf954",
+  "check_logic_version": "http-host-security-standard-v1",
   "http_status_validation_version": "http-status-validation-v1",
   "structured_data_validation_version": "structured-data-validation-v1",
   "status_values": [
@@ -38,8 +38,8 @@
       "fixture_validated": 8,
       "single_domain_validated": 9,
       "cross_domain_validated": 17,
-      "validated_with_limits": 17,
-      "manual_review_required": 76,
+      "validated_with_limits": 27,
+      "manual_review_required": 66,
       "invalid": 0,
       "deprecated": 0
     },
@@ -77,16 +77,16 @@
     },
     "evidence_class_counts": {
       "inventory": 11,
-      "optional_opportunity": 46,
-      "primary_conditional": 23,
-      "primary_required": 43,
+      "optional_opportunity": 36,
+      "primary_conditional": 26,
+      "primary_required": 50,
       "secondary_diagnostic": 11
     },
-    "score_capable_checks": 63,
+    "score_capable_checks": 73,
     "diagnostic_only_checks": 5,
     "disabled_checks": 3,
-    "standard_aligned_checks": 39,
-    "checks_without_central_requirement_definition": 26,
+    "standard_aligned_checks": 52,
+    "checks_without_central_requirement_definition": 25,
     "check_validation_coverage": 82.09,
     "score_weighted_validation_coverage": 60.96,
     "critical_high_validation_coverage": 37.5,
@@ -97,7 +97,8 @@
       "distinct_runs_with_results": 64,
       "source": "read-only aggregate metadata; no domains or customer content"
     },
-    "robots_ai_llms_family_coverage": 100
+    "robots_ai_llms_family_coverage": 100,
+    "http_host_security_family_coverage": 100
   },
   "checks": [
     {
@@ -2854,57 +2855,98 @@
     },
     {
       "check_id": "tech.cache_control_header",
-      "name": "Cache-Control header present",
+      "name": "Effective cache policy",
       "category": "Server/Performance Best Practice",
       "finding_type": "best_practice",
       "default_severity": "Low",
       "active": true,
-      "score_effect": "conditional",
-      "evidence_class": "optional_opportunity",
+      "score_effect": "score_capable",
+      "evidence_class": "primary_conditional",
       "coverage_unit": "check:tech.cache_control_header",
       "required_facts": [
-        "htmlResponseHeaders"
+        "finalResponseHeaders",
+        "resourceRole",
+        "cachePolicyParserVersion"
       ],
       "requirement_definition_status": "declared",
       "inventory_issues": [],
       "data_sources": [
-        "projects",
-        "pages",
-        "response_headers"
+        "pages.responseHeadersJson",
+        "resources.responseHeadersJson",
+        "resources.resourceType",
+        "resources.sizeBytes"
       ],
-      "scope": "url_aggregate",
-      "root_cause_family": "tech.cache_control_header",
-      "current_validation_status": "manual_review_required",
-      "validation_status": "manual_review_required",
-      "validation_confidence": "medium",
-      "tested_domains": [],
-      "tested_archetypes": [],
-      "positive_cases": 0,
-      "negative_cases": 0,
+      "scope": "response_resource",
+      "root_cause_family": "http_cache.configuration",
+      "current_validation_status": "validated_with_limits",
+      "validation_status": "validated_with_limits",
+      "validation_confidence": "high",
+      "tested_domains": [
+        "app.uniswap.org",
+        "cloudflare.com",
+        "github.com",
+        "marcdeboer.de",
+        "mozilla.org",
+        "nextjs.org",
+        "react.dev",
+        "www.ikea.com",
+        "trinkgut-zierles.de"
+      ],
+      "tested_archetypes": [
+        "application",
+        "corporate-platform",
+        "documentation-framework",
+        "enterprise-ecommerce",
+        "open-source-platform",
+        "small-business-site"
+      ],
+      "positive_cases": 3,
+      "negative_cases": 3,
       "fixture_tests": [
         "tests/batch851.test.js",
-        "tests/evidence-coverage-v3.test.js"
+        "tests/evidence-coverage-v3.test.js",
+        "tests/http-host-security-standard.test.js"
       ],
-      "real_world_runs": [],
+      "real_world_runs": [
+        "batch-12.3-live-read-only-2026-07-23",
+        "run-77-read-only-recheck"
+      ],
       "false_positives": 0,
-      "false_negatives": 0,
+      "false_negatives": 1,
       "severity_errors": 0,
       "scope_errors": 0,
-      "stability_runs": 0,
+      "stability_runs": 2,
       "known_limits": [
-        "Automated facts do not determine business relevance, search intent, editorial quality, or implementation priority without human context."
+        "HTML no-cache/no-store is not an automatic failure without stronger page-dynamism evidence.",
+        "A Medium cache finding requires independently measured broad impact or material repeat-transfer cost; no fixed resource percentage is used."
       ],
-      "manual_review_reason": "Cache-Control header present can collect technical facts automatically, but the conclusion depends on page purpose, search intent, business context, editorial judgment, or implementation trade-offs.",
-      "last_validated_at": "2026-07-19",
-      "last_validated_commit": "020e13c8fc2cc16c689ec01eed415c4e0b2950ad",
+      "manual_review_reason": null,
+      "last_validated_at": "2026-07-23",
+      "last_validated_commit": "84304f3d5b7546cacc246337bd57429cd3edf954",
       "evidence_references": [
         "tests/batch851.test.js",
-        "tests/evidence-coverage-v3.test.js"
+        "tests/evidence-coverage-v3.test.js",
+        "docs/http-host-security-check-validation-v1.md",
+        "tests/http-host-security-standard.test.js"
       ],
-      "recommended_trust_action": "manual_review_before_scoring",
+      "recommended_trust_action": "automated_with_limits",
       "historical_observations": 64,
       "historical_run_count": 44,
-      "validation_gap": null
+      "validation_gap": null,
+      "standard_version": "audit-standard-v1",
+      "standard_status": "active",
+      "standard_usage": "automated_with_limits",
+      "standard_severity": "Low",
+      "standard_score_effect": "score_capable",
+      "standard_finding_type": "best_practice",
+      "diagnostic_only": false,
+      "disabled": false,
+      "applicability": "Successful responses with complete response-header, resource-role and size evidence; personalized or authenticated resources are outside the normal cache requirement.",
+      "not_applicable_rule": "Intentionally personalized/authenticated resources and responses without a cacheable representation are not applicable; incomplete header or resource coverage is insufficient_evidence.",
+      "review_status": "not_required",
+      "rollup_role": "shared_root_cause_member",
+      "pattern_role": "none",
+      "score_owner_check_id": null
     },
     {
       "check_id": "tech.canonical_missing",
@@ -3280,50 +3322,92 @@
       "finding_type": "best_practice",
       "default_severity": "Low",
       "active": true,
-      "score_effect": "conditional",
-      "evidence_class": "optional_opportunity",
+      "score_effect": "score_capable",
+      "evidence_class": "primary_conditional",
       "coverage_unit": "check:tech.cdn_cache_signals",
-      "required_facts": [],
-      "requirement_definition_status": "missing",
-      "inventory_issues": [
-        "missing_central_requirement_definition"
+      "required_facts": [
+        "finalResponseHeaders",
+        "resourceRole",
+        "effectiveCachePolicy",
+        "cacheSignalInventory"
       ],
+      "requirement_definition_status": "declared",
+      "inventory_issues": [],
       "data_sources": [
-        "projects",
-        "pages",
-        "response_headers"
+        "pages.responseHeadersJson",
+        "resources.responseHeadersJson",
+        "resources.resourceType",
+        "resources.sizeBytes"
       ],
-      "scope": "url_aggregate",
-      "root_cause_family": "tech.cdn_cache_signals",
-      "current_validation_status": "manual_review_required",
-      "validation_status": "manual_review_required",
-      "validation_confidence": "medium",
-      "tested_domains": [],
-      "tested_archetypes": [],
-      "positive_cases": 0,
-      "negative_cases": 0,
+      "scope": "response_resource",
+      "root_cause_family": "http_cache.configuration",
+      "current_validation_status": "validated_with_limits",
+      "validation_status": "validated_with_limits",
+      "validation_confidence": "high",
+      "tested_domains": [
+        "app.uniswap.org",
+        "cloudflare.com",
+        "github.com",
+        "marcdeboer.de",
+        "mozilla.org",
+        "nextjs.org",
+        "react.dev",
+        "www.ikea.com",
+        "trinkgut-zierles.de"
+      ],
+      "tested_archetypes": [
+        "application",
+        "corporate-platform",
+        "documentation-framework",
+        "enterprise-ecommerce",
+        "open-source-platform",
+        "small-business-site"
+      ],
+      "positive_cases": 3,
+      "negative_cases": 3,
       "fixture_tests": [
-        "tests/batch102.test.js"
+        "tests/batch102.test.js",
+        "tests/http-host-security-standard.test.js"
       ],
-      "real_world_runs": [],
+      "real_world_runs": [
+        "batch-12.3-live-read-only-2026-07-23",
+        "run-77-read-only-recheck"
+      ],
       "false_positives": 0,
-      "false_negatives": 0,
+      "false_negatives": 1,
       "severity_errors": 0,
       "scope_errors": 0,
-      "stability_runs": 0,
+      "stability_runs": 2,
       "known_limits": [
-        "Automated facts do not determine business relevance, search intent, editorial quality, or implementation priority without human context."
+        "CDN/vendor header presence is diagnostic and never substitutes for effective cache-policy evidence.",
+        "This perspective shares one root cause with tech.cache_control_header."
       ],
-      "manual_review_reason": "CDN/cache header signals can collect technical facts automatically, but the conclusion depends on page purpose, search intent, business context, editorial judgment, or implementation trade-offs.",
-      "last_validated_at": "2026-07-19",
-      "last_validated_commit": "020e13c8fc2cc16c689ec01eed415c4e0b2950ad",
+      "manual_review_reason": null,
+      "last_validated_at": "2026-07-23",
+      "last_validated_commit": "84304f3d5b7546cacc246337bd57429cd3edf954",
       "evidence_references": [
-        "tests/batch102.test.js"
+        "tests/batch102.test.js",
+        "docs/http-host-security-check-validation-v1.md",
+        "tests/http-host-security-standard.test.js"
       ],
-      "recommended_trust_action": "manual_review_before_scoring",
+      "recommended_trust_action": "automated_with_limits",
       "historical_observations": 1,
       "historical_run_count": 1,
-      "validation_gap": null
+      "validation_gap": null,
+      "standard_version": "audit-standard-v1",
+      "standard_status": "active",
+      "standard_usage": "automated_with_limits",
+      "standard_severity": "Low",
+      "standard_score_effect": "score_capable",
+      "standard_finding_type": "best_practice",
+      "diagnostic_only": false,
+      "disabled": false,
+      "applicability": "Successful responses with complete effective cache-policy evidence; the presence of a vendor/CDN header is not itself a pass condition.",
+      "not_applicable_rule": "Personalized/authenticated responses are not applicable; incomplete resource headers or sizes are insufficient_evidence.",
+      "review_status": "not_required",
+      "rollup_role": "shared_root_cause_member",
+      "pattern_role": "none",
+      "score_owner_check_id": null
     },
     {
       "check_id": "tech.charset_utf8_present",
@@ -3397,51 +3481,95 @@
     },
     {
       "check_id": "tech.compression_header",
-      "name": "Compression header present",
+      "name": "Effective HTTP compression",
       "category": "Server/Performance Best Practice",
       "finding_type": "best_practice",
       "default_severity": "Low",
       "active": true,
-      "score_effect": "conditional",
-      "evidence_class": "optional_opportunity",
+      "score_effect": "score_capable",
+      "evidence_class": "primary_conditional",
       "coverage_unit": "check:tech.compression_header",
       "required_facts": [
-        "htmlResponseHeaders"
+        "finalResponseHeaders",
+        "contentType",
+        "decodedResponseBytes",
+        "compressionPolicyVersion"
       ],
       "requirement_definition_status": "declared",
       "inventory_issues": [],
       "data_sources": [
-        "projects",
-        "pages",
-        "response_headers"
+        "pages.responseHeadersJson",
+        "pages.rawHtmlSize",
+        "resources.responseHeadersJson",
+        "resources.sizeBytes"
       ],
-      "scope": "url_aggregate",
-      "root_cause_family": "tech.compression_header",
-      "current_validation_status": "manual_review_required",
-      "validation_status": "manual_review_required",
-      "validation_confidence": "low",
-      "tested_domains": [],
-      "tested_archetypes": [],
-      "positive_cases": 0,
-      "negative_cases": 0,
-      "fixture_tests": [],
-      "real_world_runs": [],
-      "false_positives": 0,
+      "scope": "compressible_response",
+      "root_cause_family": "http_compression.configuration",
+      "current_validation_status": "validated_with_limits",
+      "validation_status": "validated_with_limits",
+      "validation_confidence": "high",
+      "tested_domains": [
+        "app.uniswap.org",
+        "cloudflare.com",
+        "github.com",
+        "marcdeboer.de",
+        "mozilla.org",
+        "nextjs.org",
+        "react.dev",
+        "www.ikea.com",
+        "trinkgut-zierles.de"
+      ],
+      "tested_archetypes": [
+        "application",
+        "corporate-platform",
+        "documentation-framework",
+        "enterprise-ecommerce",
+        "open-source-platform",
+        "small-business-site"
+      ],
+      "positive_cases": 5,
+      "negative_cases": 3,
+      "fixture_tests": [
+        "tests/http-host-security-standard.test.js"
+      ],
+      "real_world_runs": [
+        "batch-12.3-live-read-only-2026-07-23",
+        "run-77-read-only-recheck"
+      ],
+      "false_positives": 1,
       "false_negatives": 0,
       "severity_errors": 0,
       "scope_errors": 0,
-      "stability_runs": 0,
+      "stability_runs": 2,
       "known_limits": [
-        "Automated facts do not determine business relevance, search intent, editorial quality, or implementation priority without human context."
+        "The current minimum decoded body size is versioned technical policy, not an immutable universal threshold.",
+        "Real-domain positive compression was observed; missing-compression negative coverage is fixture-backed."
       ],
-      "manual_review_reason": "Compression header present can collect technical facts automatically, but the conclusion depends on page purpose, search intent, business context, editorial judgment, or implementation trade-offs.",
-      "last_validated_at": "",
-      "last_validated_commit": "",
-      "evidence_references": [],
-      "recommended_trust_action": "manual_review_before_scoring",
+      "manual_review_reason": null,
+      "last_validated_at": "2026-07-23",
+      "last_validated_commit": "84304f3d5b7546cacc246337bd57429cd3edf954",
+      "evidence_references": [
+        "docs/http-host-security-check-validation-v1.md",
+        "tests/http-host-security-standard.test.js"
+      ],
+      "recommended_trust_action": "automated_with_limits",
       "historical_observations": 64,
       "historical_run_count": 44,
-      "validation_gap": null
+      "validation_gap": null,
+      "standard_version": "audit-standard-v1",
+      "standard_status": "active",
+      "standard_usage": "automated_with_limits",
+      "standard_severity": "Low",
+      "standard_score_effect": "score_capable",
+      "standard_finding_type": "best_practice",
+      "diagnostic_only": false,
+      "disabled": false,
+      "applicability": "Successful text-compressible HTML, CSS, JavaScript, JSON, XML and SVG responses above the current versioned minimum size.",
+      "not_applicable_rule": "Already-compressed binary formats and responses below the versioned minimum size are not applicable; missing byte or header evidence is insufficient_evidence.",
+      "review_status": "not_required",
+      "rollup_role": "resource_root_score_owner",
+      "pattern_role": "none",
+      "score_owner_check_id": null
     },
     {
       "check_id": "tech.consent_technical_signals",
@@ -3564,57 +3692,97 @@
     },
     {
       "check_id": "tech.content_security_policy",
-      "name": "Content-Security-Policy present",
+      "name": "Content-Security-Policy",
       "category": "Security Best Practice",
       "finding_type": "best_practice",
       "default_severity": "Low",
       "active": true,
-      "score_effect": "conditional",
-      "evidence_class": "optional_opportunity",
+      "score_effect": "score_capable",
+      "evidence_class": "primary_required",
       "coverage_unit": "check:tech.content_security_policy",
       "required_facts": [
-        "htmlResponseHeaders"
+        "successfulFinalHtmlResponse",
+        "completeFinalResponseHeaders",
+        "headerParserVersion"
       ],
       "requirement_definition_status": "declared",
       "inventory_issues": [],
       "data_sources": [
-        "projects",
-        "pages",
-        "response_headers"
+        "pages.responseHeadersJson",
+        "pages.finalUrl",
+        "check_results.evidenceJson"
       ],
-      "scope": "url_aggregate",
-      "root_cause_family": "tech.content_security_policy",
-      "current_validation_status": "manual_review_required",
-      "validation_status": "manual_review_required",
-      "validation_confidence": "medium",
-      "tested_domains": [],
-      "tested_archetypes": [],
-      "positive_cases": 0,
-      "negative_cases": 0,
+      "scope": "final_response_header",
+      "root_cause_family": "security_headers.csp",
+      "current_validation_status": "validated_with_limits",
+      "validation_status": "validated_with_limits",
+      "validation_confidence": "high",
+      "tested_domains": [
+        "app.uniswap.org",
+        "cloudflare.com",
+        "github.com",
+        "marcdeboer.de",
+        "mozilla.org",
+        "nextjs.org",
+        "react.dev",
+        "www.ikea.com",
+        "trinkgut-zierles.de"
+      ],
+      "tested_archetypes": [
+        "application",
+        "corporate-platform",
+        "documentation-framework",
+        "enterprise-ecommerce",
+        "open-source-platform",
+        "small-business-site"
+      ],
+      "positive_cases": 4,
+      "negative_cases": 4,
       "fixture_tests": [
         "tests/batch85.test.js",
-        "tests/calibration-v2.test.js"
+        "tests/calibration-v2.test.js",
+        "tests/http-host-security-standard.test.js"
       ],
-      "real_world_runs": [],
+      "real_world_runs": [
+        "batch-12.3-live-read-only-2026-07-23",
+        "run-77-read-only-recheck"
+      ],
       "false_positives": 0,
-      "false_negatives": 0,
+      "false_negatives": 3,
       "severity_errors": 0,
       "scope_errors": 0,
-      "stability_runs": 0,
+      "stability_runs": 2,
       "known_limits": [
-        "Automated facts do not determine business relevance, search intent, editorial quality, or implementation priority without human context."
+        "Static header parsing cannot prove that every application flow remains functional under the policy.",
+        "unsafe-inline is Medium only when executable-content protection is materially weakened without a usable nonce/hash model."
       ],
-      "manual_review_reason": "Content-Security-Policy present can collect technical facts automatically, but the conclusion depends on page purpose, search intent, business context, editorial judgment, or implementation trade-offs.",
-      "last_validated_at": "2026-07-19",
-      "last_validated_commit": "020e13c8fc2cc16c689ec01eed415c4e0b2950ad",
+      "manual_review_reason": null,
+      "last_validated_at": "2026-07-23",
+      "last_validated_commit": "84304f3d5b7546cacc246337bd57429cd3edf954",
       "evidence_references": [
         "tests/batch85.test.js",
-        "tests/calibration-v2.test.js"
+        "tests/calibration-v2.test.js",
+        "docs/http-host-security-check-validation-v1.md",
+        "tests/http-host-security-standard.test.js"
       ],
-      "recommended_trust_action": "manual_review_before_scoring",
+      "recommended_trust_action": "automated_with_limits",
       "historical_observations": 64,
       "historical_run_count": 44,
-      "validation_gap": null
+      "validation_gap": null,
+      "standard_version": "audit-standard-v1",
+      "standard_status": "active",
+      "standard_usage": "automated_with_limits",
+      "standard_severity": "Low",
+      "standard_score_effect": "score_capable",
+      "standard_finding_type": "best_practice",
+      "diagnostic_only": false,
+      "disabled": false,
+      "applicability": "Successful relevant HTML responses with complete enforced and report-only CSP header evidence.",
+      "not_applicable_rule": "Responses outside the declared resource scope are not applicable; incomplete response-header evidence is insufficient_evidence.",
+      "review_status": "not_required",
+      "rollup_role": "header_configuration_score_owner",
+      "pattern_role": "none",
+      "score_owner_check_id": null
     },
     {
       "check_id": "tech.content_type_html_correct",
@@ -4447,33 +4615,52 @@
     },
     {
       "check_id": "tech.hsts_header",
-      "name": "HSTS present",
+      "name": "HSTS policy",
       "category": "Security Best Practice",
       "finding_type": "best_practice",
       "default_severity": "Low",
       "active": true,
-      "score_effect": "conditional",
-      "evidence_class": "optional_opportunity",
+      "score_effect": "score_capable",
+      "evidence_class": "primary_required",
       "coverage_unit": "check:tech.hsts_header",
       "required_facts": [
-        "htmlResponseHeaders"
+        "successfulFinalHtmlResponse",
+        "completeFinalResponseHeaders",
+        "headerParserVersion"
       ],
       "requirement_definition_status": "declared",
       "inventory_issues": [],
       "data_sources": [
-        "projects",
-        "pages",
-        "response_headers"
+        "pages.responseHeadersJson",
+        "pages.finalUrl",
+        "check_results.evidenceJson"
       ],
-      "scope": "url_aggregate",
-      "root_cause_family": "tech.hsts_header",
-      "current_validation_status": "manual_review_required",
-      "validation_status": "manual_review_required",
-      "validation_confidence": "medium",
-      "tested_domains": [],
-      "tested_archetypes": [],
-      "positive_cases": 0,
-      "negative_cases": 0,
+      "scope": "final_response_header",
+      "root_cause_family": "security_headers.hsts",
+      "current_validation_status": "validated_with_limits",
+      "validation_status": "validated_with_limits",
+      "validation_confidence": "high",
+      "tested_domains": [
+        "app.uniswap.org",
+        "cloudflare.com",
+        "github.com",
+        "marcdeboer.de",
+        "mozilla.org",
+        "nextjs.org",
+        "react.dev",
+        "www.ikea.com",
+        "trinkgut-zierles.de"
+      ],
+      "tested_archetypes": [
+        "application",
+        "corporate-platform",
+        "documentation-framework",
+        "enterprise-ecommerce",
+        "open-source-platform",
+        "small-business-site"
+      ],
+      "positive_cases": 7,
+      "negative_cases": 2,
       "fixture_tests": [
         "tests/batch101.test.js",
         "tests/batch41.test.js",
@@ -4484,20 +4671,25 @@
         "tests/batch91.test.js",
         "tests/batch92.test.js",
         "tests/calibration-v2.test.js",
-        "tests/report-semantics.test.js"
+        "tests/report-semantics.test.js",
+        "tests/http-host-security-standard.test.js"
       ],
-      "real_world_runs": [],
+      "real_world_runs": [
+        "batch-12.3-live-read-only-2026-07-23",
+        "run-77-read-only-recheck"
+      ],
       "false_positives": 0,
-      "false_negatives": 0,
+      "false_negatives": 1,
       "severity_errors": 0,
       "scope_errors": 0,
-      "stability_runs": 0,
+      "stability_runs": 2,
       "known_limits": [
-        "Automated facts do not determine business relevance, search intent, editorial quality, or implementation priority without human context."
+        "The current six-month minimum is versioned and can evolve without changing the underlying parser contract.",
+        "includeSubDomains and preload remain separately visible quality signals."
       ],
-      "manual_review_reason": "HSTS present can collect technical facts automatically, but the conclusion depends on page purpose, search intent, business context, editorial judgment, or implementation trade-offs.",
-      "last_validated_at": "2026-07-19",
-      "last_validated_commit": "020e13c8fc2cc16c689ec01eed415c4e0b2950ad",
+      "manual_review_reason": null,
+      "last_validated_at": "2026-07-23",
+      "last_validated_commit": "84304f3d5b7546cacc246337bd57429cd3edf954",
       "evidence_references": [
         "tests/batch101.test.js",
         "tests/batch41.test.js",
@@ -4508,12 +4700,28 @@
         "tests/batch91.test.js",
         "tests/batch92.test.js",
         "tests/calibration-v2.test.js",
-        "tests/report-semantics.test.js"
+        "tests/report-semantics.test.js",
+        "docs/http-host-security-check-validation-v1.md",
+        "tests/http-host-security-standard.test.js"
       ],
-      "recommended_trust_action": "manual_review_before_scoring",
+      "recommended_trust_action": "automated_with_limits",
       "historical_observations": 64,
       "historical_run_count": 44,
-      "validation_gap": null
+      "validation_gap": null,
+      "standard_version": "audit-standard-v1",
+      "standard_status": "active",
+      "standard_usage": "automated_with_limits",
+      "standard_severity": "Low",
+      "standard_score_effect": "score_capable",
+      "standard_finding_type": "best_practice",
+      "diagnostic_only": false,
+      "disabled": false,
+      "applicability": "Successful HTTPS responses with complete Strict-Transport-Security evidence.",
+      "not_applicable_rule": "Non-HTTPS responses are not applicable; missing response-header provenance is insufficient_evidence.",
+      "review_status": "not_required",
+      "rollup_role": "header_configuration_score_owner",
+      "pattern_role": "none",
+      "score_owner_check_id": null
     },
     {
       "check_id": "tech.html_lang_missing",
@@ -4735,17 +4943,18 @@
         "httpGetResponse",
         "initialStatus",
         "redirectChain",
-        "finalUrl"
+        "finalUrl",
+        "representativePublicPathCoverage"
       ],
       "requirement_definition_status": "declared",
       "inventory_issues": [],
       "data_sources": [
-        "projects",
-        "pages",
-        "response_headers"
+        "projects.protocolBehaviorJson",
+        "pages.url",
+        "pages.pageType"
       ],
-      "scope": "site",
-      "root_cause_family": "tech.http_to_https_redirect",
+      "scope": "host_path_variant",
+      "root_cause_family": "host.redirect_configuration",
       "current_validation_status": "validated_with_limits",
       "validation_status": "validated_with_limits",
       "validation_confidence": "high",
@@ -4757,102 +4966,168 @@
         "developer.mozilla.org",
         "www.ikea.com",
         "app.uniswap.org",
-        "nextjs.org"
+        "nextjs.org",
+        "cloudflare.com",
+        "github.com",
+        "mozilla.org"
       ],
       "tested_archetypes": [
         "small_static_expert",
         "local_commerce_dynamic",
         "ssr_documentation",
         "large_ecommerce",
-        "csr_application"
+        "csr_application",
+        "application",
+        "corporate-platform",
+        "documentation-framework",
+        "enterprise-ecommerce",
+        "open-source-platform",
+        "small-business-site"
       ],
-      "positive_cases": 2,
+      "positive_cases": 4,
       "negative_cases": 18,
       "fixture_tests": [
         "tests/calibration-v2.test.js",
-        "tests/http-status-validation.test.js"
+        "tests/http-status-validation.test.js",
+        "tests/http-host-security-standard.test.js"
       ],
       "real_world_runs": [
         "http-status-validation-v1-2026-07-19",
-        "run-77-forensic-validation"
+        "run-77-forensic-validation",
+        "batch-12.3-live-read-only-2026-07-23",
+        "run-77-read-only-recheck"
       ],
       "false_positives": 0,
-      "false_negatives": 0,
+      "false_negatives": 2,
       "severity_errors": 0,
       "scope_errors": 0,
       "stability_runs": 3,
       "known_limits": [
-        "Root-candidate detection does not by itself prove deep-path and query preservation; the validation batch used separate deep probes.",
-        "Temporary 302/307 HTTPS redirects are reported as a warning rather than an outage."
+        "Representative public paths are deterministic and bounded; they do not prove every custom edge-routing rule.",
+        "Potentially transient 429/5xx/network states remain availability states until confirmed."
       ],
-      "manual_review_reason": "",
-      "last_validated_at": "2026-07-19",
-      "last_validated_commit": "901a096a43169a8fa5fd21ec6682da30507f5a9d",
+      "manual_review_reason": null,
+      "last_validated_at": "2026-07-23",
+      "last_validated_commit": "84304f3d5b7546cacc246337bd57429cd3edf954",
       "evidence_references": [
         "tests/calibration-v2.test.js",
         "tests/http-status-validation.test.js",
-        "docs/http-status-check-validation-v1.md"
+        "docs/http-status-check-validation-v1.md",
+        "docs/http-host-security-check-validation-v1.md",
+        "tests/http-host-security-standard.test.js"
       ],
-      "recommended_trust_action": "automated_with_limits",
+      "recommended_trust_action": "fully_automated",
       "historical_observations": 64,
       "historical_run_count": 44,
-      "validation_gap": null
+      "validation_gap": null,
+      "standard_version": "audit-standard-v1",
+      "standard_status": "active",
+      "standard_usage": "fully_automated",
+      "standard_severity": "Medium",
+      "standard_score_effect": "score_capable",
+      "standard_finding_type": "core_issue",
+      "diagnostic_only": false,
+      "disabled": false,
+      "applicability": "Relevant HTTP Apex/www variants and deterministic representative public paths for the audited host.",
+      "not_applicable_rule": "There is no website-level exception; unavailable, unstable or incomplete host evidence is an availability state.",
+      "review_status": "not_required",
+      "rollup_role": "host_configuration_score_owner",
+      "pattern_role": "none",
+      "score_owner_check_id": null
     },
     {
       "check_id": "tech.http_version_support",
-      "name": "HTTP protocol version evidence",
+      "name": "Negotiated HTTP protocol version",
       "category": "Server/Performance Best Practice",
       "finding_type": "best_practice",
       "default_severity": "Low",
       "active": true,
-      "score_effect": "conditional",
-      "evidence_class": "optional_opportunity",
+      "score_effect": "score_capable",
+      "evidence_class": "primary_required",
       "coverage_unit": "check:tech.http_version_support",
       "required_facts": [
-        "protocol_version",
-        "response_headers"
+        "actualTlsAlpnNegotiation"
       ],
       "requirement_definition_status": "declared",
       "inventory_issues": [],
       "data_sources": [
-        "pages",
-        "extracted_html_facts"
+        "projects.protocolBehaviorJson",
+        "tlsAlpnProbe",
+        "responseHeaders.alt-svc"
       ],
-      "scope": "url_aggregate",
-      "root_cause_family": "tech.http_version_support",
-      "current_validation_status": "manual_review_required",
-      "validation_status": "manual_review_required",
-      "validation_confidence": "medium",
-      "tested_domains": [],
-      "tested_archetypes": [],
-      "positive_cases": 0,
-      "negative_cases": 0,
+      "scope": "canonical_https_host",
+      "root_cause_family": "http_protocol.negotiation",
+      "current_validation_status": "validated_with_limits",
+      "validation_status": "validated_with_limits",
+      "validation_confidence": "high",
+      "tested_domains": [
+        "app.uniswap.org",
+        "cloudflare.com",
+        "github.com",
+        "marcdeboer.de",
+        "mozilla.org",
+        "nextjs.org",
+        "react.dev",
+        "www.ikea.com",
+        "trinkgut-zierles.de"
+      ],
+      "tested_archetypes": [
+        "application",
+        "corporate-platform",
+        "documentation-framework",
+        "enterprise-ecommerce",
+        "open-source-platform",
+        "small-business-site"
+      ],
+      "positive_cases": 8,
+      "negative_cases": 2,
       "fixture_tests": [
         "tests/batch10.test.js",
         "tests/batch102.test.js",
-        "tests/batch105.test.js"
+        "tests/batch105.test.js",
+        "tests/http-host-security-standard.test.js"
       ],
-      "real_world_runs": [],
-      "false_positives": 0,
+      "real_world_runs": [
+        "batch-12.3-live-read-only-2026-07-23",
+        "run-77-read-only-recheck"
+      ],
+      "false_positives": 1,
       "false_negatives": 0,
       "severity_errors": 0,
       "scope_errors": 0,
-      "stability_runs": 0,
+      "stability_runs": 2,
       "known_limits": [
-        "Automated facts do not determine business relevance, search intent, editorial quality, or implementation priority without human context."
+        "The bundled probe negotiates HTTP/2 or HTTP/1.1 through ALPN; HTTP/3 is an additive Alt-Svc observation until a QUIC client is introduced.",
+        "All live validation domains negotiated HTTP/2; the HTTP/1.1-only negative remains fixture-backed."
       ],
-      "manual_review_reason": "HTTP protocol version evidence can collect technical facts automatically, but the conclusion depends on page purpose, search intent, business context, editorial judgment, or implementation trade-offs.",
-      "last_validated_at": "2026-07-19",
-      "last_validated_commit": "020e13c8fc2cc16c689ec01eed415c4e0b2950ad",
+      "manual_review_reason": null,
+      "last_validated_at": "2026-07-23",
+      "last_validated_commit": "84304f3d5b7546cacc246337bd57429cd3edf954",
       "evidence_references": [
         "tests/batch10.test.js",
         "tests/batch102.test.js",
-        "tests/batch105.test.js"
+        "tests/batch105.test.js",
+        "docs/http-host-security-check-validation-v1.md",
+        "tests/http-host-security-standard.test.js"
       ],
-      "recommended_trust_action": "manual_review_before_scoring",
+      "recommended_trust_action": "fully_automated",
       "historical_observations": 1,
       "historical_run_count": 1,
-      "validation_gap": null
+      "validation_gap": null,
+      "standard_version": "audit-standard-v1",
+      "standard_status": "active",
+      "standard_usage": "fully_automated",
+      "standard_severity": "Low",
+      "standard_score_effect": "score_capable",
+      "standard_finding_type": "best_practice",
+      "diagnostic_only": false,
+      "disabled": false,
+      "applicability": "The canonical HTTPS host with an actual TLS ALPN/HTTP protocol negotiation measurement.",
+      "not_applicable_rule": "A client, TLS or network failure is technical_error; stored strings and unverified headers cannot establish a pass.",
+      "review_status": "not_required",
+      "rollup_role": "host_configuration_score_owner",
+      "pattern_role": "none",
+      "score_owner_check_id": null
     },
     {
       "check_id": "tech.https_reachable",
@@ -4866,20 +5141,23 @@
       "coverage_unit": "check:tech.https_reachable",
       "required_facts": [
         "httpsGetResponse",
-        "finalHttpsUrl"
+        "finalHttpsUrl",
+        "tlsConnection",
+        "certificateValidation",
+        "hostnameValidation"
       ],
       "requirement_definition_status": "declared",
       "inventory_issues": [],
       "data_sources": [
-        "projects",
-        "pages",
-        "response_headers"
+        "projects.protocolBehaviorJson",
+        "tlsAlpnProbe",
+        "redirectChain"
       ],
-      "scope": "site",
-      "root_cause_family": "tech.https_reachable",
+      "scope": "https_host_variant",
+      "root_cause_family": "host.https_transport",
       "current_validation_status": "validated_with_limits",
       "validation_status": "validated_with_limits",
-      "validation_confidence": "medium",
+      "validation_confidence": "high",
       "tested_domains": [
         "marcdeboer.de",
         "trinkgut-zierles.de",
@@ -4888,16 +5166,25 @@
         "developer.mozilla.org",
         "www.ikea.com",
         "app.uniswap.org",
-        "nextjs.org"
+        "nextjs.org",
+        "cloudflare.com",
+        "github.com",
+        "mozilla.org"
       ],
       "tested_archetypes": [
         "small_static_expert",
         "local_commerce_dynamic",
         "ssr_documentation",
         "large_ecommerce",
-        "csr_application"
+        "csr_application",
+        "application",
+        "corporate-platform",
+        "documentation-framework",
+        "enterprise-ecommerce",
+        "open-source-platform",
+        "small-business-site"
       ],
-      "positive_cases": 5,
+      "positive_cases": 8,
       "negative_cases": 16,
       "fixture_tests": [
         "tests/batch110.test.js",
@@ -4906,24 +5193,27 @@
         "tests/batch92.test.js",
         "tests/batch93.test.js",
         "tests/calibration-v2.test.js",
-        "tests/http-status-validation.test.js"
+        "tests/http-status-validation.test.js",
+        "tests/http-host-security-standard.test.js"
       ],
       "real_world_runs": [
         "http-status-validation-v1-2026-07-19",
-        "run-77-forensic-validation"
+        "run-77-forensic-validation",
+        "batch-12.3-live-read-only-2026-07-23",
+        "run-77-read-only-recheck"
       ],
       "false_positives": 0,
-      "false_negatives": 0,
+      "false_negatives": 1,
       "severity_errors": 0,
       "scope_errors": 0,
       "stability_runs": 3,
       "known_limits": [
-        "Organic validation covers reachable HTTPS sites; certificate mismatch, expiry, DNS and TLS failures use controlled technical fixtures because inaccessible sites cannot provide a normal live audit run.",
-        "An HTTPS 4xx or 5xx proves transport reachability but not page health; separate status checks evaluate the HTTP response."
+        "Local DNS/network failures remain technical availability states unless independently confirmed.",
+        "An HTTP 4xx/5xx still proves transport reachability and is evaluated by its dedicated status check."
       ],
-      "manual_review_reason": "",
-      "last_validated_at": "2026-07-19",
-      "last_validated_commit": "901a096a43169a8fa5fd21ec6682da30507f5a9d",
+      "manual_review_reason": null,
+      "last_validated_at": "2026-07-23",
+      "last_validated_commit": "84304f3d5b7546cacc246337bd57429cd3edf954",
       "evidence_references": [
         "tests/batch110.test.js",
         "tests/batch82.test.js",
@@ -4932,12 +5222,28 @@
         "tests/batch93.test.js",
         "tests/calibration-v2.test.js",
         "tests/http-status-validation.test.js",
-        "docs/http-status-check-validation-v1.md"
+        "docs/http-status-check-validation-v1.md",
+        "docs/http-host-security-check-validation-v1.md",
+        "tests/http-host-security-standard.test.js"
       ],
-      "recommended_trust_action": "automated_with_limits",
+      "recommended_trust_action": "fully_automated",
       "historical_observations": 64,
       "historical_run_count": 44,
-      "validation_gap": null
+      "validation_gap": null,
+      "standard_version": "audit-standard-v1",
+      "standard_status": "active",
+      "standard_usage": "fully_automated",
+      "standard_severity": "High",
+      "standard_score_effect": "score_capable",
+      "standard_finding_type": "core_issue",
+      "diagnostic_only": false,
+      "disabled": false,
+      "applicability": "The canonical and relevant alternate HTTPS host variants with GET and certificate/TLS evidence.",
+      "not_applicable_rule": "Local DNS/network failure and incomplete evidence are technical availability states, not a pass or website fail.",
+      "review_status": "not_required",
+      "rollup_role": "host_configuration_score_owner",
+      "pattern_role": "none",
+      "score_owner_check_id": null
     },
     {
       "check_id": "tech.images_without_alt",
@@ -6779,51 +7085,93 @@
     },
     {
       "check_id": "tech.permissions_policy",
-      "name": "Permissions-Policy present",
+      "name": "Permissions-Policy",
       "category": "Security Best Practice",
       "finding_type": "best_practice",
       "default_severity": "Low",
       "active": true,
-      "score_effect": "conditional",
-      "evidence_class": "optional_opportunity",
+      "score_effect": "score_capable",
+      "evidence_class": "primary_required",
       "coverage_unit": "check:tech.permissions_policy",
       "required_facts": [
-        "htmlResponseHeaders"
+        "successfulFinalHtmlResponse",
+        "completeFinalResponseHeaders",
+        "headerParserVersion"
       ],
       "requirement_definition_status": "declared",
       "inventory_issues": [],
       "data_sources": [
-        "projects",
-        "pages",
-        "response_headers"
+        "pages.responseHeadersJson",
+        "pages.finalUrl",
+        "check_results.evidenceJson"
       ],
-      "scope": "url_aggregate",
-      "root_cause_family": "tech.permissions_policy",
-      "current_validation_status": "manual_review_required",
-      "validation_status": "manual_review_required",
-      "validation_confidence": "low",
-      "tested_domains": [],
-      "tested_archetypes": [],
-      "positive_cases": 0,
-      "negative_cases": 0,
-      "fixture_tests": [],
-      "real_world_runs": [],
+      "scope": "final_response_header",
+      "root_cause_family": "security_headers.permissions_policy",
+      "current_validation_status": "validated_with_limits",
+      "validation_status": "validated_with_limits",
+      "validation_confidence": "high",
+      "tested_domains": [
+        "app.uniswap.org",
+        "cloudflare.com",
+        "github.com",
+        "marcdeboer.de",
+        "mozilla.org",
+        "nextjs.org",
+        "react.dev",
+        "www.ikea.com",
+        "trinkgut-zierles.de"
+      ],
+      "tested_archetypes": [
+        "application",
+        "corporate-platform",
+        "documentation-framework",
+        "enterprise-ecommerce",
+        "open-source-platform",
+        "small-business-site"
+      ],
+      "positive_cases": 2,
+      "negative_cases": 6,
+      "fixture_tests": [
+        "tests/http-host-security-standard.test.js"
+      ],
+      "real_world_runs": [
+        "batch-12.3-live-read-only-2026-07-23",
+        "run-77-read-only-recheck"
+      ],
       "false_positives": 0,
-      "false_negatives": 0,
+      "false_negatives": 2,
       "severity_errors": 0,
       "scope_errors": 0,
-      "stability_runs": 0,
+      "stability_runs": 2,
       "known_limits": [
-        "Automated facts do not determine business relevance, search intent, editorial quality, or implementation priority without human context."
+        "Presence and syntax are objective; application-specific capability needs can constrain whether a restrictive allowlist is operationally appropriate.",
+        "Only wildcard access for the defined sensitive capability set is automatically Medium."
       ],
-      "manual_review_reason": "Permissions-Policy present can collect technical facts automatically, but the conclusion depends on page purpose, search intent, business context, editorial judgment, or implementation trade-offs.",
-      "last_validated_at": "",
-      "last_validated_commit": "",
-      "evidence_references": [],
-      "recommended_trust_action": "manual_review_before_scoring",
+      "manual_review_reason": null,
+      "last_validated_at": "2026-07-23",
+      "last_validated_commit": "84304f3d5b7546cacc246337bd57429cd3edf954",
+      "evidence_references": [
+        "docs/http-host-security-check-validation-v1.md",
+        "tests/http-host-security-standard.test.js"
+      ],
+      "recommended_trust_action": "automated_with_limits",
       "historical_observations": 64,
       "historical_run_count": 44,
-      "validation_gap": null
+      "validation_gap": null,
+      "standard_version": "audit-standard-v1",
+      "standard_status": "active",
+      "standard_usage": "automated_with_limits",
+      "standard_severity": "Low",
+      "standard_score_effect": "score_capable",
+      "standard_finding_type": "best_practice",
+      "diagnostic_only": false,
+      "disabled": false,
+      "applicability": "Successful relevant HTML responses with complete Permissions-Policy header evidence.",
+      "not_applicable_rule": "Responses outside the declared resource scope are not applicable; incomplete response-header evidence is insufficient_evidence.",
+      "review_status": "not_required",
+      "rollup_role": "header_configuration_score_owner",
+      "pattern_role": "none",
+      "score_owner_check_id": null
     },
     {
       "check_id": "tech.person_present_missing",
@@ -7443,51 +7791,93 @@
     },
     {
       "check_id": "tech.referrer_policy",
-      "name": "Referrer-Policy present",
+      "name": "Referrer-Policy",
       "category": "Security Best Practice",
       "finding_type": "best_practice",
       "default_severity": "Low",
       "active": true,
-      "score_effect": "conditional",
-      "evidence_class": "optional_opportunity",
+      "score_effect": "score_capable",
+      "evidence_class": "primary_required",
       "coverage_unit": "check:tech.referrer_policy",
       "required_facts": [
-        "htmlResponseHeaders"
+        "successfulFinalHtmlResponse",
+        "completeFinalResponseHeaders",
+        "headerParserVersion"
       ],
       "requirement_definition_status": "declared",
       "inventory_issues": [],
       "data_sources": [
-        "projects",
-        "pages",
-        "response_headers"
+        "pages.responseHeadersJson",
+        "pages.finalUrl",
+        "check_results.evidenceJson"
       ],
-      "scope": "url_aggregate",
-      "root_cause_family": "tech.referrer_policy",
-      "current_validation_status": "manual_review_required",
-      "validation_status": "manual_review_required",
-      "validation_confidence": "low",
-      "tested_domains": [],
-      "tested_archetypes": [],
-      "positive_cases": 0,
-      "negative_cases": 0,
-      "fixture_tests": [],
-      "real_world_runs": [],
+      "scope": "final_response_header",
+      "root_cause_family": "security_headers.referrer_policy",
+      "current_validation_status": "validated_with_limits",
+      "validation_status": "validated_with_limits",
+      "validation_confidence": "high",
+      "tested_domains": [
+        "app.uniswap.org",
+        "cloudflare.com",
+        "github.com",
+        "marcdeboer.de",
+        "mozilla.org",
+        "nextjs.org",
+        "react.dev",
+        "www.ikea.com",
+        "trinkgut-zierles.de"
+      ],
+      "tested_archetypes": [
+        "application",
+        "corporate-platform",
+        "documentation-framework",
+        "enterprise-ecommerce",
+        "open-source-platform",
+        "small-business-site"
+      ],
+      "positive_cases": 5,
+      "negative_cases": 4,
+      "fixture_tests": [
+        "tests/http-host-security-standard.test.js"
+      ],
+      "real_world_runs": [
+        "batch-12.3-live-read-only-2026-07-23",
+        "run-77-read-only-recheck"
+      ],
       "false_positives": 0,
-      "false_negatives": 0,
+      "false_negatives": 2,
       "severity_errors": 0,
       "scope_errors": 0,
-      "stability_runs": 0,
+      "stability_runs": 2,
       "known_limits": [
-        "Automated facts do not determine business relevance, search intent, editorial quality, or implementation priority without human context."
+        "strict-origin-when-cross-origin is the recommended tier; other controlled valid policies pass and retain their quality tier.",
+        "Header parsing does not infer a business need for more permissive referral analytics."
       ],
-      "manual_review_reason": "Referrer-Policy present can collect technical facts automatically, but the conclusion depends on page purpose, search intent, business context, editorial judgment, or implementation trade-offs.",
-      "last_validated_at": "",
-      "last_validated_commit": "",
-      "evidence_references": [],
-      "recommended_trust_action": "manual_review_before_scoring",
+      "manual_review_reason": null,
+      "last_validated_at": "2026-07-23",
+      "last_validated_commit": "84304f3d5b7546cacc246337bd57429cd3edf954",
+      "evidence_references": [
+        "docs/http-host-security-check-validation-v1.md",
+        "tests/http-host-security-standard.test.js"
+      ],
+      "recommended_trust_action": "fully_automated",
       "historical_observations": 64,
       "historical_run_count": 44,
-      "validation_gap": null
+      "validation_gap": null,
+      "standard_version": "audit-standard-v1",
+      "standard_status": "active",
+      "standard_usage": "fully_automated",
+      "standard_severity": "Low",
+      "standard_score_effect": "score_capable",
+      "standard_finding_type": "best_practice",
+      "diagnostic_only": false,
+      "disabled": false,
+      "applicability": "Successful relevant HTML responses with complete Referrer-Policy header evidence.",
+      "not_applicable_rule": "Responses outside the declared resource scope are not applicable; incomplete response-header evidence is insufficient_evidence.",
+      "review_status": "not_required",
+      "rollup_role": "header_configuration_score_owner",
+      "pattern_role": "none",
+      "score_owner_check_id": null
     },
     {
       "check_id": "tech.rendered_word_count_delta",
@@ -8989,17 +9379,19 @@
         "getResponseForBothHostVariants",
         "initialStatus",
         "redirectChain",
-        "finalHost"
+        "finalHost",
+        "representativePublicPathCoverage"
       ],
       "requirement_definition_status": "declared",
       "inventory_issues": [],
       "data_sources": [
-        "projects",
-        "pages",
-        "response_headers"
+        "projects.wwwBehaviorJson",
+        "projects.protocolBehaviorJson",
+        "pages.url",
+        "pages.pageType"
       ],
-      "scope": "site",
-      "root_cause_family": "tech.www_non_www_consistency",
+      "scope": "host_path_variant",
+      "root_cause_family": "host.canonical_host_configuration",
       "current_validation_status": "validated_with_limits",
       "validation_status": "validated_with_limits",
       "validation_confidence": "high",
@@ -9011,143 +9403,256 @@
         "developer.mozilla.org",
         "www.ikea.com",
         "app.uniswap.org",
-        "nextjs.org"
+        "nextjs.org",
+        "cloudflare.com",
+        "github.com",
+        "mozilla.org"
       ],
       "tested_archetypes": [
         "small_static_expert",
         "local_commerce_dynamic",
         "ssr_documentation",
         "large_ecommerce",
-        "csr_application"
+        "csr_application",
+        "application",
+        "corporate-platform",
+        "documentation-framework",
+        "enterprise-ecommerce",
+        "open-source-platform",
+        "small-business-site"
       ],
       "positive_cases": 4,
       "negative_cases": 14,
       "fixture_tests": [
         "tests/http-status-validation.test.js",
-        "tests/url.test.js"
+        "tests/url.test.js",
+        "tests/http-host-security-standard.test.js"
       ],
       "real_world_runs": [
         "http-status-validation-v1-2026-07-19",
-        "run-77-forensic-validation"
+        "run-77-forensic-validation",
+        "batch-12.3-live-read-only-2026-07-23",
+        "run-77-read-only-recheck"
       ],
-      "false_positives": 0,
-      "false_negatives": 0,
+      "false_positives": 1,
+      "false_negatives": 1,
       "severity_errors": 0,
       "scope_errors": 0,
       "stability_runs": 3,
       "known_limits": [
-        "An intentionally unprovisioned alternate host or an active migration can require operational context.",
-        "Root candidates prove root convergence; deep path/query preservation was independently probed but is not yet persisted as a separate production probe.",
-        "Genuine subdomain audits are not assigned a fabricated www-of-subdomain requirement."
+        "Genuine subdomain projects remain not_applicable rather than receiving a fabricated www requirement.",
+        "Canonical-host locale/content routing is not confused with alternate-host consolidation."
       ],
-      "manual_review_reason": "",
-      "last_validated_at": "2026-07-19",
-      "last_validated_commit": "901a096a43169a8fa5fd21ec6682da30507f5a9d",
+      "manual_review_reason": null,
+      "last_validated_at": "2026-07-23",
+      "last_validated_commit": "84304f3d5b7546cacc246337bd57429cd3edf954",
       "evidence_references": [
         "tests/http-status-validation.test.js",
         "tests/url.test.js",
-        "docs/http-status-check-validation-v1.md"
+        "docs/http-status-check-validation-v1.md",
+        "docs/http-host-security-check-validation-v1.md",
+        "tests/http-host-security-standard.test.js"
+      ],
+      "recommended_trust_action": "fully_automated",
+      "historical_observations": 64,
+      "historical_run_count": 44,
+      "validation_gap": null,
+      "standard_version": "audit-standard-v1",
+      "standard_status": "active",
+      "standard_usage": "fully_automated",
+      "standard_severity": "Medium",
+      "standard_score_effect": "score_capable",
+      "standard_finding_type": "core_issue",
+      "diagnostic_only": false,
+      "disabled": false,
+      "applicability": "Sites with a meaningful Apex/www pair, measured across the canonical host and deterministic representative public paths.",
+      "not_applicable_rule": "Genuine subdomain projects without a meaningful www alternative are not applicable; incomplete host evidence is an availability state.",
+      "review_status": "not_required",
+      "rollup_role": "host_configuration_score_owner",
+      "pattern_role": "none",
+      "score_owner_check_id": null
+    },
+    {
+      "check_id": "tech.x_content_type_options",
+      "name": "X-Content-Type-Options",
+      "category": "Security Best Practice",
+      "finding_type": "best_practice",
+      "default_severity": "Low",
+      "active": true,
+      "score_effect": "score_capable",
+      "evidence_class": "primary_required",
+      "coverage_unit": "check:tech.x_content_type_options",
+      "required_facts": [
+        "successfulFinalHtmlOrExecutableResourceResponse",
+        "completeFinalResponseHeaders",
+        "completeExecutableResourceInventory",
+        "headerParserVersion"
+      ],
+      "requirement_definition_status": "declared",
+      "inventory_issues": [],
+      "data_sources": [
+        "pages.responseHeadersJson",
+        "pages.finalUrl",
+        "resources.responseHeadersJson",
+        "resources.resourceType",
+        "check_results.evidenceJson"
+      ],
+      "scope": "final_response_header",
+      "root_cause_family": "security_headers.content_type_protection",
+      "current_validation_status": "validated_with_limits",
+      "validation_status": "validated_with_limits",
+      "validation_confidence": "high",
+      "tested_domains": [
+        "app.uniswap.org",
+        "cloudflare.com",
+        "github.com",
+        "marcdeboer.de",
+        "mozilla.org",
+        "nextjs.org",
+        "react.dev",
+        "www.ikea.com",
+        "trinkgut-zierles.de"
+      ],
+      "tested_archetypes": [
+        "application",
+        "corporate-platform",
+        "documentation-framework",
+        "enterprise-ecommerce",
+        "open-source-platform",
+        "small-business-site"
+      ],
+      "positive_cases": 5,
+      "negative_cases": 4,
+      "fixture_tests": [
+        "tests/http-host-security-standard.test.js"
+      ],
+      "real_world_runs": [
+        "batch-12.3-live-read-only-2026-07-23",
+        "run-77-read-only-recheck"
+      ],
+      "false_positives": 0,
+      "false_negatives": 1,
+      "severity_errors": 0,
+      "scope_errors": 0,
+      "stability_runs": 2,
+      "known_limits": [
+        "Only nosniff passes; resource-level coverage depends on retained executable/style response headers."
+      ],
+      "manual_review_reason": null,
+      "last_validated_at": "2026-07-23",
+      "last_validated_commit": "84304f3d5b7546cacc246337bd57429cd3edf954",
+      "evidence_references": [
+        "docs/http-host-security-check-validation-v1.md",
+        "tests/http-host-security-standard.test.js"
+      ],
+      "recommended_trust_action": "fully_automated",
+      "historical_observations": 64,
+      "historical_run_count": 44,
+      "validation_gap": null,
+      "standard_version": "audit-standard-v1",
+      "standard_status": "active",
+      "standard_usage": "fully_automated",
+      "standard_severity": "Low",
+      "standard_score_effect": "score_capable",
+      "standard_finding_type": "best_practice",
+      "diagnostic_only": false,
+      "disabled": false,
+      "applicability": "Successful HTML, JavaScript and stylesheet responses with complete X-Content-Type-Options evidence.",
+      "not_applicable_rule": "Responses outside the declared resource scope are not applicable; incomplete response-header evidence is insufficient_evidence.",
+      "review_status": "not_required",
+      "rollup_role": "header_configuration_score_owner",
+      "pattern_role": "none",
+      "score_owner_check_id": null
+    },
+    {
+      "check_id": "tech.x_frame_options",
+      "name": "Effective frame protection",
+      "category": "Security Best Practice",
+      "finding_type": "best_practice",
+      "default_severity": "Low",
+      "active": true,
+      "score_effect": "score_capable",
+      "evidence_class": "primary_required",
+      "coverage_unit": "check:tech.x_frame_options",
+      "required_facts": [
+        "successfulFinalHtmlResponse",
+        "completeFinalResponseHeaders",
+        "headerParserVersion"
+      ],
+      "requirement_definition_status": "declared",
+      "inventory_issues": [],
+      "data_sources": [
+        "pages.responseHeadersJson",
+        "pages.finalUrl",
+        "check_results.evidenceJson"
+      ],
+      "scope": "final_response_header",
+      "root_cause_family": "security_headers.frame_protection",
+      "current_validation_status": "validated_with_limits",
+      "validation_status": "validated_with_limits",
+      "validation_confidence": "high",
+      "tested_domains": [
+        "app.uniswap.org",
+        "cloudflare.com",
+        "github.com",
+        "marcdeboer.de",
+        "mozilla.org",
+        "nextjs.org",
+        "react.dev",
+        "www.ikea.com",
+        "trinkgut-zierles.de"
+      ],
+      "tested_archetypes": [
+        "application",
+        "corporate-platform",
+        "documentation-framework",
+        "enterprise-ecommerce",
+        "open-source-platform",
+        "small-business-site"
+      ],
+      "positive_cases": 6,
+      "negative_cases": 3,
+      "fixture_tests": [
+        "tests/http-host-security-standard.test.js"
+      ],
+      "real_world_runs": [
+        "batch-12.3-live-read-only-2026-07-23",
+        "run-77-read-only-recheck"
+      ],
+      "false_positives": 1,
+      "false_negatives": 0,
+      "severity_errors": 0,
+      "scope_errors": 0,
+      "stability_runs": 2,
+      "known_limits": [
+        "Enforced CSP frame-ancestors takes precedence over X-Frame-Options.",
+        "A controlled embedding allowlist can be correct but still requires complete CSP syntax evidence."
+      ],
+      "manual_review_reason": null,
+      "last_validated_at": "2026-07-23",
+      "last_validated_commit": "84304f3d5b7546cacc246337bd57429cd3edf954",
+      "evidence_references": [
+        "docs/http-host-security-check-validation-v1.md",
+        "tests/http-host-security-standard.test.js"
       ],
       "recommended_trust_action": "automated_with_limits",
       "historical_observations": 64,
       "historical_run_count": 44,
-      "validation_gap": null
-    },
-    {
-      "check_id": "tech.x_content_type_options",
-      "name": "X-Content-Type-Options present",
-      "category": "Security Best Practice",
-      "finding_type": "best_practice",
-      "default_severity": "Low",
-      "active": true,
-      "score_effect": "conditional",
-      "evidence_class": "optional_opportunity",
-      "coverage_unit": "check:tech.x_content_type_options",
-      "required_facts": [
-        "htmlResponseHeaders"
-      ],
-      "requirement_definition_status": "declared",
-      "inventory_issues": [],
-      "data_sources": [
-        "projects",
-        "pages",
-        "response_headers"
-      ],
-      "scope": "url_aggregate",
-      "root_cause_family": "tech.x_content_type_options",
-      "current_validation_status": "manual_review_required",
-      "validation_status": "manual_review_required",
-      "validation_confidence": "low",
-      "tested_domains": [],
-      "tested_archetypes": [],
-      "positive_cases": 0,
-      "negative_cases": 0,
-      "fixture_tests": [],
-      "real_world_runs": [],
-      "false_positives": 0,
-      "false_negatives": 0,
-      "severity_errors": 0,
-      "scope_errors": 0,
-      "stability_runs": 0,
-      "known_limits": [
-        "Automated facts do not determine business relevance, search intent, editorial quality, or implementation priority without human context."
-      ],
-      "manual_review_reason": "X-Content-Type-Options present can collect technical facts automatically, but the conclusion depends on page purpose, search intent, business context, editorial judgment, or implementation trade-offs.",
-      "last_validated_at": "",
-      "last_validated_commit": "",
-      "evidence_references": [],
-      "recommended_trust_action": "manual_review_before_scoring",
-      "historical_observations": 64,
-      "historical_run_count": 44,
-      "validation_gap": null
-    },
-    {
-      "check_id": "tech.x_frame_options",
-      "name": "X-Frame-Options present",
-      "category": "Security Best Practice",
-      "finding_type": "best_practice",
-      "default_severity": "Low",
-      "active": true,
-      "score_effect": "conditional",
-      "evidence_class": "optional_opportunity",
-      "coverage_unit": "check:tech.x_frame_options",
-      "required_facts": [
-        "htmlResponseHeaders"
-      ],
-      "requirement_definition_status": "declared",
-      "inventory_issues": [],
-      "data_sources": [
-        "projects",
-        "pages",
-        "response_headers"
-      ],
-      "scope": "url_aggregate",
-      "root_cause_family": "tech.x_frame_options",
-      "current_validation_status": "manual_review_required",
-      "validation_status": "manual_review_required",
-      "validation_confidence": "low",
-      "tested_domains": [],
-      "tested_archetypes": [],
-      "positive_cases": 0,
-      "negative_cases": 0,
-      "fixture_tests": [],
-      "real_world_runs": [],
-      "false_positives": 0,
-      "false_negatives": 0,
-      "severity_errors": 0,
-      "scope_errors": 0,
-      "stability_runs": 0,
-      "known_limits": [
-        "Automated facts do not determine business relevance, search intent, editorial quality, or implementation priority without human context."
-      ],
-      "manual_review_reason": "X-Frame-Options present can collect technical facts automatically, but the conclusion depends on page purpose, search intent, business context, editorial judgment, or implementation trade-offs.",
-      "last_validated_at": "",
-      "last_validated_commit": "",
-      "evidence_references": [],
-      "recommended_trust_action": "manual_review_before_scoring",
-      "historical_observations": 64,
-      "historical_run_count": 44,
-      "validation_gap": null
+      "validation_gap": null,
+      "standard_version": "audit-standard-v1",
+      "standard_status": "active",
+      "standard_usage": "automated_with_limits",
+      "standard_severity": "Low",
+      "standard_score_effect": "score_capable",
+      "standard_finding_type": "best_practice",
+      "diagnostic_only": false,
+      "disabled": false,
+      "applicability": "Successful relevant HTML responses with complete X-Frame-Options and enforced CSP frame-ancestors evidence.",
+      "not_applicable_rule": "Responses outside the declared resource scope are not applicable; incomplete response-header evidence is insufficient_evidence.",
+      "review_status": "not_required",
+      "rollup_role": "header_configuration_score_owner",
+      "pattern_role": "none",
+      "score_owner_check_id": null
     },
     {
       "check_id": "tech.x_robots_tag_unusual",
@@ -10357,5 +10862,8 @@
   "robots_sitemap_validation_version": "robots-sitemap-validation-v1",
   "audit_standard_version": "audit-standard-v1",
   "metadata_alignment_version": "standard-metadata-alignment-v1",
-  "robots_ai_llms_validation_version": "robots-ai-llms-validation-v1"
+  "robots_ai_llms_validation_version": "robots-ai-llms-validation-v1",
+  "header_policy_version": "http-header-policy-v1",
+  "protocol_negotiation_version": "http-protocol-negotiation-v1",
+  "domain_detection_version": "domain-host-detection-v2"
 }

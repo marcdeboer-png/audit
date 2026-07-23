@@ -41,6 +41,20 @@ import {
   sitemapMetadata
 } from '../../utils/discoverySemantics.js';
 import { activeStandardChecks } from '../standardMetadata.js';
+import {
+  COMPRESSION_MINIMUM_BODY_BYTES,
+  HEADER_POLICY_VERSION,
+  parseCachePolicy,
+  parseContentSecurityPolicy,
+  parseCrossOriginPolicies,
+  parseFrameProtection,
+  parseHsts,
+  parsePermissionsPolicy,
+  parseReferrerPolicy,
+  parseXContentTypeOptions,
+  evaluateCompression
+} from '../../utils/headerSemantics.js';
+import { PROTOCOL_NEGOTIATION_VERSION } from '../../utils/protocolProbe.js';
 
 const tech = (id, category, name, run, options = {}) => ({
   id: id.startsWith('template.') ? id : `tech.${id}`,
@@ -109,36 +123,18 @@ export function techChecks() {
     http4xxPages(),
     http5xxPages(),
     redirectPagesInventory(),
-    headerPresence('compression_header', 'Server/Performance Best Practice', 'Compression header present', 'content-encoding', 'Low', {
-      findingType: 'best_practice',
-      missingFinding: (affected, total) => `${affected}/${total} HTML page(s) have no detected Content-Encoding header.`,
-      okFinding: 'HTML responses include compression evidence where headers were stored.',
-      recommendation: 'Treat a missing Content-Encoding header as a header-sample review item; verify transfer compression with Requests/SF before prioritizing.',
-      confidence: (affected) => affected > 5 ? 'medium' : affected ? 'low' : 'high',
-      reviewRecommended: (affected) => affected > 0,
-      dataBasis: 'stored compact response headers',
-      limitations: 'Header evidence can be affected by crawler/request settings and does not replace a transfer-size audit.'
-    }),
-    headerPresence('cache_control_header', 'Server/Performance Best Practice', 'Cache-Control header present', 'cache-control', 'Low', {
-      findingType: 'best_practice',
-      missingFinding: (affected, total) => `${affected}/${total} HTML page(s) have no detected HTTP Cache-Control header.`,
-      okFinding: 'HTML responses include a Cache-Control header where stored.',
-      recommendation: 'Review caching policy: HTTP Cache-Control was not detected on sampled HTML responses. Validate static assets/CDN TTLs before calling it a performance defect.',
-      confidence: 'medium',
-      reviewRecommended: true,
-      reviewReason: 'HTML Cache-Control intent varies by template and cannot prove CDN/cache effectiveness alone.',
-      dataBasis: 'stored HTML response headers',
-      automationCoverage: 'partial',
-      limitations: 'Use Requests/SF resource header exports for asset TTL and CONFIG_NOCACHE conclusions.'
-    }),
+    compressionPolicyCheck(),
+    cachePolicyCheck(),
     httpVersionSupport(),
     cdnCacheSignals(),
-    headerPresence('hsts_header', 'Security Best Practice', 'HSTS present', 'strict-transport-security', 'Low'),
-    headerPresence('content_security_policy', 'Security Best Practice', 'Content-Security-Policy present', 'content-security-policy', 'Low'),
-    headerPresence('x_frame_options', 'Security Best Practice', 'X-Frame-Options present', 'x-frame-options', 'Low'),
-    headerPresence('x_content_type_options', 'Security Best Practice', 'X-Content-Type-Options present', 'x-content-type-options', 'Low'),
-    headerPresence('referrer_policy', 'Security Best Practice', 'Referrer-Policy present', 'referrer-policy', 'Low'),
-    headerPresence('permissions_policy', 'Security Best Practice', 'Permissions-Policy present', 'permissions-policy', 'Low'),
+    securityHeaderCheck('hsts_header', 'HSTS policy', (headers, row) => parseHsts(headers, { url: row.finalUrl || row.url })),
+    securityHeaderCheck('content_security_policy', 'Content-Security-Policy', parseContentSecurityPolicy),
+    securityHeaderCheck('x_frame_options', 'Effective frame protection', parseFrameProtection),
+    securityHeaderCheck('x_content_type_options', 'X-Content-Type-Options', parseXContentTypeOptions, {
+      includeExecutableResources: true
+    }),
+    securityHeaderCheck('referrer_policy', 'Referrer-Policy', parseReferrerPolicy),
+    securityHeaderCheck('permissions_policy', 'Permissions-Policy', parsePermissionsPolicy),
     xRobotsTagCheck(),
     contentTypeHtmlCheck(),
     charsetUtf8Check(),
@@ -252,21 +248,56 @@ export function techChecks() {
 function domainHttpsReachable() {
   return tech('https_reachable', 'Server & Infrastructure', 'HTTPS reachable', function run(ctx) {
     const candidates = parseProjectJson(ctx.project, 'protocolBehaviorJson', []);
-    const httpsCandidates = candidates.filter((item) => item.startUrl?.startsWith('https://'));
+    const httpsCandidates = candidates.filter((item) => item.startUrl?.startsWith('https://') && item.probeRole !== 'representative_public_path');
     if (!httpsCandidates.length) return availabilityResult(this, 'insufficient_evidence', {
       finding: 'HTTPS reachability was not evaluated because no HTTPS candidate measurement is available.',
       evidence: { httpsCandidates: [], protocolMeasurementsAvailable: false },
       requirements: { requiredFacts: ['httpsCandidateResponse'], missingFacts: ['httpsCandidateResponse'], minimumCoverage: 1, canCollectWithTargetedRun: true }
     });
+    const certificateFailures = httpsCandidates.filter(confirmedCertificateFailure);
+    if (certificateFailures.length) return makeResult(this, 'Error', {
+      affectedCount: certificateFailures.length,
+      priority: 'High',
+      finding: `${certificateFailures.length} relevant HTTPS host variant(s) have a confirmed certificate validation failure.`,
+      recommendation: 'Install a valid, unexpired certificate whose hostnames cover every relevant HTTPS host variant.',
+      evidence: {
+        logicVersion: HTTP_STATUS_VALIDATION_VERSION,
+        protocolNegotiationVersion: PROTOCOL_NEGOTIATION_VERSION,
+        certificateFailures: certificateFailures.map(protocolCandidateSample),
+        httpsCandidates
+      },
+      requirements: httpsReachabilityRequirements(),
+      scoreDeduplicationKey: 'host.https_transport',
+      rootCauseKey: 'host.https_transport',
+      rootCauseFamily: 'host.https_transport',
+      scopeType: 'host_configuration',
+      evidenceClass: 'primary_required',
+      coverageUnitKey: 'relevant_https_host_variant'
+    });
     if (httpsCandidates.every((item) => !httpStatusKnown(item))) return availabilityResult(this, 'technical_error', {
       finding: 'All HTTPS candidate measurements failed technically; no website failure was inferred.',
-      evidence: { httpsCandidates, technicalErrors: httpsCandidates.map((item) => item.error).filter(Boolean) },
+      evidence: {
+        logicVersion: HTTP_STATUS_VALIDATION_VERSION,
+        protocolNegotiationVersion: PROTOCOL_NEGOTIATION_VERSION,
+        httpsCandidates,
+        technicalErrors: httpsCandidates.map((item) => ({ error: item.error, errorType: item.errorType, tls: item.tls })).filter((item) => item.error || item.tls)
+      },
       requirements: { requiredFacts: ['httpsCandidateResponse'], missingFacts: ['stableHttpsResponse'], minimumCoverage: 1, canCollectWithTargetedRun: true }
     });
     const responded = httpsCandidates.filter(httpStatusKnown);
     const reachable = responded.filter((item) => {
       const final = safeUrl(item.finalUrl);
       return final?.protocol === 'https:';
+    });
+    const incompleteTls = reachable.filter((item) => !item.tls || item.tls.state !== 'connected' || item.tls.authorized === false);
+    if (reachable.length && incompleteTls.length) return availabilityResult(this, 'insufficient_evidence', {
+      finding: `${incompleteTls.length} reachable HTTPS candidate(s) lack complete successful certificate/TLS evidence.`,
+      evidence: {
+        logicVersion: HTTP_STATUS_VALIDATION_VERSION,
+        protocolNegotiationVersion: PROTOCOL_NEGOTIATION_VERSION,
+        httpsCandidates
+      },
+      requirements: { ...httpsReachabilityRequirements(), missingFacts: ['completeTlsCertificateEvidence'] }
     });
     return makeResult(this, reachable.length ? 'OK' : 'Error', {
       affectedCount: reachable.length ? 0 : 1,
@@ -279,7 +310,13 @@ function domainHttpsReachable() {
         finalHttpsSiteReachable: reachable.length > 0,
         httpsCandidates
       },
-      requirements: { requiredFacts: ['httpsGetResponse', 'finalHttpsUrl'], optionalFacts: ['certificateDetails'], missingFacts: [], minimumCoverage: 1, canCollectWithTargetedRun: true }
+      requirements: httpsReachabilityRequirements(),
+      scoreDeduplicationKey: 'host.https_transport',
+      rootCauseKey: 'host.https_transport',
+      rootCauseFamily: 'host.https_transport',
+      scopeType: 'host_configuration',
+      evidenceClass: 'primary_required',
+      coverageUnitKey: 'relevant_https_host_variant'
     });
   }, { priority: 'High', effort: 'M' });
 }
@@ -287,7 +324,7 @@ function domainHttpsReachable() {
 function httpToHttpsRedirect() {
   return tech('http_to_https_redirect', 'Server & Infrastructure', 'HTTP to HTTPS redirect', function run(ctx) {
     const candidates = parseProjectJson(ctx.project, 'protocolBehaviorJson', []);
-    const http = candidates.filter((item) => item.startUrl?.startsWith('http://') && httpStatusKnown(item));
+    const http = candidates.filter((item) => item.startUrl?.startsWith('http://') && candidateHasHttpEvidence(item));
     const unavailable = http.filter(candidateBlocksRedirectEvaluation);
     const stableHttp = http.filter((item) => !candidateBlocksRedirectEvaluation(item));
     if (!stableHttp.length && unavailable.length) return availabilityResult(this, 'technical_error', {
@@ -295,17 +332,33 @@ function httpToHttpsRedirect() {
       evidence: { logicVersion: HTTP_STATUS_VALIDATION_VERSION, httpCandidates: http, unavailableCandidates: unavailable },
       requirements: { requiredFacts: ['httpGetResponse', 'initialStatus', 'redirectChain', 'finalUrl'], missingFacts: ['stableHttpRedirectResponse'], minimumCoverage: 1, canCollectWithTargetedRun: true }
     });
-    const incomplete = stableHttp.filter((item) => item.initialStatusCode === null || item.initialStatusCode === undefined || !Array.isArray(item.redirectChain) || typeof item.pathPreserved !== 'boolean' || typeof item.queryPreserved !== 'boolean');
+    const incomplete = stableHttp.filter((item) =>
+      (item.initialStatusCode === null || item.initialStatusCode === undefined || !Array.isArray(item.redirectChain))
+      && !candidateHasRedirectConfigurationFailure(item)
+    );
     if (incomplete.length) return availabilityResult(this, 'insufficient_evidence', {
       finding: `${incomplete.length} HTTP candidate measurement(s) predate complete initial-status and redirect provenance.`,
       details: 'No HTTP-to-HTTPS defect was inferred from final-only historical facts.',
       evidence: { logicVersion: HTTP_STATUS_VALIDATION_VERSION, httpCandidates: http, incompleteMeasurements: incomplete.length },
       requirements: { requiredFacts: ['httpGetResponse', 'initialStatus', 'redirectChain', 'finalUrl'], missingFacts: ['completeRedirectProvenance'], minimumCoverage: 1, canCollectWithTargetedRun: true }
     });
-    const notRedirecting = stableHttp.filter((item) => !item.redirectsToHttps || !hasRedirect(item));
+    const selectedHost = safeUrl(ctx.project.finalDomain)?.hostname || null;
+    if (representativeHostPathEvidenceMissing(ctx, stableHttp)) return availabilityResult(this, 'insufficient_evidence', {
+      finding: 'HTTP-to-HTTPS root behavior is available, but representative public path coverage is incomplete.',
+      evidence: { logicVersion: HTTP_STATUS_VALIDATION_VERSION, httpCandidates: http },
+      requirements: {
+        requiredFacts: ['httpGetResponse', 'initialStatus', 'redirectChain', 'finalUrl', 'representativePublicPathCoverage'],
+        missingFacts: ['representativePublicPathCoverage'],
+        minimumCoverage: 1,
+        canCollectWithTargetedRun: true
+      }
+    });
+    const notRedirecting = stableHttp.filter((item) => candidateHasRedirectConfigurationFailure(item) || !item.redirectsToHttps || !hasRedirect(item));
     const temporary = stableHttp.filter((item) => item.redirectsToHttps && hasRedirect(item) && !isPermanentRedirectChain(item));
     const pathOrQueryLoss = stableHttp.filter((item) => item.redirectsToHttps && (item.pathPreserved === false || item.queryPreserved === false));
-    const affected = [...new Set([...notRedirecting, ...temporary, ...pathOrQueryLoss])];
+    const wrongHost = stableHttp.filter((item) => item.redirectsToHttps && selectedHost && item.finalHost !== selectedHost);
+    const unnecessaryHops = stableHttp.filter((item) => (item.redirectStatuses || []).length > 1);
+    const affected = [...new Set([...notRedirecting, ...temporary, ...pathOrQueryLoss, ...wrongHost, ...unnecessaryHops])];
     const status = !http.length ? 'NA' : affected.length ? 'Warning' : 'OK';
     if (!http.length) return availabilityResult(this, 'insufficient_evidence', {
       finding: 'HTTP-to-HTTPS behavior was not evaluated because no HTTP candidate response is available.',
@@ -316,11 +369,32 @@ function httpToHttpsRedirect() {
       affectedCount: affected.length,
       finding: status === 'OK' ? 'Reachable HTTP candidates permanently redirect to HTTPS.' : `${affected.length} HTTP candidate(s) lack a permanent, path-preserving HTTPS redirect.`,
       recommendation: 'Use a permanent 301/308 redirect from relevant HTTP variants to the matching canonical HTTPS URL.',
-      evidence: { logicVersion: HTTP_STATUS_VALIDATION_VERSION, httpCandidates: http, temporaryRedirects: temporary.length, nonHttpsOrNoRedirect: notRedirecting.length, pathOrQueryLoss: pathOrQueryLoss.length, unavailableCandidates: unavailable.length },
+      evidence: {
+        logicVersion: HTTP_STATUS_VALIDATION_VERSION,
+        httpCandidates: http,
+        temporaryRedirects: temporary.length,
+        nonHttpsOrNoRedirect: notRedirecting.length,
+        pathOrQueryLoss: pathOrQueryLoss.length,
+        wrongHost: wrongHost.length,
+        unnecessaryHops: unnecessaryHops.length,
+        redirectLoops: stableHttp.filter((item) => item.loopDetected).length,
+        unavailableCandidates: unavailable.length
+      },
       facts: { measuredCandidates: http.length, stableCandidates: stableHttp.length, affectedCandidates: affected.length },
       confidence: unavailable.length || temporary.length ? 'medium' : 'high',
-      limitations: 'Root-candidate domain detection proves root-path behavior. Deep path/query preservation requires a targeted host-consistency probe.',
-      requirements: { requiredFacts: ['httpGetResponse', 'initialStatus', 'redirectChain', 'finalUrl'], optionalFacts: ['deepPathQueryProbe'], missingFacts: unavailable.length ? ['completeStableHttpCandidateCoverage'] : [], minimumCoverage: 1, canCollectWithTargetedRun: true }
+      requirements: {
+        requiredFacts: ['httpGetResponse', 'initialStatus', 'redirectChain', 'finalUrl', 'representativePublicPathCoverage'],
+        optionalFacts: [],
+        missingFacts: unavailable.length ? ['completeStableHttpCandidateCoverage'] : [],
+        minimumCoverage: 1,
+        canCollectWithTargetedRun: true
+      },
+      scoreDeduplicationKey: 'host.redirect_configuration',
+      rootCauseKey: 'host.redirect_configuration',
+      rootCauseFamily: 'host.redirect_configuration',
+      scopeType: 'host_configuration',
+      evidenceClass: 'primary_required',
+      coverageUnitKey: 'http_host_path_variant'
     });
   });
 }
@@ -336,7 +410,7 @@ function wwwConsistency() {
       evidence: { logicVersion: HTTP_STATUS_VALIDATION_VERSION, selectedHost: data.selectedHost, candidates: relevant },
       requirements: { requiredFacts: ['registrableApexHost'], missingFacts: [], minimumCoverage: 1, canCollectWithTargetedRun: false }
     });
-    const measured = relevant.filter(httpStatusKnown);
+    const measured = relevant.filter(candidateHasHttpEvidence);
     if (measured.length < startHosts.length) return availabilityResult(this, 'technical_error', {
       finding: 'Apex/www consistency could not be evaluated because at least one host variant produced no HTTP response.',
       evidence: { logicVersion: HTTP_STATUS_VALIDATION_VERSION, selectedHost: data.selectedHost, candidates: relevant },
@@ -348,16 +422,33 @@ function wwwConsistency() {
       evidence: { logicVersion: HTTP_STATUS_VALIDATION_VERSION, selectedHost: data.selectedHost, candidates: relevant, unavailableCandidates: unavailable },
       requirements: { requiredFacts: ['getResponseForBothHostVariants'], missingFacts: ['stableHostVariantResponse'], minimumCoverage: 2, canCollectWithTargetedRun: true }
     });
-    const incomplete = measured.filter((item) => item.initialStatusCode === null || item.initialStatusCode === undefined || !Array.isArray(item.redirectChain) || typeof item.pathPreserved !== 'boolean' || typeof item.queryPreserved !== 'boolean');
+    const incomplete = measured.filter((item) =>
+      (item.initialStatusCode === null || item.initialStatusCode === undefined || !Array.isArray(item.redirectChain))
+      && !candidateHasRedirectConfigurationFailure(item)
+    );
     if (incomplete.length) return availabilityResult(this, 'insufficient_evidence', {
       finding: `${incomplete.length} host-variant measurement(s) predate complete initial-status and redirect provenance.`,
       details: 'No Apex/www inconsistency was inferred from final-host-only historical facts.',
       evidence: { logicVersion: HTTP_STATUS_VALIDATION_VERSION, selectedHost: data.selectedHost, candidates: relevant, incompleteMeasurements: incomplete.length },
       requirements: { requiredFacts: ['getResponseForBothHostVariants', 'initialStatus', 'redirectChain', 'finalHost'], missingFacts: ['completeHostRedirectProvenance'], minimumCoverage: 2, canCollectWithTargetedRun: true }
     });
+    if (representativeHostPathEvidenceMissing(ctx, measured)) return availabilityResult(this, 'insufficient_evidence', {
+      finding: 'Apex/www root behavior is available, but representative public path coverage is incomplete.',
+      evidence: { logicVersion: HTTP_STATUS_VALIDATION_VERSION, selectedHost: data.selectedHost, candidates: relevant },
+      requirements: {
+        requiredFacts: ['getResponseForBothHostVariants', 'initialStatus', 'redirectChain', 'finalHost', 'representativePublicPathCoverage'],
+        missingFacts: ['representativePublicPathCoverage'],
+        minimumCoverage: 2,
+        canCollectWithTargetedRun: true
+      }
+    });
     const issues = measured.filter((item) => {
+      if (candidateHasRedirectConfigurationFailure(item)) return true;
       if (item.finalHost !== data.selectedHost) return true;
-      if (item.startHost !== data.selectedHost && (!hasRedirect(item) || !isPermanentRedirectChain(item))) return true;
+      if (item.startHost === data.selectedHost) return false;
+      if (!hasRedirect(item) || !isPermanentRedirectChain(item)) return true;
+      if ((item.redirectStatuses || []).length > 1) return true;
+      if (item.startUrl?.startsWith('https://') && item.tls?.errorClass === 'certificate_error') return true;
       return item.pathPreserved === false || item.queryPreserved === false;
     });
     const status = issues.length ? 'Warning' : 'OK';
@@ -370,7 +461,13 @@ function wwwConsistency() {
       confidence: 'high',
       reviewRecommended: issues.length > 0,
       limitations: 'An intentionally unprovisioned alternate host or migration window can require operational context.',
-      requirements: { requiredFacts: ['getResponseForBothHostVariants', 'initialStatus', 'redirectChain', 'finalHost'], optionalFacts: ['sitemapAndCanonicalHostAgreement'], missingFacts: [], minimumCoverage: 2, canCollectWithTargetedRun: true }
+      requirements: { requiredFacts: ['getResponseForBothHostVariants', 'initialStatus', 'redirectChain', 'finalHost', 'representativePublicPathCoverage'], optionalFacts: ['sitemapAndCanonicalHostAgreement'], missingFacts: [], minimumCoverage: 2, canCollectWithTargetedRun: true },
+      scoreDeduplicationKey: 'host.canonical_host_configuration',
+      rootCauseKey: 'host.canonical_host_configuration',
+      rootCauseFamily: 'host.canonical_host_configuration',
+      scopeType: 'host_configuration',
+      evidenceClass: 'primary_required',
+      coverageUnitKey: 'apex_www_path_variant'
     });
   });
 }
@@ -455,6 +552,8 @@ function http5xxPages() {
 function redirectPagesInventory() {
   return tech('redirect_pages', 'Server & Infrastructure', 'Redirect pages present', function run(ctx) {
     const rows = all(ctx.db, `SELECT url, initialStatusCode, statusCode, finalUrl, redirectChainJson FROM pages WHERE runId = ? AND initialStatusCode >= 300 AND initialStatusCode < 400 ORDER BY id`, [ctx.run.id]);
+    const hostCandidates = parseProjectJson(ctx.project, 'protocolBehaviorJson', [])
+      .filter((item) => hasRedirect(item) || candidateHasRedirectConfigurationFailure(item));
     const legacyRedirectSignals = count(ctx.db, "SELECT COUNT(*) AS count FROM pages WHERE runId = ? AND initialStatusCode IS NULL AND finalUrl IS NOT NULL AND finalUrl <> url", [ctx.run.id]);
     if (!rows.length && legacyRedirectSignals) return availabilityResult(this, 'insufficient_evidence', {
       finding: `${legacyRedirectSignals} historical final-URL difference(s) exist without retained initial redirect status.`,
@@ -465,9 +564,23 @@ function redirectPagesInventory() {
     return makeResult(this, 'OK', {
       affectedCount: rows.length,
       sampleUrls: rows.map((row) => row.url),
-      finding: rows.length ? `${rows.length} requested URL(s) returned an initial redirect.` : 'No initial page redirects were recorded.',
+      finding: rows.length || hostCandidates.length
+        ? `${rows.length} crawled URL(s) and ${hostCandidates.length} host/path probe(s) returned a redirect or redirect-configuration failure.`
+        : 'No initial page or host-probe redirects were recorded.',
       recommendation: 'Use this inventory to review redirect chains; a redirect is not automatically a defect.',
-      evidence: { logicVersion: HTTP_STATUS_VALIDATION_VERSION, totalRedirectUrls: rows.length, displayedSamples: Math.min(rows.length, 10), samples: rows.slice(0, 10) },
+      evidence: {
+        logicVersion: HTTP_STATUS_VALIDATION_VERSION,
+        totalRedirectUrls: rows.length,
+        displayedSamples: Math.min(rows.length, 10),
+        samples: rows.slice(0, 10),
+        hostPathProbes: hostCandidates.slice(0, 20),
+        hostRedirectStates: {
+          temporaryChains: hostCandidates.filter((item) => hasRedirect(item) && !isPermanentRedirectChain(item)).length,
+          multiHopChains: hostCandidates.filter((item) => (item.redirectStatuses || []).length > 1).length,
+          loops: hostCandidates.filter((item) => item.loopDetected).length,
+          hopLimitExceeded: hostCandidates.filter((item) => item.errorType === 'redirect_hops_exceeded').length
+        }
+      },
       findingType: 'info',
       scoreEligible: false,
       confidence: 'high',
@@ -518,11 +631,55 @@ function httpStatusKnown(item) {
   return Number.isInteger(Number(item?.finalStatusCode ?? item?.statusCode)) && Number(item?.finalStatusCode ?? item?.statusCode) >= 100;
 }
 
+function confirmedCertificateFailure(item) {
+  if (item?.tls?.errorClass !== 'certificate_error') return false;
+  const tlsAttempts = Array.isArray(item.tls?.attempts)
+    ? item.tls.attempts.filter((attempt) => attempt.errorClass === 'certificate_error')
+    : [];
+  const httpAttempts = Array.isArray(item?.attempts)
+    ? item.attempts.filter((attempt) =>
+        attempt.errorType === 'certificate_error' || /cert/i.test(String(attempt.error || ''))
+      )
+    : [];
+  return tlsAttempts.length >= 2 || httpAttempts.length >= 2;
+}
+
+function representativeHostPathEvidenceMissing(ctx, candidates) {
+  const deepPublicPageExists = all(ctx.db, `
+    SELECT url
+    FROM pages
+    WHERE runId = ?
+      AND statusCode >= 200 AND statusCode < 300
+      AND (contentType LIKE '%text/html%' OR contentType LIKE '%application/xhtml%')
+      AND COALESCE(pageType, 'other') NOT IN ('login', 'search', 'error')
+    ORDER BY id
+  `, [ctx.run.id]).some((row) => {
+    const parsed = safeUrl(row.url);
+    return parsed && parsed.pathname !== '/';
+  });
+  if (!deepPublicPageExists) return false;
+  return !(candidates || []).some((item) => item.probeRole === 'representative_public_path');
+}
+
+function candidateHasHttpEvidence(item) {
+  const initial = Number(item?.initialStatusCode ?? item?.redirectChain?.[0]?.statusCode);
+  return httpStatusKnown(item)
+    || (Number.isInteger(initial) && initial >= 100 && initial <= 599)
+    || candidateHasRedirectConfigurationFailure(item);
+}
+
 function candidateBlocksRedirectEvaluation(item) {
   const status = Number(item?.finalStatusCode ?? item?.statusCode);
-  if (status === 408 || status === 429 || status >= 500) return true;
-  if (!Array.isArray(item?.attempts) || !item.attempts.length) return false;
-  return ['technical_error', 'transient', 'insufficient_evidence'].includes(classifyHttpStability(item.attempts).status);
+  if (candidateHasRedirectConfigurationFailure(item)) return false;
+  if (status === 408 || status === 429) return true;
+  const attempts = Array.isArray(item?.attempts) ? item.attempts : [];
+  if (status >= 500 && !attempts.length) return true;
+  if (!attempts.length) return Boolean(item?.error);
+  return ['technical_error', 'transient', 'insufficient_evidence'].includes(classifyHttpStability(attempts).status);
+}
+
+function candidateHasRedirectConfigurationFailure(item) {
+  return Boolean(item?.loopDetected || ['redirect_loop', 'redirect_hops_exceeded'].includes(item?.errorType));
 }
 
 function hasRedirect(item) {
@@ -539,6 +696,16 @@ function isPermanentRedirectChain(item) {
 
 function safeUrl(value) {
   try { return new URL(value); } catch { return null; }
+}
+
+function httpsReachabilityRequirements() {
+  return {
+    requiredFacts: ['httpsGetResponse', 'finalHttpsUrl', 'tlsConnection', 'certificateValidation', 'hostnameValidation'],
+    optionalFacts: ['certificateDetails', 'negotiatedProtocol'],
+    missingFacts: [],
+    minimumCoverage: 1,
+    canCollectWithTargetedRun: true
+  };
 }
 
 function pageStatusCheck(id, category, name, where, status = 'Warning', priority = 'Medium', scopeWhere = null) {
@@ -633,140 +800,443 @@ function highTtfbCheck() {
   }, { priority: 'Medium', effort: 'M' });
 }
 
-function headerPresence(id, category, name, headerKey, priority = 'Medium', options = {}) {
-  return tech(id, category, name, function run(ctx) {
-    const gate = storedFactGate(this, ctx, 'storeResponseHeaders', 'HTML response headers');
+function securityHeaderCheck(id, name, evaluator, options = {}) {
+  return tech(id, 'Security Best Practice', name, function run(ctx) {
+    const deduplicationKey = securityHeaderRootCauseKey(id);
+    const requirements = headerPolicyRequirements(options);
+    const gate = storedFactGate(this, ctx, 'storeResponseHeaders', 'complete final HTML response headers');
     if (gate) return gate;
-    const total = htmlPageCount(ctx.db, ctx.run.id);
-    const where = `${HTML_WHERE} AND (responseHeadersJson IS NULL OR responseHeadersJson NOT LIKE ?)`;
-    const affectedCount = count(ctx.db, `SELECT COUNT(*) AS count FROM pages WHERE runId = ? AND (${where})`, [ctx.run.id, `%"${headerKey}"%`]);
-    const samples = affectedCount ? sampleUrls(ctx.db, ctx.run.id, where, [`%"${headerKey}"%`]) : [];
-    return makeResult(this, checkStatusForCoverage(total, affectedCount, 'Warning'), {
-      affectedCount,
-      sampleUrls: samples,
-      finding: total
-        ? affectedCount
-          ? (typeof options.missingFinding === 'function' ? options.missingFinding(affectedCount, total) : `${affectedCount}/${total} HTML page(s) are missing ${headerKey}.`)
-          : (options.okFinding || `HTML pages include ${headerKey}.`)
-        : 'No HTML pages stored.',
-      recommendation: options.recommendation || `Review whether the ${headerKey} header should be sent for HTML responses.`,
-      evidence: { totalHtmlPages: total, missingHeaderPages: affectedCount, headerKey, sampleUrls: samples },
-      findingType: options.findingType || (category === 'Security Best Practice' ? 'best_practice' : undefined),
-      confidence: typeof options.confidence === 'function' ? options.confidence(affectedCount, total) : (options.confidence || 'high'),
-      reviewRecommended: typeof options.reviewRecommended === 'function' ? options.reviewRecommended(affectedCount, total) : Boolean(options.reviewRecommended),
-      reviewReason: options.reviewReason,
-      dataBasis: options.dataBasis || 'stored response headers',
-      evidenceLevel: 'aggregate',
-      automationCoverage: options.automationCoverage || 'partial',
-      interpretation: options.interpretation || '',
-      limitations: options.limitations || '',
-      requirements: { requiredFacts: ['htmlResponseHeaders'], optionalFacts: [], missingFacts: [], minimumCoverage: 1, canCollectWithTargetedRun: true }
+    if (options.includeExecutableResources) {
+      const resourceGate = storedFactGate(
+        this,
+        ctx,
+        'storeAllResources',
+        'complete JavaScript and stylesheet response inventory'
+      );
+      if (resourceGate) return resourceGate;
+    }
+    const pageRows = all(ctx.db, `
+      SELECT url, finalUrl, statusCode, initialStatusCode, contentType, pageType, responseHeadersJson
+      FROM pages
+      WHERE runId = ? AND ${SUCCESSFUL_HTML_WHERE}
+      ORDER BY id
+    `, [ctx.run.id]).map((row) => ({ ...row, evidenceSource: 'page' }));
+    const resourceRows = options.includeExecutableResources ? all(ctx.db, `
+      SELECT resourceUrl AS url, resourceUrl AS finalUrl, statusCode, statusCode AS initialStatusCode,
+             contentType, responseHeadersJson
+      FROM resources
+      WHERE runId = ?
+        AND statusCode >= 200 AND statusCode < 300
+        AND resourceType IN ('script', 'stylesheet')
+      ORDER BY id
+    `, [ctx.run.id]).map((row) => ({ ...row, evidenceSource: 'resource' })) : [];
+    const rows = [...pageRows, ...resourceRows];
+    if (!rows.length) return availabilityResult(this, 'not_applicable', {
+      finding: options.includeExecutableResources
+        ? `${name}: no successful HTML, JavaScript or stylesheet response is in scope.`
+        : `${name}: no successful HTML response is in scope.`,
+      evidence: { logicVersion: HEADER_POLICY_VERSION, evaluatedResponses: 0 },
+      requirements
     });
-  }, { priority, effort: 'M' });
+    const incomplete = rows.filter((row) => row.responseHeadersJson === null);
+    const evaluated = rows
+      .filter((row) => row.responseHeadersJson !== null)
+      .map((row) => {
+        const headers = safeJson(row.responseHeadersJson, {});
+        return {
+          url: row.url,
+          finalUrl: row.finalUrl,
+          statusCode: row.statusCode,
+          evidenceSource: row.evidenceSource,
+          policy: adjustHeaderPolicySeverity(id, evaluator(headers, row), row),
+          supportingEvidence: {
+            crossOriginPolicies: parseCrossOriginPolicies(headers),
+            serverHeaderPresent: Boolean(headers?.server),
+            poweredByHeaderPresent: Boolean(headers?.['x-powered-by'])
+          }
+        };
+      });
+    const applicable = evaluated.filter((row) => row.policy.state !== 'not_applicable');
+    const issues = applicable.filter((row) => !row.policy.pass);
+    if (!issues.length && incomplete.length) return availabilityResult(this, 'insufficient_evidence', {
+      finding: `${name}: ${incomplete.length} in-scope response(s) lack retained final-header evidence.`,
+      evidence: {
+        logicVersion: HEADER_POLICY_VERSION,
+        evaluatedResponses: evaluated.length,
+        incompleteResponses: incomplete.slice(0, 10).map((row) => row.url),
+        samples: evaluated.slice(0, 10)
+      },
+      requirements: { ...requirements, missingFacts: ['completeFinalResponseHeaders'] }
+    });
+    if (!applicable.length) return availabilityResult(this, 'not_applicable', {
+      finding: `${name}: no response is applicable to this header policy.`,
+      evidence: { logicVersion: HEADER_POLICY_VERSION, evaluatedResponses: evaluated.length, samples: evaluated.slice(0, 10) },
+      requirements
+    });
+    const priority = issues.some((row) => row.policy.severity === 'Medium') ? 'Medium' : 'Low';
+    return makeResult(this, issues.length ? 'Warning' : 'OK', {
+      priority,
+      affectedCount: issues.length,
+      affectedUrlCount: issues.length,
+      sampleUrls: issues.map((row) => row.url),
+      finding: issues.length
+        ? `${issues.length}/${applicable.length} evaluated response(s) fail the effective ${name} policy.`
+        : `${name} is effective on all evaluated responses.`,
+      recommendation: `Configure a valid and effective ${name} policy on the final response.`,
+      evidence: {
+        logicVersion: HEADER_POLICY_VERSION,
+        evaluatedResponses: applicable.length,
+        incompleteResponses: incomplete.length,
+        issueStates: frequency(issues.map((row) => row.policy.state)),
+        samples: (issues.length ? issues : applicable).slice(0, 10)
+      },
+      requirements: {
+        ...requirements,
+        missingFacts: incomplete.length ? ['completeFinalResponseHeadersForAllInScopeResponses'] : []
+      },
+      checkVersion: HEADER_POLICY_VERSION,
+      evidenceClass: 'primary_required',
+      coverageUnitKey: `final_response_header:${id}`,
+      scoreDeduplicationKey: deduplicationKey,
+      rootCauseKey: deduplicationKey,
+      rootCauseFamily: 'security_headers.configuration',
+      scopeType: 'header_configuration',
+      findingType: 'best_practice',
+      confidence: incomplete.length ? 'medium' : 'high',
+      reviewRecommended: false,
+      automationCoverage: 'full',
+      limitations: incomplete.length ? 'The finding is valid, but a sitewide pass is not asserted while final-header evidence remains incomplete.' : ''
+    });
+  }, { priority: 'Low', effort: 'M' });
+}
+
+function securityHeaderRootCauseKey(id) {
+  const keys = {
+    content_security_policy: 'security_headers.csp',
+    permissions_policy: 'security_headers.permissions_policy',
+    referrer_policy: 'security_headers.referrer_policy',
+    x_content_type_options: 'security_headers.content_type_protection',
+    x_frame_options: 'security_headers.frame_protection',
+    hsts_header: 'security_headers.hsts'
+  };
+  return keys[id] || `security_headers.${id}`;
+}
+
+function adjustHeaderPolicySeverity(id, policy, row) {
+  if (
+    id === 'x_frame_options'
+    && !policy.pass
+    && ['login', 'checkout', 'account'].includes(String(row.pageType || '').toLowerCase())
+  ) {
+    return { ...policy, severity: 'Medium', sensitivePage: true };
+  }
+  return policy;
+}
+
+function compressionPolicyCheck() {
+  return tech('compression_header', 'Server/Performance Best Practice', 'Effective HTTP compression', function run(ctx) {
+    const gate = storedFactGate(this, ctx, 'storeResponseHeaders', 'final response headers and decoded response sizes');
+    if (gate) return gate;
+    const pages = all(ctx.db, `
+      SELECT url, finalUrl, contentType, rawHtmlSize AS bodyBytes, responseHeadersJson
+      FROM pages
+      WHERE runId = ? AND ${SUCCESSFUL_HTML_WHERE}
+      ORDER BY id
+    `, [ctx.run.id]).map((row) => ({ ...row, evidenceSource: 'page' }));
+    const resources = all(ctx.db, `
+      SELECT pageUrl, resourceUrl AS url, contentType, sizeBytes AS bodyBytes,
+             sizeMeasurementKind, sizeMeasurementError, responseHeadersJson
+      FROM resources
+      WHERE runId = ? AND statusCode >= 200 AND statusCode < 300
+        AND (
+          contentType LIKE 'text/%' OR
+          LOWER(COALESCE(contentType, '')) LIKE '%javascript%' OR
+          LOWER(COALESCE(contentType, '')) LIKE '%json%' OR
+          LOWER(COALESCE(contentType, '')) LIKE '%xml%' OR
+          LOWER(COALESCE(contentType, '')) LIKE '%svg%'
+        )
+      ORDER BY id
+    `, [ctx.run.id]).map((row) => ({ ...row, evidenceSource: 'resource' }));
+    const rows = [...pages, ...resources];
+    if (!rows.length) return availabilityResult(this, 'not_applicable', {
+      finding: 'No successful text-compressible response is in scope.',
+      evidence: { logicVersion: HEADER_POLICY_VERSION, evaluatedResponses: 0 },
+      requirements: compressionRequirements()
+    });
+    const assessments = rows.map((row) => ({
+      url: row.url,
+      pageUrl: row.pageUrl || row.url,
+      evidenceSource: row.evidenceSource,
+      sizeMeasurementKind: row.sizeMeasurementKind || 'decoded_response_bytes',
+      policy: row.responseHeadersJson === null
+        ? { logicVersion: HEADER_POLICY_VERSION, state: 'insufficient_evidence', pass: false, reason: 'Final response headers are unavailable.' }
+        : evaluateCompression(safeJson(row.responseHeadersJson, {}), {
+            contentType: row.contentType,
+            bodyBytes: row.bodyBytes,
+            minimumBodyBytes: COMPRESSION_MINIMUM_BODY_BYTES
+          })
+    }));
+    const applicable = assessments.filter((row) => !['not_applicable'].includes(row.policy.state));
+    const incomplete = applicable.filter((row) => row.policy.state === 'insufficient_evidence');
+    const issues = applicable.filter((row) => row.policy.state === 'uncompressed');
+    if (!issues.length && incomplete.length) return availabilityResult(this, 'insufficient_evidence', {
+      finding: `Compression could not be fully evaluated for ${incomplete.length} response(s).`,
+      evidence: { logicVersion: HEADER_POLICY_VERSION, minimumBodyBytes: COMPRESSION_MINIMUM_BODY_BYTES, samples: incomplete.slice(0, 10) },
+      requirements: { ...compressionRequirements(), missingFacts: ['completeFinalHeadersAndDecodedSize'] }
+    });
+    if (!applicable.length) return availabilityResult(this, 'not_applicable', {
+      finding: 'All measured responses are outside the compressible type/size scope.',
+      evidence: { logicVersion: HEADER_POLICY_VERSION, minimumBodyBytes: COMPRESSION_MINIMUM_BODY_BYTES, samples: assessments.slice(0, 10) },
+      requirements: compressionRequirements()
+    });
+    return makeResult(this, issues.length ? 'Warning' : 'OK', {
+      affectedCount: issues.length,
+      affectedUrlCount: new Set(issues.map((row) => row.pageUrl)).size,
+      sampleUrls: issues.map((row) => row.url),
+      finding: issues.length
+        ? `${issues.length} sufficiently large text response(s) were transferred without gzip, br or zstd evidence.`
+        : 'All applicable measured text responses include supported compression evidence.',
+      recommendation: 'Compress sufficiently large HTML and text resources using gzip, Brotli or zstd where the delivery stack supports it.',
+      evidence: {
+        logicVersion: HEADER_POLICY_VERSION,
+        minimumBodyBytes: COMPRESSION_MINIMUM_BODY_BYTES,
+        evaluatedResponses: applicable.length,
+        incompleteResponses: incomplete.length,
+        samples: (issues.length ? issues : applicable).slice(0, 10)
+      },
+      requirements: { ...compressionRequirements(), missingFacts: incomplete.length ? ['completeCompressionCoverage'] : [] },
+      checkVersion: HEADER_POLICY_VERSION,
+      evidenceClass: 'primary_conditional',
+      coverageUnitKey: 'compressible_response',
+      scoreDeduplicationKey: 'http_compression.configuration',
+      rootCauseKey: 'http_compression.configuration',
+      rootCauseFamily: 'http_compression.configuration',
+      scopeType: 'resource',
+      findingType: 'best_practice',
+      confidence: incomplete.length ? 'medium' : 'high',
+      automationCoverage: incomplete.length ? 'partial' : 'full'
+    });
+  }, { priority: 'Low', effort: 'M' });
+}
+
+function cachePolicyCheck() {
+  return tech('cache_control_header', 'Server/Performance Best Practice', 'Effective cache policy', function run(ctx) {
+    return evaluateCacheConfiguration(this, ctx, { diagnosticPerspective: false });
+  }, { priority: 'Low', effort: 'M' });
+}
+
+function evaluateCacheConfiguration(check, ctx, options = {}) {
+  const gate = storedFactGate(check, ctx, 'storeResponseHeaders', 'complete final response headers for HTML and loaded resources');
+  if (gate) return gate;
+  const pageRows = all(ctx.db, `
+    SELECT url, finalUrl, pageType, indexable, contentType, rawHtmlSize AS sizeBytes, responseHeadersJson
+    FROM pages
+    WHERE runId = ? AND ${SUCCESSFUL_HTML_WHERE}
+    ORDER BY id
+  `, [ctx.run.id]).map((row) => ({
+    ...row,
+    resourceUrl: row.url,
+    pageUrl: row.url,
+    resourceKind: 'html',
+    evidenceSource: 'page'
+  }));
+  const rawResources = all(ctx.db, `
+    SELECT pageUrl, resourceUrl, resourceType, statusCode, sizeBytes, sizeMeasurementKind,
+           contentType, responseHeadersJson
+    FROM resources
+    WHERE runId = ? AND statusCode >= 200 AND statusCode < 300
+      AND resourceType IN ('script', 'stylesheet', 'font', 'image')
+    ORDER BY id
+  `, [ctx.run.id]);
+  const seenResources = new Set();
+  const resourceRows = rawResources.filter((row) => {
+    if (seenResources.has(row.resourceUrl)) return false;
+    seenResources.add(row.resourceUrl);
+    return true;
+  }).map((row) => ({
+    ...row,
+    url: row.resourceUrl,
+    resourceKind: 'static',
+    evidenceSource: 'resource'
+  }));
+  const rows = [...pageRows, ...resourceRows];
+  if (!rows.length) return availabilityResult(check, 'not_applicable', {
+    finding: 'No successful public HTML or loaded static response is in cache-policy scope.',
+    evidence: { logicVersion: HEADER_POLICY_VERSION, evaluatedResponses: 0 },
+    requirements: cachePolicyRequirements()
+  });
+  const assessed = rows.map((row) => ({
+    url: row.url,
+    pageUrl: row.pageUrl,
+    resourceKind: row.resourceKind,
+    resourceType: row.resourceType || 'html',
+    sizeBytes: row.sizeBytes,
+    sizeMeasurementKind: row.sizeMeasurementKind || 'decoded_response_bytes',
+    policy: row.responseHeadersJson === null
+      ? { logicVersion: HEADER_POLICY_VERSION, state: 'insufficient_evidence', pass: false, reason: 'Final response headers are unavailable.' }
+      : parseCachePolicy(safeJson(row.responseHeadersJson, {}), {
+          resourceKind: row.resourceKind,
+          personalized: false
+        })
+  }));
+  const incomplete = assessed.filter((row) => row.policy.state === 'insufficient_evidence');
+  const issues = assessed.filter((row) => !row.policy.pass && !['insufficient_evidence', 'not_applicable'].includes(row.policy.state));
+  if (!issues.length && incomplete.length) return availabilityResult(check, 'insufficient_evidence', {
+    finding: `Cache policy could not be completely evaluated for ${incomplete.length} response(s).`,
+    evidence: { logicVersion: HEADER_POLICY_VERSION, samples: incomplete.slice(0, 10) },
+    requirements: { ...cachePolicyRequirements(), missingFacts: ['completeResourceResponseHeaders'] }
+  });
+  const impactedBytes = issues.reduce((sum, row) => sum + (Number.isFinite(Number(row.sizeBytes)) ? Number(row.sizeBytes) : 0), 0);
+  return makeResult(check, issues.length ? 'Warning' : 'OK', {
+    priority: 'Low',
+    affectedCount: issues.length,
+    affectedUrlCount: new Set(issues.map((row) => row.pageUrl)).size,
+    sampleUrls: issues.map((row) => row.url),
+    finding: issues.length
+      ? `${issues.length} public response(s) have a missing, unusable or explicitly uncacheable effective policy.`
+      : 'Evaluated public responses have usable cache-policy or revalidation evidence.',
+    recommendation: 'Review caching policy: use effective browser/shared-cache directives or validators appropriate to the public resource type; do not infer quality from vendor headers alone.',
+    evidence: {
+      logicVersion: HEADER_POLICY_VERSION,
+      perspective: options.diagnosticPerspective ? 'cache_delivery_signals' : 'effective_cache_policy',
+      evaluatedResponses: assessed.length,
+      incompleteResponses: incomplete.length,
+      impactedDecodedBytes: impactedBytes,
+      issueStates: frequency(issues.map((row) => row.policy.state)),
+      samples: (issues.length ? issues : assessed).slice(0, 10)
+    },
+    requirements: { ...cachePolicyRequirements(), missingFacts: incomplete.length ? ['completeCachePolicyCoverage'] : [] },
+    checkVersion: HEADER_POLICY_VERSION,
+    evidenceClass: 'primary_conditional',
+    coverageUnitKey: 'effective_response_cache_policy',
+    scoreDeduplicationKey: 'http_cache.configuration',
+    rootCauseKey: 'http_cache.configuration',
+    rootCauseFamily: 'http_cache.configuration',
+    scopeType: 'resource',
+    findingType: 'best_practice',
+    confidence: incomplete.length ? 'medium' : 'high',
+    automationCoverage: incomplete.length ? 'partial' : 'full',
+    limitations: 'Medium severity requires independently measured broad impact or material repeat-transfer cost; this check does not infer those from a fixed resource percentage.'
+  });
+}
+
+function headerPolicyRequirements(options = {}) {
+  return {
+    requiredFacts: options.includeExecutableResources
+      ? [
+          'successfulFinalHtmlOrExecutableResourceResponse',
+          'completeFinalResponseHeaders',
+          'completeExecutableResourceInventory',
+          'headerParserVersion'
+        ]
+      : ['successfulFinalHtmlResponse', 'completeFinalResponseHeaders', 'headerParserVersion'],
+    optionalFacts: ['crossOriginPolicyInventory', 'serverHeaderPresence', 'poweredByHeaderPresence'],
+    missingFacts: [],
+    minimumCoverage: 1,
+    canCollectWithTargetedRun: true
+  };
+}
+
+function compressionRequirements() {
+  return {
+    requiredFacts: ['finalResponseHeaders', 'contentType', 'decodedResponseBytes', 'compressionPolicyVersion'],
+    optionalFacts: ['transferBytes'],
+    missingFacts: [],
+    minimumCoverage: 1,
+    canCollectWithTargetedRun: true
+  };
+}
+
+function cachePolicyRequirements() {
+  return {
+    requiredFacts: ['finalResponseHeaders', 'resourceRole', 'cachePolicyParserVersion'],
+    optionalFacts: ['decodedResponseBytes', 'transferBytes', 'cdnHeaders'],
+    missingFacts: [],
+    minimumCoverage: 1,
+    canCollectWithTargetedRun: true
+  };
+}
+
+function frequency(values) {
+  return values.reduce((output, value) => {
+    output[value] = (output[value] || 0) + 1;
+    return output;
+  }, {});
 }
 
 function httpVersionSupport() {
-  return tech('http_version_support', 'Server/Performance Best Practice', 'HTTP protocol version evidence', function run(ctx) {
-    const rows = all(ctx.db, `
-      SELECT url, responseHeadersJson, featureFlagsJson
-      FROM pages
-      WHERE runId = ? AND (
-        COALESCE(responseHeadersJson, '') LIKE '%x-http-version%' OR
-        COALESCE(featureFlagsJson, '') LIKE '%httpVersion%'
-      )
-      LIMIT 20
-    `, [ctx.run.id]);
-    if (!rows.length) {
-      return makeResult(this, 'NA', {
-        finding: 'No HTTP protocol version data is stored for this run.',
-        recommendation: 'Import a Requests/Screaming-Frog header export or capture protocol metadata before judging HTTP/2 or HTTP/3 coverage.',
-        evidence: { requiredData: ['protocol_version', 'response_headers'] },
-        findingType: 'info',
-        confidence: 'high'
-      });
-    }
-    const weak = rows.filter((row) => !/h2|http\/2|http\/3|h3/i.test(`${row.responseHeadersJson || ''} ${row.featureFlagsJson || ''}`));
-    return makeResult(this, weak.length ? 'Warning' : 'OK', {
-      affectedCount: weak.length,
-      sampleUrls: weak.map((row) => row.url).slice(0, 10),
-      finding: weak.length
-        ? `${weak.length} sampled page(s) have protocol evidence but no HTTP/2+/HTTP/3 signal.`
-        : 'Stored protocol evidence includes HTTP/2+/HTTP/3 signals where available.',
-      recommendation: 'Verify protocol support with request-level tooling before using this as a final infrastructure finding.',
-      evidence: { checkedRows: rows.length, samples: rows.slice(0, 10) },
+  return tech('http_version_support', 'Server/Performance Best Practice', 'Negotiated HTTP protocol version', function run(ctx) {
+    const candidates = parseProjectJson(ctx.project, 'protocolBehaviorJson', []);
+    const selectedHost = safeUrl(ctx.project.finalDomain)?.hostname;
+    const https = candidates.filter((item) => item.startUrl?.startsWith('https://'));
+    const canonical = https.find((item) => item.finalHost === selectedHost && item.tls?.state === 'connected')
+      || https.find((item) => item.tls?.state === 'connected');
+    if (!canonical) return availabilityResult(this, https.some((item) => item.tls?.state === 'technical_error') ? 'technical_error' : 'insufficient_evidence', {
+      finding: 'No successful actual TLS ALPN negotiation is stored for the canonical HTTPS host.',
+      evidence: { logicVersion: PROTOCOL_NEGOTIATION_VERSION, candidates: https.map(protocolCandidateSample) },
+      requirements: {
+        requiredFacts: ['actualTlsAlpnNegotiation'],
+        optionalFacts: ['http3AltSvc'],
+        missingFacts: ['successfulCanonicalHostNegotiation'],
+        minimumCoverage: 1,
+        canCollectWithTargetedRun: true
+      }
+    });
+    const negotiated = String(canonical.tls.negotiatedProtocol || '').toLowerCase();
+    const modern = negotiated === 'h2' || negotiated === 'h3' || negotiated.startsWith('h3-');
+    return makeResult(this, modern ? 'OK' : 'Warning', {
+      affectedCount: modern ? 0 : 1,
+      finding: modern
+        ? `The canonical HTTPS host negotiated ${negotiated}.`
+        : `The canonical HTTPS host negotiated only ${negotiated || 'an unknown protocol'}.`,
+      recommendation: 'Enable HTTP/2 or HTTP/3 on the canonical HTTPS host.',
+      evidence: {
+        logicVersion: PROTOCOL_NEGOTIATION_VERSION,
+        negotiatedProtocol: negotiated || null,
+        tlsProtocol: canonical.tls.tlsProtocol,
+        canonicalCandidate: protocolCandidateSample(canonical),
+        http3Advertisement: String(canonical.finalHeaders?.['alt-svc'] || '').includes('h3')
+      },
+      requirements: {
+        requiredFacts: ['actualTlsAlpnNegotiation'],
+        optionalFacts: ['http3AltSvc'],
+        missingFacts: [],
+        minimumCoverage: 1,
+        canCollectWithTargetedRun: true
+      },
+      checkVersion: PROTOCOL_NEGOTIATION_VERSION,
+      evidenceClass: 'primary_required',
+      coverageUnitKey: 'canonical_https_host',
+      scoreDeduplicationKey: 'http_protocol.negotiation',
+      rootCauseKey: 'http_protocol.negotiation',
+      rootCauseFamily: 'http_protocol.negotiation',
+      scopeType: 'host_configuration',
       findingType: 'best_practice',
-      confidence: 'medium',
-      reviewRecommended: weak.length > 0
+      confidence: 'high',
+      automationCoverage: 'full'
     });
   }, { priority: 'Low', effort: 'S' });
 }
 
 function cdnCacheSignals() {
   return tech('cdn_cache_signals', 'Server/Performance Best Practice', 'CDN/cache header signals', function run(ctx) {
-    const total = htmlPageCount(ctx.db, ctx.run.id);
-    const rows = all(ctx.db, `
-      SELECT url, responseHeadersJson
-      FROM pages
-      WHERE runId = ? AND ${HTML_WHERE}
-        AND COALESCE(responseHeadersJson, '') <> ''
-      LIMIT 50
-    `, [ctx.run.id]);
-    if (!rows.length) {
-      return makeResult(this, total ? 'NA' : 'NA', {
-        finding: 'No compact response header data is stored for CDN/cache assessment.',
-        recommendation: 'Store response headers or import SF/Requests headers to evaluate cache/CDN patterns.',
-        evidence: { totalHtmlPages: total, requiredHeaders: ['cache-control', 'age', 'via', 'x-cache', 'cf-cache-status', 'x-azure-ref', 'server'] },
-        findingType: 'info'
-      });
-    }
-    const parsed = rows.map((row) => ({ ...row, headers: safeJson(row.responseHeadersJson, {}) }));
-    const signalRows = parsed.filter((row) => hasCdnOrCacheSignal(row.headers));
-    const noStoreRows = parsed.filter((row) => /no-store/i.test(String(row.headers['cache-control'] || '')));
-    const noCacheRows = parsed.filter((row) => /\bno-cache\b|max-age=0|s-maxage=0/i.test(String(row.headers['cache-control'] || '')));
-    const assetCacheRows = all(ctx.db, `
-      SELECT pageUrl AS url, resourceUrl, resourceType, responseHeadersJson
-      FROM resources
-      WHERE runId = ?
-        AND resourceType IN ('script', 'stylesheet', 'font', 'image')
-        AND COALESCE(responseHeadersJson, '') <> ''
-      LIMIT 200
-    `, [ctx.run.id]).map((row) => ({ ...row, headers: safeJson(row.responseHeadersJson, {}) }));
-    const uncacheableAssets = assetCacheRows.filter((row) => {
-      const cacheControl = String(row.headers['cache-control'] || '').toLowerCase();
-      return !cacheControl || /no-store|no-cache|max-age=0|s-maxage=0/.test(cacheControl);
-    });
-    const clearAssetProblem = assetCacheRows.length >= 10 && uncacheableAssets.length / assetCacheRows.length > 0.5;
-    const status = clearAssetProblem ? 'Warning' : 'OK';
-    return makeResult(this, status, {
-      affectedCount: clearAssetProblem ? uncacheableAssets.length : 0,
-      sampleUrls: clearAssetProblem ? uncacheableAssets.slice(0, 10).map((row) => row.url) : [],
-      finding: clearAssetProblem
-        ? `${uncacheableAssets.length}/${assetCacheRows.length} sampled static asset response(s) have missing or no-cache Cache-Control evidence.`
-        : signalRows.length
-          ? `${signalRows.length}/${rows.length} sampled HTML page(s) include CDN/cache header signals.`
-          : 'Stored headers do not prove CDN/cache issues; no clear static-asset caching problem was detected from available facts.',
-      recommendation: clearAssetProblem
-        ? 'Review cache policy for static assets and CDN edge behaviour with a Requests/SF header export before prioritizing infrastructure changes.'
-        : 'Use this as a technical evidence inventory. CDN architecture, CONFIG_NOCACHE and TTL quality require response-header/resource exports or infrastructure data.',
-      evidence: {
-        sampledHtmlHeaderRows: rows.length,
-        signalRows: signalRows.slice(0, 10),
-        htmlNoStoreRows: noStoreRows.slice(0, 10),
-        htmlNoCacheRows: noCacheRows.slice(0, 10),
-        sampledAssetHeaderRows: assetCacheRows.length,
-        uncacheableAssetSamples: uncacheableAssets.slice(0, 10)
-      },
-      findingType: 'best_practice',
-      confidence: clearAssetProblem ? 'medium' : 'low',
-      reviewRecommended: true,
-      reviewReason: 'CDN/cache findings depend on resource type, TTL intent and infrastructure context.',
-      dataBasis: 'compact response headers and resource header samples',
-      evidenceLevel: assetCacheRows.length ? 'sample' : 'aggregate',
-      automationCoverage: clearAssetProblem ? 'partial' : 'requires_external_data',
-      interpretation: 'CDN and cache evidence is documented separately from hard errors; only clear static-asset cache problems are raised.',
-      limitations: 'HTML Cache-Control alone does not prove CDN effectiveness or CONFIG_NOCACHE impact.'
-    });
+    return evaluateCacheConfiguration(this, ctx, { diagnosticPerspective: true });
   }, { priority: 'Low', effort: 'S' });
+}
+
+function protocolCandidateSample(item) {
+  return {
+    startUrl: item.startUrl,
+    finalUrl: item.finalUrl,
+    initialStatus: item.initialStatusCode,
+    finalStatus: item.finalStatusCode,
+    negotiatedProtocol: item.tls?.negotiatedProtocol || null,
+    tlsProtocol: item.tls?.tlsProtocol || null,
+    tlsState: item.tls?.state || null,
+    tlsErrorClass: item.tls?.errorClass || null,
+    certificate: item.tls?.certificate || null,
+    finalHeaders: item.finalHeaders || {}
+  };
 }
 
 function xRobotsTagCheck() {
@@ -3797,14 +4267,6 @@ function parseRobotsDirectives(value) {
     .split(/[;,]/)
     .map((item) => item.trim().split(/\s+/)[0])
     .filter(Boolean);
-}
-
-function hasCdnOrCacheSignal(headers = {}) {
-  const haystack = Object.entries(headers || {})
-    .map(([key, value]) => `${key}: ${value}`)
-    .join('\n')
-    .toLowerCase();
-  return /cache-control|age:|expires:|etag:|last-modified:|vary:|via:|x-cache|x-cache-hits|cf-cache-status|x-azure-ref|x-served-by|cloudflare|akamai|fastly|azure|frontdoor|cdn/.test(haystack);
 }
 
 function normalizeComparableUrl(value) {

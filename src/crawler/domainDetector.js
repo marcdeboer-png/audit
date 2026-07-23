@@ -1,6 +1,9 @@
 import { followRedirectChain } from '../utils/http.js';
 import { normalizeUrl, originCandidates, stripWww, urlOrigin } from '../utils/url.js';
 import { classifyHostRelation, RETRY_SENSITIVE_HTTP_STATUSES } from '../utils/httpStatus.js';
+import { probeTlsProtocol, PROTOCOL_NEGOTIATION_VERSION } from '../utils/protocolProbe.js';
+
+export const DOMAIN_DETECTION_VERSION = 'domain-host-detection-v2';
 
 export async function detectDomain(inputDomain, options = {}) {
   const candidates = originCandidates(inputDomain);
@@ -31,6 +34,27 @@ export async function detectDomain(inputDomain, options = {}) {
     redirectChain: selected.chain,
     allCandidates: results
   };
+}
+
+export async function probeRepresentativeHostPaths(inputDomain, representatives = [], options = {}) {
+  const bases = originCandidates(inputDomain);
+  const results = [];
+  for (const representative of representatives) {
+    const pathAndQuery = representative.pathAndQuery || '/';
+    if (pathAndQuery === '/') continue;
+    for (const base of bases) {
+      const target = new URL(pathAndQuery, base).toString();
+      const result = await probeCandidate(target, { ...options, probeTls: false });
+      results.push(candidateEvidence(result, {
+        redirectsToHttps: Boolean(result.finalUrl && new URL(result.finalUrl).protocol === 'https:'),
+        startHost: new URL(result.startUrl).hostname,
+        probeRole: 'representative_public_path',
+        sourcePageType: representative.pageType || 'other',
+        sourceUrl: representative.sourceUrl || null
+      }));
+    }
+  }
+  return results;
 }
 
 function candidateRank(result) {
@@ -73,7 +97,15 @@ function candidateEvidence(result, extra = {}) {
     hostRelation: final ? classifyHostRelation(start.hostname, final.hostname) : null,
     method: 'GET',
     attempts: result.attempts || [],
+    initialHeaders: result.initialHeaders || result.chain?.[0]?.headers || {},
+    finalHeaders: result.finalHeaders || result.chain?.at(-1)?.headers || {},
+    contentType: result.contentType || result.chain?.at(-1)?.contentType || '',
+    loopDetected: Boolean(result.loopDetected),
+    errorType: result.errorType || null,
     error: result.error || null,
+    tls: result.tls || null,
+    domainDetectionVersion: DOMAIN_DETECTION_VERSION,
+    protocolNegotiationVersion: PROTOCOL_NEGOTIATION_VERSION,
     ...extra
   };
 }
@@ -93,6 +125,9 @@ async function probeCandidate(candidate, options) {
   const attempts = [];
   const maximum = 2;
   let result;
+  const tls = candidate.startsWith('https://') && options.probeTls !== false
+    ? await probeTlsProtocol(candidate, { timeoutMs: 8000, attempts: 2 })
+    : null;
   for (let attempt = 1; attempt <= maximum; attempt += 1) {
     result = await followRedirectChain(candidate, { timeoutMs: 8000, userAgent: options.userAgent });
     attempts.push({
@@ -101,9 +136,11 @@ async function probeCandidate(candidate, options) {
       initialStatusCode: result.chain?.[0]?.statusCode ?? null,
       finalStatusCode: result.statusCode,
       finalUrl: result.finalUrl,
+      errorType: result.errorType || null,
       error: result.error || null
     });
+    if (result.loopDetected || result.errorType === 'redirect_hops_exceeded') break;
     if (!result.error && !RETRY_SENSITIVE_HTTP_STATUSES.has(Number(result.statusCode))) break;
   }
-  return { ...result, attempts };
+  return { ...result, attempts, tls };
 }

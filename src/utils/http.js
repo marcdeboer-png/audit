@@ -28,10 +28,16 @@ export function selectedHeaders(headersObject) {
     'content-encoding',
     'strict-transport-security',
     'content-security-policy',
+    'content-security-policy-report-only',
     'x-frame-options',
     'x-content-type-options',
     'referrer-policy',
     'permissions-policy',
+    'cross-origin-embedder-policy',
+    'cross-origin-opener-policy',
+    'cross-origin-resource-policy',
+    'alt-svc',
+    'x-powered-by',
     'x-robots-tag'
   ];
   const output = {};
@@ -146,10 +152,25 @@ export async function followRedirectChain(startUrl, options = {}) {
   const timeoutMs = options.timeoutMs || 10000;
   let currentUrl = startUrl;
   const chain = [];
+  const visited = new Set();
 
   for (let i = 0; i <= maxRedirects; i += 1) {
+    if (visited.has(currentUrl)) {
+      return {
+        startUrl,
+        finalUrl: currentUrl,
+        statusCode: null,
+        ok: false,
+        chain,
+        loopDetected: true,
+        errorType: 'redirect_loop',
+        error: 'Redirect loop detected'
+      };
+    }
+    visited.add(currentUrl);
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
+    const started = Date.now();
     try {
       const response = await fetch(currentUrl, {
         method: 'GET',
@@ -164,11 +185,27 @@ export async function followRedirectChain(startUrl, options = {}) {
       const entry = {
         url: currentUrl,
         statusCode: response.status,
-        location: location ? new URL(location, currentUrl).toString() : null
+        location: location ? new URL(location, currentUrl).toString() : null,
+        headers: selectedHeaders(headersToObject(response.headers)),
+        contentType: response.headers.get('content-type') || '',
+        durationMs: Date.now() - started
       };
       chain.push(entry);
+      if (response.body) await response.body.cancel().catch(() => {});
 
       if (response.status >= 300 && response.status < 400 && location) {
+        if (visited.has(entry.location)) {
+          return {
+            startUrl,
+            finalUrl: entry.location,
+            statusCode: null,
+            ok: false,
+            chain,
+            loopDetected: true,
+            errorType: 'redirect_loop',
+            error: 'Redirect loop detected'
+          };
+        }
         currentUrl = entry.location;
         continue;
       }
@@ -180,14 +217,22 @@ export async function followRedirectChain(startUrl, options = {}) {
         // A valid HTTP response proves transport reachability even when the
         // website itself returns 5xx. Status checks decide whether it is healthy.
         ok: response.status >= 100 && response.status <= 599,
-        chain
+        chain,
+        initialHeaders: chain[0]?.headers || {},
+        finalHeaders: entry.headers,
+        contentType: entry.contentType,
+        loopDetected: false,
+        errorType: null
       };
     } catch (error) {
+      const errorType = classifyFetchError(error);
       chain.push({
         url: currentUrl,
         statusCode: null,
         location: null,
-        error: error.message
+        error: error.message,
+        errorType,
+        durationMs: Date.now() - started
       });
       return {
         startUrl,
@@ -195,6 +240,8 @@ export async function followRedirectChain(startUrl, options = {}) {
         statusCode: null,
         ok: false,
         chain,
+        loopDetected: false,
+        errorType,
         error: error.message
       };
     } finally {
@@ -208,6 +255,26 @@ export async function followRedirectChain(startUrl, options = {}) {
     statusCode: null,
     ok: false,
     chain,
+    loopDetected: false,
+    errorType: 'redirect_hops_exceeded',
     error: 'Too many redirects'
   };
+}
+
+function classifyFetchError(error) {
+  const code = String(error?.cause?.code || error?.code || '').toUpperCase();
+  if ([
+    'CERT_HAS_EXPIRED',
+    'CERT_NOT_YET_VALID',
+    'DEPTH_ZERO_SELF_SIGNED_CERT',
+    'ERR_TLS_CERT_ALTNAME_INVALID',
+    'SELF_SIGNED_CERT_IN_CHAIN',
+    'UNABLE_TO_GET_ISSUER_CERT_LOCALLY',
+    'UNABLE_TO_VERIFY_LEAF_SIGNATURE'
+  ].includes(code)) return 'certificate_error';
+  if (code === 'ENOTFOUND' || code === 'EAI_AGAIN') return 'dns_error';
+  if (code === 'ECONNREFUSED') return 'connection_refused';
+  if (code === 'ECONNRESET' || code === 'EPIPE') return 'connection_reset';
+  if (code === 'ETIMEDOUT' || error?.name === 'AbortError') return 'timeout';
+  return 'technical_error';
 }
