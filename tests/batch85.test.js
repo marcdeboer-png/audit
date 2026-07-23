@@ -210,18 +210,18 @@ test('structured-data fixture scopes schema checks by page type and FAQ strength
   assert.equal(parseDetail.rows[0].parseStatus, 'error');
 });
 
-test('GEO fixture treats AI bot policy, llms files and trust links as opportunities with evidence', async () => {
+test('GEO fixture applies score-capable AI bot and llms standards with diagnostic policy summary', async () => {
   const missing = await runFixtureAudit('geo', { llmsFullStatus: 404, trustLinks: false }, { maxUrls: 12, maxDepth: 2 });
   const missingResults = allResults(missing.db, missing.runId);
   assertExpectationCompliance(missingResults);
 
   const gptbot = result(missingResults, 'geo.robots_mentions_gptbot');
-  assert.equal(gptbot.status, 'NA');
-  assert.equal(gptbot.evaluationState, 'not_applicable');
-  assert.equal(gptbot.scoreEligible, false);
+  assert.equal(gptbot.status, 'Warning');
+  assert.equal(gptbot.evaluationState, 'fail');
+  assert.equal(gptbot.scoreEligible, true);
   assert.equal(gptbot.priority, 'Low');
-  assert.equal(gptbot.normalizedFindingType, 'info');
-  assert.notEqual(gptbot.reportSection, 'action_items');
+  assert.equal(gptbot.normalizedFindingType, 'core_issue');
+  assert.equal(gptbot.reportSection, 'action_items');
   assert.equal(gptbot.evidence.botName, 'GPTBot');
   assert.equal(gptbot.evidence.policy.mentioned, false);
 
@@ -234,7 +234,7 @@ test('GEO fixture treats AI bot policy, llms files and trust links as opportunit
   assert.equal(result(missingResults, 'geo.contact_linked').status, 'Warning');
 
   const botDetail = detail(missing.db, missing.runId, 'geo.ai_bots_policy_summary');
-  assert.ok(botDetail.rows.some((row) => row.botName === 'GPTBot' && row.mentioned === false));
+  assert.ok(botDetail.rows.some((row) => row.botName === 'GPTBot' && row.explicitGroup === false));
   assert.ok(detailKeys(botDetail).includes('botName'));
 
   const explicit = await runFixtureAudit('geo', {
@@ -247,6 +247,11 @@ test('GEO fixture treats AI bot policy, llms files and trust links as opportunit
   assertExpectationCompliance(explicitResults);
 
   for (const checkId of [
+    'geo.robots_mentions_applebot',
+    'geo.robots_mentions_bytespider',
+    'geo.robots_mentions_ccbot',
+    'geo.robots_mentions_chatgpt_user',
+    'geo.robots_mentions_claude_web',
     'geo.robots_mentions_gptbot',
     'geo.robots_mentions_oai_searchbot',
     'geo.robots_mentions_claudebot',

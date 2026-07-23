@@ -46,8 +46,8 @@ test('maturity model scores existing findings without creating new checks', () =
   assert.equal(model.evaluatedChecks, 6);
   assert.equal(model.excludedChecks, 1);
   assert.equal(model.passedChecks, 2);
-  assert.equal(model.actionItems, 2);
-  assert.equal(model.opportunities, 1);
+  assert.equal(model.actionItems, 3);
+  assert.equal(model.opportunities, 0);
   assert.equal(model.bestPracticeWarnings, 1);
   assert.equal(model.maturityScore, 6);
   assert.equal(model.weightedScore, 6);

@@ -172,7 +172,7 @@ test('legitimacy QA matrix covers critical check families and existing check ids
     assert.equal(checkIds.has(id), true, `${id} exists in registered checks`);
   }
 
-  assert.ok(legitCheckGuardrails.opportunitiesAreNotCore.includes('geo.robots_mentions_gptbot'));
+  assert.equal(legitCheckGuardrails.opportunitiesAreNotCore.includes('geo.robots_mentions_gptbot'), false);
   assert.ok(legitCheckGuardrails.bestPracticesAreNotCore.includes('tech.hsts_header'));
   assert.ok(legitCheckGuardrails.unavailableToolingIsNotCore.includes('template.lighthouse_unavailable'));
   assert.ok(legitCheckGuardrails.pageTypeScopedSchema.includes('tech.product_coverage_on_product_like_pages'));

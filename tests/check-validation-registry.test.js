@@ -18,7 +18,7 @@ test('every active audit check has one valid registry entry', () => {
   assert.equal(summary.totalChecks, registry.checks.length);
   assert.equal(summary.activeChecks, 134);
   assert.equal(summary.historicalChecks, 3);
-  assert.equal(summary.statusCounts.cross_domain_validated, 7);
+  assert.equal(summary.statusCounts.cross_domain_validated, 17);
 });
 
 test('registry validation fails closed for a new unregistered check', () => {
@@ -191,4 +191,35 @@ test('HTML head and heading family records effective-state and editorial limits 
   }
   assert.equal(byId.get('tech.duplicate_titles').validation_status, 'manual_review_required');
   assert.equal(byId.get('tech.duplicate_titles').score_effect, 'score_capable');
+});
+
+test('AI robots and llms family records the v1 automation, availability and deduplication contract', () => {
+  const registry = loadCheckValidationRegistry();
+  const byId = new Map(registry.checks.map((entry) => [entry.check_id, entry]));
+  const summary = byId.get('geo.ai_bots_policy_summary');
+  assert.equal(summary.validation_status, 'validated_with_limits');
+  assert.equal(summary.standard_usage, 'diagnostic_only');
+  assert.equal(summary.score_effect, 'score_free');
+  assert.equal(summary.parser_policy_version, 'ai-robots-policy-v2');
+
+  for (const id of ['geo.llms_txt_present', 'geo.llms_txt_http_status']) {
+    const entry = byId.get(id);
+    assert.equal(entry.validation_status, 'cross_domain_validated', id);
+    assert.equal(entry.score_effect, 'score_capable', id);
+    assert.equal(entry.root_cause_family, 'ai_files.llms_txt', id);
+    assert.equal(entry.coverage_unit, 'site:ai_files:llms_txt', id);
+    assert.equal(entry.parser_policy_version, 'llms-txt-validation-v1', id);
+    assert.match(entry.availability_semantics, /never count as pass/);
+  }
+
+  const bots = [...byId.values()].filter((entry) => entry.check_id.startsWith('geo.robots_mentions_'));
+  assert.equal(bots.length, 10);
+  assert.ok(bots.every((entry) => entry.score_effect === 'score_capable'));
+  assert.ok(bots.every((entry) => entry.root_cause_family === 'ai_crawler_policy.robots_configuration'));
+  assert.ok(bots.every((entry) => ['cross_domain_validated', 'validated_with_limits'].includes(entry.validation_status)));
+
+  const block = byId.get('geo.robots_blocks_txt_files');
+  assert.equal(block.validation_status, 'cross_domain_validated');
+  assert.equal(block.default_severity, 'Medium');
+  assert.equal(block.root_cause_family, 'ai_crawler_policy.robots_configuration');
 });

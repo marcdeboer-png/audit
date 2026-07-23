@@ -9,9 +9,19 @@ import {
   safeJson,
   sampleUrls
 } from '../helpers.js';
-import { blocksTxtFiles, summarizeAiBotRules } from '../../utils/robots.js';
+import {
+  AI_ROBOTS_POLICY_VERSION,
+  parseRobotsPolicy,
+  summarizeAiBotRules,
+  SUPPORTED_AI_BOTS
+} from '../../utils/robots.js';
+import {
+  analyzeLlmsTxtAsset,
+  classifyLlmsAvailability,
+  LLMS_TXT_VALIDATION_VERSION
+} from '../../utils/llmsTxt.js';
 import { hasVisibleTextProvenance, VISIBLE_TEXT_NORMALIZATION_VERSION } from '../../extractors/visibleText.js';
-import { analyzeRobotsAsset, ROBOTS_SITEMAP_VALIDATION_VERSION } from '../../utils/discoverySemantics.js';
+import { analyzeRobotsAsset } from '../../utils/discoverySemantics.js';
 import { evaluatePageTypeSchemaCoverage, STRUCTURED_DATA_COVERAGE_LOGIC_VERSION } from '../structuredDataCoverage.js';
 import { SCHEMA_TYPE_HIERARCHY_VERSION } from '../../extractors/structuredData.js';
 import { activeStandardChecks } from '../standardMetadata.js';
@@ -24,6 +34,14 @@ const geo = (id, category, name, run, options = {}) => ({
   priority: options.priority || 'Medium',
   effort: options.effort || 'M',
   recommendation: options.recommendation || '',
+  findingType: options.findingType,
+  evidenceClass: options.evidenceClass,
+  coverageUnitKey: options.coverageUnitKey,
+  scoreDeduplicationKey: options.scoreDeduplicationKey,
+  rootCauseFamily: options.rootCauseFamily,
+  scopeType: options.scopeType,
+  relatedCheckIds: options.relatedCheckIds,
+  checkVersion: options.checkVersion,
   run
 });
 
@@ -38,7 +56,11 @@ const trust = (id, category, name, run, options = {}) => ({
   run
 });
 
-const AI_BOTS = ['GPTBot', 'OAI-SearchBot', 'ChatGPT-User', 'ClaudeBot', 'Claude-Web', 'PerplexityBot', 'Google-Extended', 'CCBot', 'Applebot', 'Bytespider'];
+const AI_BOTS = SUPPORTED_AI_BOTS;
+const AI_POLICY_ROOT_CAUSE = 'ai_crawler_policy.robots_configuration';
+const LLMS_TXT_ROOT_CAUSE = 'ai_files.llms_txt';
+const AI_POLICY_CHECK_VERSION = 'ai-bot-policy-check-v2';
+const LLMS_TXT_CHECK_VERSION = 'llms-txt-check-v2';
 const VISIBLE_TEXT_FACTS_WHERE = `COALESCE(textFactsJson, '') LIKE '%"normalization_version":"${VISIBLE_TEXT_NORMALIZATION_VERSION}"%'`;
 const ABOUT_TARGET_PATTERNS = [
   { needle: '/about', pattern: /(^|\/)about(\/|$)/i },
@@ -146,20 +168,39 @@ function assetContentGate(check, asset, factName) {
 }
 
 function robotsPolicyGate(check, asset) {
-  const contentGate = assetContentGate(check, asset, 'robotsTxtContent');
-  if (contentGate) return contentGate;
+  const responseGate = assetHttpResponseGate(check, asset, 'robotsTxtHttpResponse');
+  if (responseGate) return responseGate;
   const analysis = analyzeRobotsAsset(asset);
-  if (analysis.state === 'absent') return availabilityResult(check, 'not_applicable', {
-    finding: `${check.name}: robots.txt is absent, so no explicit policy document exists to evaluate.`,
-    facts: { robotsPresent: false, crawlDefault: analysis.crawlDefault },
-    evidence: analysis,
-    requirements: { requiredFacts: ['usableRobotsTxtPolicy'], missingFacts: [], canCollectWithTargetedRun: false, reason: 'robots.txt policy checks are conditional on a usable policy resource.' }
+  if (!analysis.provenanceComplete) return availabilityResult(check, 'insufficient_evidence', {
+    finding: `${check.name}: robots.txt exists, but complete initial/final host and redirect provenance is unavailable.`,
+    facts: { robotsState: analysis.state, provenanceComplete: false },
+    evidence: { ...analysis, policyVersion: AI_ROBOTS_POLICY_VERSION },
+    requirements: { requiredFacts: ['completeRobotsHostRedirectProvenance'], missingFacts: ['completeRobotsHostRedirectProvenance'], canCollectWithTargetedRun: true }
   });
+  if (analysis.state === 'absent') return null;
   if (!['valid', 'valid_empty'].includes(analysis.state)) return availabilityResult(check, analysis.state === 'technical_error' ? 'technical_error' : 'insufficient_evidence', {
     finding: `${check.name}: robots.txt policy is unavailable or invalid (${analysis.state}).`,
     facts: { robotsState: analysis.state },
-    evidence: { ...analysis, logicVersion: ROBOTS_SITEMAP_VALIDATION_VERSION },
-    requirements: { requiredFacts: ['usableRobotsTxtPolicy'], missingFacts: ['usableRobotsTxtPolicy'], canCollectWithTargetedRun: true }
+    evidence: { ...analysis, policyVersion: AI_ROBOTS_POLICY_VERSION },
+    requirements: { requiredFacts: ['stableRobotsTxtGet', 'usableRobotsTxtPolicy'], missingFacts: ['usableRobotsTxtPolicy'], canCollectWithTargetedRun: true }
+  });
+  if (asset.content === null || asset.content === undefined) return availabilityResult(check, 'insufficient_evidence', {
+    finding: `${check.name}: robots.txt content was not retained for policy evaluation.`,
+    facts: { robotsState: analysis.state, contentObserved: false },
+    evidence: { ...analysis, policyVersion: AI_ROBOTS_POLICY_VERSION },
+    requirements: { requiredFacts: ['robotsTxtContent'], missingFacts: ['robotsTxtContent'], canCollectWithTargetedRun: true }
+  });
+  const parsed = parseRobotsPolicy(asset.content);
+  if (!parsed.valid) return availabilityResult(check, 'insufficient_evidence', {
+    finding: `${check.name}: robots.txt could not be parsed into a reliable policy.`,
+    facts: { robotsState: analysis.state, parserValid: false },
+    evidence: {
+      ...analysis,
+      policyVersion: AI_ROBOTS_POLICY_VERSION,
+      parserErrors: parsed.errors,
+      unknownDirectives: parsed.unknownDirectives
+    },
+    requirements: { requiredFacts: ['reliablyParsedRobotsPolicy'], missingFacts: ['reliablyParsedRobotsPolicy'], canCollectWithTargetedRun: true }
   });
   return null;
 }
@@ -186,39 +227,144 @@ function isMarkdownLikeAsset(row, contentType = '') {
 function llmsTxtPresent() {
   return geo('llms_txt_present', 'GEO Opportunities', 'llms.txt vorhanden', function run(ctx) {
     const asset = getAsset(ctx, 'llms');
-    const gate = assetHttpResponseGate(this, asset, 'llmsTxtHttpResponse');
-    if (gate) return gate;
-    const ok = asset && asset.statusCode >= 200 && asset.statusCode < 300;
-    return makeResult(this, ok ? 'OK' : 'Warning', {
-      affectedCount: ok ? 0 : 1,
-      finding: ok ? 'llms.txt returned a 2xx status.' : 'llms.txt did not return a 2xx status.',
-      recommendation: 'Publish /llms.txt if it is part of the site AI-readiness strategy.',
-      evidence: { url: asset?.url, statusCode: asset?.statusCode ?? null, bytes: asset?.content?.length || 0 },
-      requirements: { requiredFacts: ['llmsTxtHttpResponse'], optionalFacts: ['siteAiReadinessIntent'], missingFacts: [], minimumCoverage: 1, canCollectWithTargetedRun: true },
-      scoreDeduplicationKey: 'ai_files.llms_txt',
-      reportGroupingKey: 'ai_files.llms_txt'
+    const evaluated = evaluateLlmsTxtAsset(this, asset);
+    if (evaluated.gate) return evaluated.gate;
+    const analysis = evaluated.analysis;
+    return makeResult(this, analysis.pass ? 'OK' : 'Warning', {
+      affectedCount: analysis.pass ? 0 : 1,
+      finding: analysis.pass
+        ? `llms.txt is a direct, stable HTTP 200 UTF-8 text resource for ${analysis.content.siteDesignation}.`
+        : `llms.txt does not meet the minimum usable-resource standard: ${analysis.failureReasons.join(', ')}.`,
+      recommendation: 'Publish a direct HTTP 200 UTF-8 text/Markdown llms.txt with a clear site identity and at least one usable section or canonical internal target.',
+      facts: {
+        llmsTxtPresent: analysis.pass,
+        siteDesignation: analysis.content.siteDesignation,
+        usableSectionCount: analysis.content.usableSectionCount,
+        internalUrlCount: analysis.content.internalUrlCount
+      },
+      evidence: compactLlmsEvidence(analysis),
+      requirements: {
+        requiredFacts: ['stableDirectLlmsTxtHttp200', 'validTextRepresentation', 'utf8Content', 'siteDesignation', 'usableSectionOrInternalTarget'],
+        optionalFacts: [],
+        missingFacts: [],
+        minimumCoverage: 1,
+        canCollectWithTargetedRun: true
+      },
+      relatedCheckIds: ['geo.llms_txt_http_status'],
+      deduplicationReason: 'Presence and HTTP/resource validity describe the same llms.txt root cause.',
+      reportGroupingKey: LLMS_TXT_ROOT_CAUSE
     });
-  }, { priority: 'Low', effort: 'S' });
+  }, {
+    priority: 'Low',
+    effort: 'S',
+    findingType: 'core_issue',
+    evidenceClass: 'primary_required',
+    coverageUnitKey: 'site:ai_files:llms_txt',
+    scoreDeduplicationKey: LLMS_TXT_ROOT_CAUSE,
+    rootCauseFamily: LLMS_TXT_ROOT_CAUSE,
+    scopeType: 'site',
+    relatedCheckIds: ['geo.llms_txt_http_status'],
+    checkVersion: LLMS_TXT_CHECK_VERSION
+  });
 }
 
 function llmsTxtStatus() {
   return geo('llms_txt_http_status', 'GEO Opportunities', 'llms.txt HTTP status', function run(ctx) {
     const asset = getAsset(ctx, 'llms');
-    const gate = assetHttpResponseGate(this, asset, 'llmsTxtHttpStatus');
-    if (gate) return gate;
-    const ok = asset && asset.statusCode >= 200 && asset.statusCode < 300;
-    return makeResult(this, asset ? (ok ? 'OK' : 'Warning') : 'NA', {
-      affectedCount: asset && !ok ? 1 : 0,
-      finding: asset ? `llms.txt status recorded: ${asset.statusCode ?? 'fetch failed'}.` : 'llms.txt was not fetched.',
-      recommendation: 'Review the returned status and content when llms.txt should be available.',
-      evidence: { url: asset?.url, statusCode: asset?.statusCode ?? null },
-      requirements: { requiredFacts: ['llmsTxtHttpStatus'], optionalFacts: [], missingFacts: [], minimumCoverage: 1, canCollectWithTargetedRun: true },
-      findingType: ok ? 'info' : 'opportunity',
-      confidence: 'high',
-      scoreDeduplicationKey: 'ai_files.llms_txt',
-      reportGroupingKey: 'ai_files.llms_txt'
+    const evaluated = evaluateLlmsTxtAsset(this, asset);
+    if (evaluated.gate) return evaluated.gate;
+    const analysis = evaluated.analysis;
+    return makeResult(this, analysis.pass ? 'OK' : 'Warning', {
+      affectedCount: analysis.pass ? 0 : 1,
+      finding: analysis.pass
+        ? 'llms.txt returned a stable direct HTTP 200 text response without redirects.'
+        : `llms.txt HTTP/resource validation failed: ${analysis.failureReasons.join(', ')}.`,
+      recommendation: 'Serve the canonical /llms.txt directly as a stable HTTP 200 UTF-8 text/Markdown response without redirects or soft-error content.',
+      facts: {
+        initialStatusCode: analysis.initialStatusCode,
+        finalStatusCode: analysis.finalStatusCode,
+        direct200: analysis.direct200,
+        measurementState: analysis.measurementState
+      },
+      evidence: compactLlmsEvidence(analysis),
+      requirements: {
+        requiredFacts: ['directInitialAndFinalHttp200', 'completeRedirectProvenance', 'stableMeasurement', 'usableTextRepresentation'],
+        optionalFacts: [],
+        missingFacts: [],
+        minimumCoverage: 1,
+        canCollectWithTargetedRun: true
+      },
+      relatedCheckIds: ['geo.llms_txt_present'],
+      deduplicationReason: 'HTTP/resource validity and llms.txt presence describe one canonical resource root cause.',
+      reportGroupingKey: LLMS_TXT_ROOT_CAUSE
     });
-  }, { priority: 'Low', effort: 'S' });
+  }, {
+    priority: 'Low',
+    effort: 'S',
+    findingType: 'core_issue',
+    evidenceClass: 'primary_required',
+    coverageUnitKey: 'site:ai_files:llms_txt',
+    scoreDeduplicationKey: LLMS_TXT_ROOT_CAUSE,
+    rootCauseFamily: LLMS_TXT_ROOT_CAUSE,
+    scopeType: 'site',
+    relatedCheckIds: ['geo.llms_txt_present'],
+    checkVersion: LLMS_TXT_CHECK_VERSION
+  });
+}
+
+function evaluateLlmsTxtAsset(check, asset) {
+  const responseGate = assetHttpResponseGate(check, asset, 'llmsTxtHttpResponse');
+  if (responseGate) return { gate: responseGate, analysis: null };
+  const analysis = analyzeLlmsTxtAsset(asset);
+  const availability = classifyLlmsAvailability(analysis);
+  if (!availability) return { gate: null, analysis };
+  return {
+    gate: availabilityResult(check, availability, {
+      finding: `${check.name}: llms.txt could not be conclusively evaluated (${analysis.failureReasons.join(', ')}).`,
+      details: 'Incomplete, truncated, unstable, rate-limited or historical HTTP provenance is not treated as a pass or a website failure.',
+      recommendation: 'Repeat the bounded direct GET measurement and retain compact initial/final status, content and stability evidence.',
+      facts: {
+        measurementState: analysis.measurementState,
+        provenanceComplete: analysis.provenanceComplete,
+        truncated: analysis.truncated
+      },
+      evidence: compactLlmsEvidence(analysis),
+      requirements: {
+        requiredFacts: ['completeStableLlmsTxtMeasurement'],
+        missingFacts: analysis.failureReasons,
+        minimumCoverage: 1,
+        canCollectWithTargetedRun: true
+      },
+      scoreDeduplicationKey: LLMS_TXT_ROOT_CAUSE
+    }),
+    analysis
+  };
+}
+
+function compactLlmsEvidence(analysis) {
+  return {
+    validationVersion: analysis.version,
+    url: analysis.url,
+    initialStatusCode: analysis.initialStatusCode,
+    redirectChain: analysis.redirectChain,
+    finalStatusCode: analysis.finalStatusCode,
+    finalUrl: analysis.finalUrl,
+    contentType: analysis.contentType,
+    measurementState: analysis.measurementState,
+    measurementAttempts: analysis.attempts,
+    provenanceComplete: analysis.provenanceComplete,
+    truncated: analysis.truncated,
+    bodyBytes: analysis.content.bodyBytes,
+    charset: analysis.content.charset,
+    utf8Valid: analysis.content.utf8Valid,
+    looksHtml: analysis.content.looksHtml,
+    contentHash: analysis.content.contentHash,
+    headings: analysis.content.headings,
+    siteDesignation: analysis.content.siteDesignation,
+    usableSections: analysis.content.usableSections,
+    internalUrls: analysis.content.internalUrls,
+    validationReasons: analysis.failureReasons
+  };
 }
 
 function llmsFullTxtPresent() {
@@ -305,56 +451,126 @@ function comparableUrl(value) {
 }
 
 function robotsBlocksTxt() {
-  return geo('robots_blocks_txt_files', 'AI File Access', 'robots.txt blockiert .txt-Dateien', function run(ctx) {
+  return geo('robots_blocks_txt_files', 'AI File Access', 'robots.txt blockiert llms.txt', function run(ctx) {
     const robots = getAsset(ctx, 'robots');
     const gate = robotsPolicyGate(this, robots);
     if (gate) return gate;
-    const blocked = blocksTxtFiles(robots?.content || '');
-    return makeResult(this, blocked ? 'Warning' : 'OK', {
-      affectedCount: blocked ? 1 : 0,
-      finding: blocked ? 'robots.txt contains a .txt blocking pattern.' : 'No .txt blocking pattern detected in robots.txt.',
-      recommendation: 'Verify that Markdown or llms text files are not unintentionally blocked.',
-      evidence: { robotsUrl: robots?.url, statusCode: robots?.statusCode ?? null, blocksTxtFiles: blocked },
-      findingType: blocked ? 'opportunity' : 'inventory',
-      scoreEligible: false,
-      scoreExclusionReason: 'robots_txt_file_policy_requires_business_context',
-      reviewRecommended: blocked
+    const robotsAnalysis = analyzeRobotsAsset(robots);
+    const policyContent = robotsAnalysis.state === 'absent' ? '' : robots.content;
+    const testedPaths = [{ path: '/llms.txt', role: 'llms_txt' }];
+    const policies = summarizeAiBotRules(robots.url, policyContent, { testedPaths });
+    const blocked = policies.filter((policy) => policy.status === 'blocked');
+    return makeResult(this, blocked.length ? 'Warning' : 'OK', {
+      priority: 'Medium',
+      affectedCount: blocked.length,
+      finding: blocked.length
+        ? `${blocked.length} supported AI bot policy/policies block /llms.txt.`
+        : '/llms.txt is crawlable for all supported AI bots under the published robots policy.',
+      recommendation: 'Allow /llms.txt for every supported AI bot in the effective robots policy.',
+      facts: {
+        llmsTxtPath: '/llms.txt',
+        supportedBotCount: AI_BOTS.length,
+        blockedBotCount: blocked.length
+      },
+      evidence: {
+        policyVersion: AI_ROBOTS_POLICY_VERSION,
+        robots: compactRobotsAnalysis(robotsAnalysis),
+        testedPaths,
+        policies
+      },
+      requirements: {
+        requiredFacts: ['stableRobotsTxtGet', 'reliablyParsedRobotsPolicy', 'effectiveLlmsTxtPolicyForEverySupportedBot'],
+        optionalFacts: [],
+        missingFacts: [],
+        minimumCoverage: 1,
+        canCollectWithTargetedRun: true
+      },
+      relatedCheckIds: [
+        ...AI_BOTS.map(aiBotCheckId),
+        'geo.llms_txt_present',
+        'geo.llms_txt_http_status'
+      ],
+      deduplicationReason: 'The llms.txt access finding is a perspective on the same published AI crawler policy used by the individual bot checks.',
+      reportGroupingKey: 'ai_crawler_policy.llms_txt_access'
     });
-  }, { priority: 'Low' });
+  }, {
+    priority: 'Medium',
+    effort: 'S',
+    findingType: 'core_issue',
+    evidenceClass: 'primary_required',
+    coverageUnitKey: 'site:ai_policy:llms_txt_access',
+    scoreDeduplicationKey: AI_POLICY_ROOT_CAUSE,
+    rootCauseFamily: 'ai_crawler_policy',
+    scopeType: 'site',
+    relatedCheckIds: AI_BOTS.map(aiBotCheckId),
+    checkVersion: AI_POLICY_CHECK_VERSION
+  });
 }
 
 function robotsMentionsBot(botName) {
-  const id = `robots_mentions_${botName.toLowerCase().replace(/[^a-z0-9]+/g, '_')}`;
+  const id = aiBotCheckId(botName).replace(/^geo\./, '');
   return geo(id, 'AI Crawler Policy', `robots.txt mentions ${botName}`, function run(ctx) {
     const robots = getAsset(ctx, 'robots');
     const gate = robotsPolicyGate(this, robots);
     if (gate) return gate;
-    const policy = summarizeAiBotRules(robots.url, robots.content).find((item) => item.bot === botName);
-    if (!policy?.mentioned) {
-      return availabilityResult(this, 'not_applicable', {
-        finding: `${botName} has no explicit rule and follows the observed wildcard/default policy; explicit mention is optional.`,
-        details: 'Absence of a bot-specific user-agent group is not itself an SEO failure.',
-        recommendation: `Add explicit ${botName} rules only when business policy needs to differ from the default.`,
-        facts: { botName, mentioned: false, inheritedWildcard: Boolean(policy?.inheritedWildcard), effectiveStatus: policy?.status || 'unknown' },
-        evidence: { botName, policy, robotsStatusCode: robots.statusCode },
-        requirements: { requiredFacts: ['robotsTxtContent'], missingFacts: [], canCollectWithTargetedRun: false, reason: 'Bot-specific policy is optional when the default policy applies.' },
-        scoreDeduplicationKey: 'ai_crawler_policy.summary'
-      });
-    }
-    return makeResult(this, 'OK', {
-      affectedCount: 0,
-      finding: `robots.txt has an explicit ${botName} user-agent block (${policy.policyStatus}).`,
-      recommendation: `Add explicit ${botName} rules only if the crawl policy should be unambiguous.`,
-      evidence: { botName, policy, robotsStatusCode: robots.statusCode },
-      requirements: { requiredFacts: ['robotsTxtContent', 'effectiveBotPolicy'], optionalFacts: ['explicitBotPolicy'], missingFacts: [], minimumCoverage: 1, canCollectWithTargetedRun: true },
-      findingType: 'info',
+    const robotsAnalysis = analyzeRobotsAsset(robots);
+    const policyContent = robotsAnalysis.state === 'absent' ? '' : robots.content;
+    const testedPaths = representativeAiPolicyPaths(ctx, robotsAnalysis.finalUrl || robots.url);
+    const policy = summarizeAiBotRules(robots.url, policyContent, { testedPaths }).find((item) => item.bot === botName);
+    const blocked = policy.status === 'blocked';
+    const explicitPass = policy.status === 'explicitly_allowed';
+    const status = explicitPass ? 'OK' : 'Warning';
+    const priority = blocked ? 'Medium' : 'Low';
+    return makeResult(this, status, {
+      priority,
+      affectedCount: status === 'Warning' ? Math.max(1, policy.blockedPathCount) : 0,
+      finding: explicitPass
+        ? `${botName} has an explicit group that allows every tested public path.`
+        : blocked
+          ? `${botName} is effectively blocked on ${policy.blockedPathCount}/${policy.testedPathCount} tested public path(s).`
+          : `${botName} lacks a complete explicit allow policy and is only implicitly/default allowed.`,
+      recommendation: `Publish an explicit ${botName} user-agent group whose effective rules allow the relevant public website scope.`,
+      facts: {
+        botName,
+        explicitGroupPresent: policy.mentioned,
+        policyStatus: policy.policyStatus,
+        testedPathCount: policy.testedPathCount,
+        blockedPathCount: policy.blockedPathCount
+      },
+      evidence: {
+        policyVersion: AI_ROBOTS_POLICY_VERSION,
+        botName,
+        robots: compactRobotsAnalysis(robotsAnalysis),
+        policy
+      },
+      requirements: {
+        requiredFacts: ['stableRobotsTxtGet', 'reliablyParsedRobotsPolicy', 'explicitBotGroup', 'effectivePolicyForRepresentativePublicPaths'],
+        optionalFacts: [],
+        missingFacts: [],
+        minimumCoverage: 1,
+        canCollectWithTargetedRun: true
+      },
+      relatedCheckIds: [
+        'geo.ai_bots_policy_summary',
+        'geo.robots_blocks_txt_files',
+        ...AI_BOTS.filter((bot) => bot !== botName).map(aiBotCheckId)
+      ],
+      deduplicationReason: 'All individual AI bot checks are perspectives on one published robots.txt configuration.',
       confidence: 'high',
-      scoreEligible: false,
-      scoreExclusionReason: 'explicit_ai_bot_policy_is_optional',
-      reportGroupingKey: `ai_crawler_policy.${botName.toLowerCase().replace(/[^a-z0-9]+/g, '_')}`,
-      scoreDeduplicationKey: 'ai_crawler_policy.summary'
+      reportGroupingKey: `ai_crawler_policy.${botName.toLowerCase().replace(/[^a-z0-9]+/g, '_')}`
     });
-  }, { priority: 'Low' });
+  }, {
+    priority: 'Low',
+    effort: 'S',
+    findingType: 'core_issue',
+    evidenceClass: 'primary_required',
+    coverageUnitKey: `site:ai_policy:${botName.toLowerCase().replace(/[^a-z0-9]+/g, '_')}`,
+    scoreDeduplicationKey: AI_POLICY_ROOT_CAUSE,
+    rootCauseFamily: 'ai_crawler_policy',
+    scopeType: 'site',
+    relatedCheckIds: ['geo.ai_bots_policy_summary', 'geo.robots_blocks_txt_files'],
+    checkVersion: AI_POLICY_CHECK_VERSION
+  });
 }
 
 function aiBotsPolicySummary() {
@@ -362,47 +578,148 @@ function aiBotsPolicySummary() {
     const robots = getAsset(ctx, 'robots');
     const gate = robotsPolicyGate(this, robots);
     if (gate) return gate;
-    const summary = summarizeAiBotRules(robots.url, robots.content);
-    const blocked = summary.filter((item) => item.status === 'blocked');
-    const explicitAllowed = summary.filter((item) => item.policyStatus === 'allowed_explicitly');
-    const explicitBlocked = summary.filter((item) => item.policyStatus === 'blocked_explicitly');
-    const inheritedWildcard = summary.filter((item) => item.inheritedWildcard);
-    const unmentioned = summary.filter((item) => item.policyStatus === 'not_mentioned');
-    if (!blocked.length && unmentioned.length) {
-      return availabilityResult(this, 'insufficient_evidence', {
-        finding: `${unmentioned.length} tracked bot policy/policies could not be resolved from robots.txt.`,
-        details: 'No website defect was scored because an effective allow/block result could not be established.',
-        recommendation: 'Review robots.txt syntax or repeat the targeted policy parse.',
-        facts: { blockedBots: 0, unresolvedBots: unmentioned.length, inheritedWildcardBots: inheritedWildcard.length },
-        evidence: { summary, notMentioned: unmentioned },
-        requirements: { requiredFacts: ['effectiveBotPolicy'], missingFacts: ['effectiveBotPolicy'], canCollectWithTargetedRun: true },
-        scoreDeduplicationKey: 'ai_crawler_policy.summary'
-      });
-    }
-    const status = blocked.length ? 'Warning' : 'OK';
-    return makeResult(this, status, {
-      priority: blocked.length ? 'Medium' : 'Low',
-      affectedCount: blocked.length,
-      finding: blocked.length
-        ? `${blocked.length} tracked AI bot(s) appear blocked at root; ${explicitAllowed.length} are explicitly allowed.`
-        : `${explicitAllowed.length} tracked AI bot(s) are explicitly allowed and ${inheritedWildcard.length} inherit a non-blocking wildcard/default policy.`,
-      recommendation: 'Make AI crawler policy explicit only where business policy requires unambiguous AI-crawler handling; review explicit blocks before treating them as a GEO risk.',
-      evidence: { summary, explicitAllowed, explicitBlocked, inheritedWildcard, notMentioned: unmentioned },
-      findingType: status === 'OK' ? 'info' : 'opportunity',
-      confidence: blocked.length ? 'high' : 'medium',
+    const robotsAnalysis = analyzeRobotsAsset(robots);
+    const policyContent = robotsAnalysis.state === 'absent' ? '' : robots.content;
+    const testedPaths = representativeAiPolicyPaths(ctx, robotsAnalysis.finalUrl || robots.url);
+    const summary = summarizeAiBotRules(robots.url, policyContent, { testedPaths });
+    const counts = aiPolicyStatusCounts(summary);
+    return makeResult(this, 'OK', {
+      priority: 'Info',
+      affectedCount: 0,
+      finding: `AI bot policy inventory: ${counts.explicitlyAllowed} explicitly allowed, ${counts.implicitlyAllowed} implicitly allowed, ${counts.blocked} blocked, ${counts.unclear} unclear, ${counts.technicallyUnavailable} technically unavailable.`,
+      recommendation: 'Use the individual bot checks for actionable findings; this summary adds no separate root cause or score deduction.',
+      facts: counts,
+      evidence: {
+        policyVersion: AI_ROBOTS_POLICY_VERSION,
+        robots: compactRobotsAnalysis(robotsAnalysis),
+        testedPaths,
+        summary
+      },
+      findingType: 'info',
+      confidence: 'high',
       reportGroupingKey: 'ai_crawler_policy.summary',
-      dataBasis: 'robots.txt user-agent rules',
+      dataBasis: 'versioned robots.txt user-agent policy and representative public paths',
       evidenceLevel: 'fact',
-      automationCoverage: 'partial',
-      interpretation: 'This is a technical policy inventory, not a recommendation to allow or block every AI crawler.',
-      limitations: 'Business strategy, licensing and content policy determine whether explicit allow/block rules are desirable.',
+      automationCoverage: 'full',
+      interpretation: 'Diagnostic aggregation of the ten individual AI bot checks.',
+      limitations: 'The summary does not create a pass/fail statement about site quality and never hides individual bot evidence.',
       scoreEligible: false,
-      scoreExclusionReason: 'ai_crawler_policy_requires_business_context',
-      reviewRecommended: blocked.length > 0,
-      requirements: { requiredFacts: ['robotsTxtContent', 'effectiveBotPolicy'], optionalFacts: ['businessAiCrawlerPolicy'], missingFacts: [], minimumCoverage: 1, canCollectWithTargetedRun: true },
-      scoreDeduplicationKey: 'ai_crawler_policy.summary'
+      scoreExclusionReason: 'diagnostic_only_summary',
+      reviewRecommended: false,
+      requirements: {
+        requiredFacts: ['stableRobotsTxtGet', 'reliablyParsedRobotsPolicy', 'individualBotPolicyResults'],
+        optionalFacts: [],
+        missingFacts: [],
+        minimumCoverage: 1,
+        canCollectWithTargetedRun: true
+      },
+      relatedCheckIds: AI_BOTS.map(aiBotCheckId)
     });
+  }, {
+    priority: 'Info',
+    effort: 'S',
+    findingType: 'info',
+    evidenceClass: 'inventory',
+    coverageUnitKey: 'site:ai_policy:summary',
+    rootCauseFamily: 'ai_crawler_policy',
+    scopeType: 'site',
+    relatedCheckIds: AI_BOTS.map(aiBotCheckId),
+    checkVersion: AI_POLICY_CHECK_VERSION
   });
+}
+
+function representativeAiPolicyPaths(ctx, robotsUrl) {
+  const output = [
+    { path: '/', role: 'homepage', pageType: 'homepage', sourceUrl: null },
+    { path: '/llms.txt', role: 'llms_txt', pageType: null, sourceUrl: null }
+  ];
+  let primaryHost = null;
+  try {
+    primaryHost = new URL(robotsUrl).hostname.toLowerCase();
+  } catch {
+    return output;
+  }
+  const rows = all(ctx.db, `
+    SELECT p.url, p.finalUrl, p.pageType
+    FROM pages p
+    LEFT JOIN crawl_queue q
+      ON q.runId = p.runId
+     AND q.normalizedUrl = p.normalizedUrl
+    WHERE p.runId = ?
+      AND p.statusCode >= 200
+      AND p.statusCode < 300
+      AND p.indexable = 1
+      AND (p.contentType LIKE '%text/html%' OR p.contentType LIKE '%application/xhtml%')
+      AND COALESCE(q.sourceType, '') NOT LIKE 'synthetic%'
+    ORDER BY COALESCE(p.pageType, 'other') ASC, COALESCE(p.finalUrl, p.url) ASC
+  `, [ctx.run.id]);
+  const seenTypes = new Set(['homepage']);
+  const seenPaths = new Set(output.map((item) => item.path));
+  for (const row of rows) {
+    const pageType = row.pageType || 'other';
+    if (
+      seenTypes.has(pageType) ||
+      ['legal', 'search', 'search_results', 'internal_search', 'filter', 'utility', 'login', 'account', 'checkout'].includes(pageType)
+    ) continue;
+    let parsed;
+    try {
+      parsed = new URL(row.finalUrl || row.url);
+    } catch {
+      continue;
+    }
+    if (parsed.hostname.toLowerCase() !== primaryHost || isPrivateAiPolicyPath(parsed)) continue;
+    const path = `${parsed.pathname || '/'}${parsed.search || ''}`;
+    if (seenPaths.has(path)) continue;
+    seenTypes.add(pageType);
+    seenPaths.add(path);
+    output.push({
+      path,
+      role: 'representative_public_page_type',
+      pageType,
+      sourceUrl: row.finalUrl || row.url
+    });
+  }
+  return output;
+}
+
+function isPrivateAiPolicyPath(url) {
+  return /(?:^|\/)(?:login|sign-?in|account|konto|admin|checkout|cart|warenkorb|api)(?:\/|$)/i.test(url.pathname) ||
+    /[?&](?:token|session|auth|preview)=/i.test(url.search);
+}
+
+function compactRobotsAnalysis(analysis) {
+  return {
+    logicVersion: analysis.logicVersion,
+    policyVersion: AI_ROBOTS_POLICY_VERSION,
+    url: analysis.url,
+    initialStatusCode: analysis.initialStatusCode,
+    finalStatusCode: analysis.finalStatusCode,
+    finalUrl: analysis.finalUrl,
+    redirectChain: analysis.redirectChain,
+    state: analysis.state,
+    measurementState: analysis.measurementState,
+    measurementAttempts: analysis.measurementAttempts,
+    bodyBytes: analysis.bodyBytes,
+    truncated: analysis.truncated,
+    provenanceComplete: analysis.provenanceComplete,
+    requestedHost: analysis.requestedHost,
+    finalHost: analysis.finalHost,
+    hostRelation: analysis.hostRelation
+  };
+}
+
+function aiPolicyStatusCounts(summary) {
+  return {
+    explicitlyAllowed: summary.filter((policy) => policy.status === 'explicitly_allowed').length,
+    implicitlyAllowed: summary.filter((policy) => ['implicitly_allowed', 'explicit_group_without_complete_allow'].includes(policy.status)).length,
+    blocked: summary.filter((policy) => policy.status === 'blocked').length,
+    unclear: summary.filter((policy) => policy.status === 'unclear').length,
+    technicallyUnavailable: summary.filter((policy) => policy.status === 'technically_unavailable').length
+  };
+}
+
+function aiBotCheckId(botName) {
+  return `geo.robots_mentions_${botName.toLowerCase().replace(/[^a-z0-9]+/g, '_')}`;
 }
 
 function eeatSignalSummary() {

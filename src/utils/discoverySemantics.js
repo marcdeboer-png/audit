@@ -22,6 +22,18 @@ export function analyzeRobotsAsset(asset = {}) {
   const initialStatusCode = numberOrNull(metadata.initialStatusCode) ?? statusCode;
   const finalStatusCode = numberOrNull(metadata.finalStatusCode) ?? statusCode;
   const redirectChain = Array.isArray(metadata.redirectChain) ? metadata.redirectChain : [];
+  const measurementAttempts = Array.isArray(metadata.measurementAttempts) ? metadata.measurementAttempts : [];
+  const measurementState = metadata.measurementState || 'historical_unknown';
+  const requestedHost = safeHostname(asset.url);
+  const finalHost = safeHostname(metadata.finalUrl || asset.url);
+  const provenanceComplete = metadata.initialStatusCode !== undefined &&
+    metadata.finalStatusCode !== undefined &&
+    Boolean(metadata.finalUrl) &&
+    Array.isArray(metadata.redirectChain) &&
+    metadata.truncated !== undefined &&
+    Boolean(metadata.measurementState) &&
+    Array.isArray(metadata.measurementAttempts) &&
+    metadata.measurementAttempts.length > 0;
   const base = {
     logicVersion: ROBOTS_SITEMAP_VALIDATION_VERSION,
     url: asset.url || null,
@@ -32,13 +44,26 @@ export function analyzeRobotsAsset(asset = {}) {
     contentType,
     bodyBytes: Buffer.byteLength(content),
     looksHtml,
-    fetchError: metadata.fetchError || parseJson(asset.responseHeadersJson, {}).error || null
+    fetchError: metadata.fetchError || parseJson(asset.responseHeadersJson, {}).error || null,
+    measurementState,
+    measurementAttempts,
+    truncated: Boolean(metadata.truncated),
+    provenanceComplete,
+    requestedHost,
+    finalHost,
+    hostRelation: hostRelation(requestedHost, finalHost)
   };
 
-  if (statusCode === null) return { ...base, state: 'technical_error', crawlDefault: 'unknown' };
+  if (statusCode === null || measurementState === 'technical_error') return { ...base, state: 'technical_error', crawlDefault: 'unknown' };
+  if (['rate_limited', 'transient', 'unstable'].includes(measurementState)) {
+    return { ...base, state: 'temporarily_unreachable', crawlDefault: 'unknown' };
+  }
   if (statusCode === 429 || statusCode >= 500) return { ...base, state: 'temporarily_unreachable', crawlDefault: 'unknown' };
-  if (statusCode >= 400 && statusCode < 500) return { ...base, state: 'absent', crawlDefault: 'allowed' };
+  if ([404, 410].includes(statusCode)) return { ...base, state: 'absent', crawlDefault: 'allowed' };
+  if ([401, 403].includes(statusCode)) return { ...base, state: 'access_restricted', crawlDefault: 'unknown' };
+  if (statusCode >= 400 && statusCode < 500) return { ...base, state: 'unexpected_status', crawlDefault: 'unknown' };
   if (statusCode < 200 || statusCode >= 300) return { ...base, state: 'unexpected_status', crawlDefault: 'unknown' };
+  if (base.truncated) return { ...base, state: 'truncated', crawlDefault: 'unknown' };
   if (looksHtml) return { ...base, state: 'invalid_html_representation', crawlDefault: 'unknown' };
   if (!content.trim()) return { ...base, state: 'valid_empty', crawlDefault: 'allowed' };
   return { ...base, state: 'valid', crawlDefault: 'rules_apply' };
@@ -199,6 +224,15 @@ function compactXmlError(value) {
 
 function safeHostname(value) {
   try { return new URL(value).hostname.toLowerCase(); } catch { return null; }
+}
+
+function hostRelation(requestedHost, finalHost) {
+  if (!requestedHost || !finalHost) return 'unknown';
+  if (requestedHost === finalHost) return 'same';
+  const withoutWww = (value) => value.replace(/^www\./, '');
+  if (withoutWww(requestedHost) === withoutWww(finalHost)) return 'www_variant';
+  if (requestedHost.endsWith(`.${finalHost}`) || finalHost.endsWith(`.${requestedHost}`)) return 'subdomain';
+  return 'different_host';
 }
 
 function headerValue(value, key) {

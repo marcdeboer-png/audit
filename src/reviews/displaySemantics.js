@@ -121,7 +121,6 @@ export function buildDisplaySummary(rows = []) {
 export function normalizeDisplayFindingType(row = {}) {
   const input = row.findingType || 'info';
   if (row.status === 'OK' || row.status === 'NA') return 'info';
-  if (isAiCrawlerPolicy(row)) return 'opportunity';
   if (isBrowserMetadataOpportunity(row)) return 'opportunity';
   if (/security/i.test(row.category || '')) return 'best_practice';
   if (input === 'llm_assisted') return 'llm_assisted';
@@ -141,7 +140,10 @@ export function isCoreActionItem(row = {}) {
   const enriched = row.reportSection ? row : applyDisplaySemantics(row);
   if (enriched.reportSection !== 'action_items') return false;
   if (!ISSUE_STATUSES.has(enriched.effectiveStatus || enriched.status)) return false;
-  if (!['High', 'Medium'].includes(enriched.effectivePriority || enriched.priority)) return false;
+  const priority = enriched.effectivePriority || enriched.priority;
+  const aiStandardLowFinding = priority === 'Low' &&
+    /geo\.(?:robots_mentions_|llms_txt_)/.test(enriched.checkId || '');
+  if (!['High', 'Medium'].includes(priority) && !aiStandardLowFinding) return false;
   if (!['high', 'medium'].includes(enriched.confidence || 'medium')) return false;
   if (Number(enriched.affectedCount || 0) <= 0) return false;
   return true;
@@ -169,16 +171,17 @@ function reportSectionFor({ row, status, normalizedFindingType, ignored }) {
   if (/media/.test(text)) return 'media_findings';
   if (/security/.test(text) || normalizedFindingType === 'best_practice') return 'security_best_practices';
   if (normalizedFindingType === 'llm_assisted') return 'geo_opportunities';
+  if (
+    normalizedFindingType === 'core_issue' &&
+    /geo\.(?:robots_mentions_|robots_blocks_txt_files|llms_txt_)/.test(text)
+  ) {
+    return 'action_items';
+  }
   if (row.auditType === 'geo' || normalizedFindingType === 'opportunity' || /geo|ai crawler policy|ai bot|speakable|llms|webmanifest|pwa/.test(text)) {
     return 'geo_opportunities';
   }
   if (normalizedFindingType === 'core_issue') return 'action_items';
   return 'technical_appendix';
-}
-
-function isAiCrawlerPolicy(row = {}) {
-  const text = `${row.checkId || ''} ${row.category || ''}`.toLowerCase();
-  return /geo\.robots_mentions_|geo\.ai_bots_policy_summary|ai bot robots|ai crawler policy/.test(text);
 }
 
 function isBrowserMetadataOpportunity(row = {}) {

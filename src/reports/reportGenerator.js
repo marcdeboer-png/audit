@@ -617,7 +617,22 @@ function renderHtml(data) {
       <tr><th>Content Sample</th><td colspan="3"><pre>${escapeHtml((robots?.content || '').slice(0, 4000))}</pre></td></tr>
     </table>
     <h3>llms.txt Summary</h3>
-    ${simpleTable(llms.map((asset) => ({ type: asset.type, url: asset.url, statusCode: asset.statusCode, bytes: (asset.content || '').length })), ['type', 'url', 'statusCode', 'bytes'])}
+    ${simpleTable(llms.map((asset) => {
+      const metadata = safeParse(asset.metadataJson, {});
+      const analysis = metadata.llmsTxt || {};
+      return {
+        type: asset.type,
+        url: asset.url,
+        initialStatus: metadata.initialStatusCode ?? '',
+        finalStatus: metadata.finalStatusCode ?? asset.statusCode ?? '',
+        measurementState: metadata.measurementState || '',
+        contentType: metadata.contentType || '',
+        bytes: metadata.sizeBytes ?? analysis.bodyBytes ?? '',
+        siteDesignation: analysis.siteDesignation || '',
+        usableSections: analysis.usableSectionCount ?? '',
+        validationReasons: (analysis.validationReasons || []).join(', ')
+      };
+    }), ['type', 'url', 'initialStatus', 'finalStatus', 'measurementState', 'contentType', 'bytes', 'siteDesignation', 'usableSections', 'validationReasons'])}
     <h3>Recent Logs</h3>
     ${simpleTable(logs.map((log) => ({ time: log.createdAt, level: log.level, message: log.message })), ['time', 'level', 'message'])}
 

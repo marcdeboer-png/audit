@@ -1,6 +1,27 @@
 export const AUDIT_STANDARD_VERSION = 'audit-standard-v1';
 
 const STANDARD_METADATA = Object.freeze({
+  'geo.ai_bots_policy_summary': metadata({
+    severity: 'Info',
+    scoreEffect: 'score_free',
+    usage: 'diagnostic_only',
+    applicability: 'Crawl-based audits with complete robots.txt retrieval, redirect and parser provenance for the canonical primary host.',
+    notApplicableRule: 'There is no website-level exception; missing live collection is not_executed or insufficient_evidence, never a pass.',
+    reviewStatus: 'diagnostic_only',
+    rollupRole: 'score_free_summary',
+    relatedCheckIds: [
+      'geo.robots_mentions_applebot',
+      'geo.robots_mentions_bytespider',
+      'geo.robots_mentions_ccbot',
+      'geo.robots_mentions_chatgpt_user',
+      'geo.robots_mentions_claude_web',
+      'geo.robots_mentions_claudebot',
+      'geo.robots_mentions_google_extended',
+      'geo.robots_mentions_gptbot',
+      'geo.robots_mentions_oai_searchbot',
+      'geo.robots_mentions_perplexitybot'
+    ]
+  }),
   'geo.article_blog_pages_article_schema': metadata({
     severity: 'Medium',
     scoreEffect: 'score_free',
@@ -11,6 +32,29 @@ const STANDARD_METADATA = Object.freeze({
     scoreDeduplicationKey: 'structured_data.article_coverage',
     rollupRole: 'score_free_perspective',
     scoreOwnerCheckId: 'tech.article_coverage_on_article_like_pages'
+  }),
+  'geo.llms_txt_http_status': metadata({
+    severity: 'Low',
+    scoreEffect: 'score_capable',
+    usage: 'fully_automated',
+    applicability: 'The canonical /llms.txt resource on the canonical primary host in crawl-based audits.',
+    notApplicableRule: 'There is no website-level exception; missing live HTTP evidence is not_executed, technical_error or insufficient_evidence.',
+    reviewStatus: 'not_required',
+    scoreDeduplicationKey: 'ai_files.llms_txt',
+    rollupRole: 'score_deduplicated_perspective',
+    scoreOwnerCheckId: 'geo.llms_txt_present',
+    relatedCheckIds: ['geo.llms_txt_present']
+  }),
+  'geo.llms_txt_present': metadata({
+    severity: 'Low',
+    scoreEffect: 'score_capable',
+    usage: 'fully_automated',
+    applicability: 'The canonical /llms.txt resource on the canonical primary host in crawl-based audits.',
+    notApplicableRule: 'There is no website-level exception; missing live HTTP evidence is not_executed, technical_error or insufficient_evidence.',
+    reviewStatus: 'not_required',
+    scoreDeduplicationKey: 'ai_files.llms_txt',
+    rollupRole: 'primary_score_owner',
+    relatedCheckIds: ['geo.llms_txt_http_status']
   }),
   'geo.llms_full_txt_present': metadata({
     severity: null,
@@ -28,6 +72,41 @@ const STANDARD_METADATA = Object.freeze({
     notApplicableRule: 'Speakable is outside the current audit standard.',
     reviewStatus: 'disabled'
   }),
+  'geo.robots_blocks_txt_files': metadata({
+    severity: 'Medium',
+    scoreEffect: 'score_capable',
+    usage: 'fully_automated',
+    applicability: 'The effective robots.txt policy for /llms.txt and every supported AI bot on the canonical primary host.',
+    notApplicableRule: 'There is no website-level exception; unavailable or incomplete robots evidence is an availability state.',
+    reviewStatus: 'not_required',
+    scoreDeduplicationKey: 'ai_crawler_policy.robots_configuration',
+    rollupRole: 'shared_root_cause_member',
+    relatedCheckIds: [
+      'geo.ai_bots_policy_summary',
+      'geo.llms_txt_present',
+      'geo.llms_txt_http_status',
+      'geo.robots_mentions_applebot',
+      'geo.robots_mentions_bytespider',
+      'geo.robots_mentions_ccbot',
+      'geo.robots_mentions_chatgpt_user',
+      'geo.robots_mentions_claude_web',
+      'geo.robots_mentions_claudebot',
+      'geo.robots_mentions_google_extended',
+      'geo.robots_mentions_gptbot',
+      'geo.robots_mentions_oai_searchbot',
+      'geo.robots_mentions_perplexitybot'
+    ]
+  }),
+  'geo.robots_mentions_applebot': aiBotMetadata(),
+  'geo.robots_mentions_bytespider': aiBotMetadata(),
+  'geo.robots_mentions_ccbot': aiBotMetadata(),
+  'geo.robots_mentions_chatgpt_user': aiBotMetadata(),
+  'geo.robots_mentions_claude_web': aiBotMetadata(),
+  'geo.robots_mentions_claudebot': aiBotMetadata(),
+  'geo.robots_mentions_google_extended': aiBotMetadata(),
+  'geo.robots_mentions_gptbot': aiBotMetadata(),
+  'geo.robots_mentions_oai_searchbot': aiBotMetadata(),
+  'geo.robots_mentions_perplexitybot': aiBotMetadata(),
   'tech.article_coverage_on_article_like_pages': metadata({
     severity: 'Medium',
     scoreEffect: 'score_capable',
@@ -236,8 +315,22 @@ const STANDARD_METADATA = Object.freeze({
 });
 
 const STANDARD_FINDING_TYPES = Object.freeze({
+  'geo.ai_bots_policy_summary': 'info',
   'geo.article_blog_pages_article_schema': 'opportunity',
+  'geo.llms_txt_http_status': 'core_issue',
+  'geo.llms_txt_present': 'core_issue',
   'geo.llms_full_txt_present': 'info',
+  'geo.robots_blocks_txt_files': 'core_issue',
+  'geo.robots_mentions_applebot': 'core_issue',
+  'geo.robots_mentions_bytespider': 'core_issue',
+  'geo.robots_mentions_ccbot': 'core_issue',
+  'geo.robots_mentions_chatgpt_user': 'core_issue',
+  'geo.robots_mentions_claude_web': 'core_issue',
+  'geo.robots_mentions_claudebot': 'core_issue',
+  'geo.robots_mentions_google_extended': 'core_issue',
+  'geo.robots_mentions_gptbot': 'core_issue',
+  'geo.robots_mentions_oai_searchbot': 'core_issue',
+  'geo.robots_mentions_perplexitybot': 'core_issue',
   'geo.speakable_present': 'info',
   'tech.article_coverage_on_article_like_pages': 'core_issue',
   'tech.canonical_non_self': 'best_practice',
@@ -371,9 +464,27 @@ function metadata(input) {
   });
 }
 
+function aiBotMetadata() {
+  return metadata({
+    severity: 'Low',
+    severityMode: 'dynamic_low_medium',
+    scoreEffect: 'score_capable',
+    usage: 'fully_automated',
+    applicability: 'The explicit bot-specific robots.txt group evaluated across deterministic representative public paths on the canonical primary host.',
+    notApplicableRule: 'There is no website-level exception; incomplete retrieval, parsing, host or path evidence is an availability state.',
+    reviewStatus: 'not_required',
+    scoreDeduplicationKey: 'ai_crawler_policy.robots_configuration',
+    rollupRole: 'shared_root_cause_member',
+    relatedCheckIds: ['geo.ai_bots_policy_summary', 'geo.robots_blocks_txt_files']
+  });
+}
+
 function standardPriorityForResult(standard, row) {
   if (!standard.severity) return row.priority || row.originalPriority || 'Info';
   if (standard.severityMode === 'dynamic_medium_high' && ['Medium', 'High'].includes(row.priority)) {
+    return row.priority;
+  }
+  if (standard.severityMode === 'dynamic_low_medium' && ['Low', 'Medium'].includes(row.priority)) {
     return row.priority;
   }
   if (standard.scoreEffect === 'conditional' && row.manualPriority) return row.manualPriority;

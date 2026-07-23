@@ -31,13 +31,13 @@ const expectedDisabled = [
   'tech.speakable_missing'
 ];
 
-test('the runtime registry applies 22 metadata alignments and exactly three deactivations', () => {
+test('the runtime registry applies 36 metadata alignments and exactly three deactivations', () => {
   const checks = [...techChecks(), ...geoChecks()];
-  assert.equal(STANDARD_ALIGNED_CHECK_IDS.length, 25);
+  assert.equal(STANDARD_ALIGNED_CHECK_IDS.length, 39);
   assert.deepEqual([...DISABLED_CHECK_IDS].sort(), expectedDisabled);
   assert.equal(checks.length, 134);
   for (const id of expectedDisabled) assert.equal(checks.some((check) => check.id === id), false, id);
-  assert.equal(checks.filter((check) => check.standardVersion === AUDIT_STANDARD_VERSION).length, 22);
+  assert.equal(checks.filter((check) => check.standardVersion === AUDIT_STANDARD_VERSION).length, 36);
 
   const byId = new Map(checks.map((check) => [check.id, check]));
   assert.equal(byId.get('tech.duplicate_titles').priority, 'Medium');

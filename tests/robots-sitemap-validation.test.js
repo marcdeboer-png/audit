@@ -26,7 +26,7 @@ test('robots discovery distinguishes valid, empty, absent, HTML and technical st
   assert.equal(analyzeRobotsAsset(asset(200, '')).state, 'valid_empty');
   assert.deepEqual(
     [404, 410, 401, 403].map((statusCode) => analyzeRobotsAsset(asset(statusCode, '<html>missing</html>')).state),
-    ['absent', 'absent', 'absent', 'absent']
+    ['absent', 'absent', 'access_restricted', 'access_restricted']
   );
   assert.equal(analyzeRobotsAsset(asset(200, '<!doctype html><html>fallback</html>', 'text/html')).state, 'invalid_html_representation');
   assert.equal(analyzeRobotsAsset(asset(503, 'unavailable')).state, 'temporarily_unreachable');
@@ -50,7 +50,7 @@ test('robots directives handle comments, whitespace, multiple sitemaps and rejec
   assert.equal(parser.isAllowed('https://example.com/private/file', '*'), false);
   assert.equal(parser.isAllowed('https://example.com/private/public', '*'), true);
   const policies = summarizeAiBotRules('https://example.com/robots.txt', 'User-agent: *\nAllow: /');
-  assert.ok(policies.every((row) => row.status === 'allowed' && row.inheritedWildcard));
+  assert.ok(policies.every((row) => row.status === 'implicitly_allowed' && row.inheritedWildcard));
 });
 
 test('sitemap parser accepts urlset, index, namespace, BOM, entities and gzip while rejecting invalid or HTML roots', () => {
@@ -168,8 +168,9 @@ test('robots and sitemap checks make absence optional, invalid representations a
   assert.equal(noSitemap.priority, 'Low');
   assert.equal(noSitemap.scoreEligible, false);
   assert.equal(runCheck(absent, 'tech.sitemap_in_robots').evaluationState, 'not_applicable');
-  assert.equal(runGeoCheck(absent, 'geo.robots_blocks_txt_files').evaluationState, 'not_applicable');
-  assert.equal(runGeoCheck(absent, 'geo.ai_bots_policy_summary').evaluationState, 'not_applicable');
+  assert.equal(runGeoCheck(absent, 'geo.robots_blocks_txt_files').status, 'OK');
+  assert.equal(runGeoCheck(absent, 'geo.ai_bots_policy_summary').status, 'OK');
+  assert.equal(runGeoCheck(absent, 'geo.robots_mentions_gptbot').priority, 'Low');
   absent.db.close();
 
   const invalid = setupRun('https://invalid.invalid');
@@ -227,7 +228,7 @@ test('sitemap directive check accepts only absolute URLs and remains an optional
   fixture.db.close();
 });
 
-test('AI bot and text-file robots policies remain score-free business-policy inventory', () => {
+test('AI bot and llms.txt robots policies follow the score-capable standard while summary remains diagnostic', () => {
   const fixture = setupRun('https://policy.invalid');
   insertDomainAsset(fixture.db, assetRow(fixture.runId, 'robots', 200, [
     'User-agent: *',
@@ -238,8 +239,9 @@ test('AI bot and text-file robots policies remain score-free business-policy inv
   const textPolicy = runGeoCheck(fixture, 'geo.robots_blocks_txt_files');
   const botPolicy = runGeoCheck(fixture, 'geo.ai_bots_policy_summary');
   assert.equal(textPolicy.status, 'Warning');
-  assert.equal(textPolicy.scoreEligible, false);
-  assert.equal(botPolicy.status, 'Warning');
+  assert.equal(textPolicy.scoreEligible, true);
+  assert.equal(textPolicy.priority, 'Medium');
+  assert.equal(botPolicy.status, 'OK');
   assert.equal(botPolicy.scoreEligible, false);
   fixture.db.close();
 });
@@ -364,14 +366,27 @@ function asset(statusCode, content, contentType = 'text/plain') {
 }
 
 function assetRow(runId, type, statusCode, content, metadata = {}) {
+  const path = type === 'robots' ? 'robots.txt' : 'sitemap.xml';
+  const url = `https://${type}.invalid/${path}`;
   return {
     runId,
     type,
-    url: `https://${type}.invalid/${type === 'robots' ? 'robots.txt' : 'sitemap.xml'}`,
+    url,
     statusCode,
     content,
     responseHeadersJson: JSON.stringify({ 'content-type': metadata.contentType || (type === 'robots' ? 'text/plain' : 'application/xml') }),
-    metadataJson: JSON.stringify({ initialStatusCode: statusCode, finalStatusCode: statusCode, finalUrl: `https://${type}.invalid/`, redirectChain: [], ...metadata })
+    metadataJson: JSON.stringify({
+      initialStatusCode: statusCode,
+      finalStatusCode: statusCode,
+      finalUrl: url,
+      redirectChain: [],
+      truncated: false,
+      measurementState: statusCode === null ? 'technical_error' : 'confirmed',
+      measurementAttempts: statusCode === null
+        ? [{ attempt: 1, method: 'GET', networkError: metadata.fetchError || 'fixture_error' }]
+        : [{ attempt: 1, method: 'GET', initialStatusCode: statusCode, finalStatusCode: statusCode, finalUrl: url, redirectChain: [] }],
+      ...metadata
+    })
   };
 }
 

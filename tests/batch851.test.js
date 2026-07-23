@@ -5,6 +5,7 @@ import { initDatabase } from '../src/db/database.js';
 import {
   createProject,
   createRun,
+  insertDomainAsset,
   insertPage,
   replacePageArtifacts,
   updateProject,
@@ -93,10 +94,7 @@ test('Findings CSV prioritizes display semantics and keeps raw values explicit',
   const db = setupDb();
   const runId = createSeedRun(db);
   insertSeedPage(db, runId, 'https://fixture.local/');
-  db.prepare(`
-    INSERT INTO domain_assets (runId, type, url, statusCode, content, responseHeadersJson)
-    VALUES (?, 'robots', 'https://fixture.local/robots.txt', 200, 'User-agent: *\nAllow: /', '{}')
-  `).run(runId);
+  insertRobotsAsset(db, runId, 'User-agent: *\nAllow: /');
   await runChecks(db, runId);
 
   const csv = collectCsvExport(db, runId, 'findings');
@@ -225,10 +223,7 @@ test('Important check detail handlers expose concrete table fields for audit wor
       contentImage('https://fixture.local/assets/no-lazy.jpg', { loading: null, width: '640', height: '360' })
     ]
   });
-  db.prepare(`
-    INSERT INTO domain_assets (runId, type, url, statusCode, content, responseHeadersJson)
-    VALUES (?, 'robots', 'https://fixture.local/robots.txt', 200, 'User-agent: *\nAllow: /', '{}')
-  `).run(runId);
+  insertRobotsAsset(db, runId, 'User-agent: *\nAllow: /');
   insertCompletedSampling(db, runId);
 
   await runChecks(db, runId);
@@ -241,7 +236,17 @@ test('Important check detail handlers expose concrete table fields for audit wor
   assertDetailColumns(db, runId, 'tech.high_ttfb', ['url', 'ttfbMs']);
   assertDetailColumns(db, runId, 'tech.cache_control_header', ['url', 'missingHeader']);
   assertDetailColumns(db, runId, 'tech.charset_utf8_present', ['url', 'contentType', 'hasHeaderUtf8', 'hasMetaCharsetUtf8', 'detectedMetaCharset']);
-  assertDetailColumns(db, runId, 'geo.ai_bots_policy_summary', ['botName', 'mentioned', 'robotsStatus', 'recommendation']);
+  assertDetailColumns(db, runId, 'geo.ai_bots_policy_summary', [
+    'botName',
+    'policyStatus',
+    'policySource',
+    'explicitGroup',
+    'testedPath',
+    'allowed',
+    'robotsStatus',
+    'policyVersion',
+    'recommendation'
+  ]);
   assertDetailColumns(db, runId, 'template.low_lighthouse_performance', ['sampleUrl', 'performanceScore', 'seoScore']);
 
   for (const checkId of ['tech.title_too_short', 'tech.images_without_lazy_loading', 'geo.ai_bots_policy_summary']) {
@@ -286,6 +291,38 @@ function createSeedRun(db) {
     finishedAt: '2026-06-29T08:01:00.000Z'
   });
   return runId;
+}
+
+function insertRobotsAsset(db, runId, content) {
+  const url = 'https://fixture.local/robots.txt';
+  insertDomainAsset(db, {
+    runId,
+    type: 'robots',
+    url,
+    statusCode: 200,
+    content,
+    responseHeadersJson: JSON.stringify({ 'content-type': 'text/plain; charset=utf-8' }),
+    metadataJson: JSON.stringify({
+      logicVersion: 'robots-sitemap-validation-v1',
+      requestedUrl: url,
+      initialStatusCode: 200,
+      finalStatusCode: 200,
+      finalUrl: url,
+      redirectChain: [],
+      measurementAttempts: [{
+        attempt: 1,
+        method: 'GET',
+        initialStatusCode: 200,
+        finalStatusCode: 200,
+        finalUrl: url
+      }],
+      measurementState: 'confirmed',
+      contentType: 'text/plain; charset=utf-8',
+      sizeBytes: Buffer.byteLength(content),
+      utf8Valid: true,
+      truncated: false
+    })
+  });
 }
 
 function insertSeedPage(db, runId, url, overrides = {}) {

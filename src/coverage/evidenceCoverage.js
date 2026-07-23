@@ -38,6 +38,25 @@ const PLAYWRIGHT_TEMPLATE_CHECKS = new Set([
   'template.playwright_unavailable'
 ]);
 
+const AI_POLICY_CHECKS = new Set([
+  'geo.robots_blocks_txt_files',
+  'geo.robots_mentions_applebot',
+  'geo.robots_mentions_bytespider',
+  'geo.robots_mentions_ccbot',
+  'geo.robots_mentions_chatgpt_user',
+  'geo.robots_mentions_claude_web',
+  'geo.robots_mentions_claudebot',
+  'geo.robots_mentions_google_extended',
+  'geo.robots_mentions_gptbot',
+  'geo.robots_mentions_oai_searchbot',
+  'geo.robots_mentions_perplexitybot'
+]);
+
+const LLMS_TXT_CHECKS = new Set([
+  'geo.llms_txt_present',
+  'geo.llms_txt_http_status'
+]);
+
 const INVENTORY_PATTERNS = [
   /(?:^|\.)(?:noindex_pages|nofollow_pages|schema_types_coverage_summary|status_code_distribution|security_headers_inventory)$/,
   /(?:inventory|distribution|summary)$/,
@@ -172,6 +191,15 @@ function definitionFor(checkId, result, context) {
   }
   if (checkId === 'tech.critical_content_raw_html_signal') {
     return definition(EVIDENCE_CLASSES.primaryRequired, checkId, 'site:html:raw_content_integrity');
+  }
+  if (AI_POLICY_CHECKS.has(checkId)) {
+    return definition(EVIDENCE_CLASSES.primaryRequired, checkId, result.coverageUnitKey || `site:ai_policy:${checkId}`);
+  }
+  if (LLMS_TXT_CHECKS.has(checkId)) {
+    return definition(EVIDENCE_CLASSES.primaryRequired, checkId, 'site:ai_files:llms_txt');
+  }
+  if (checkId === 'geo.ai_bots_policy_summary') {
+    return definition(EVIDENCE_CLASSES.inventory, checkId, 'site:ai_policy:summary');
   }
   if (BROWSER_DIAGNOSTICS.has(checkId)) return definition(EVIDENCE_CLASSES.secondaryDiagnostic, checkId);
   if (LIGHTHOUSE_CHECKS.has(checkId)) return definition(EVIDENCE_CLASSES.primaryConditional, checkId);

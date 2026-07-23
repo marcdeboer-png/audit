@@ -332,7 +332,20 @@ function renderingRoute(res, host, pathname) {
 function robots(res, host, kind, options) {
   let body = `User-agent: *\nAllow: /\nSitemap: ${host}/sitemap.xml\n`;
   if (kind === 'geo' && options.explicitBots) {
-    body += '\nUser-agent: GPTBot\nAllow: /\nUser-agent: OAI-SearchBot\nAllow: /\nUser-agent: ClaudeBot\nAllow: /\nUser-agent: PerplexityBot\nAllow: /\nUser-agent: Google-Extended\nAllow: /\n';
+    body += [
+      '',
+      'User-agent: GPTBot', 'Allow: /',
+      'User-agent: OAI-SearchBot', 'Allow: /',
+      'User-agent: ChatGPT-User', 'Allow: /',
+      'User-agent: ClaudeBot', 'Allow: /',
+      'User-agent: Claude-Web', 'Allow: /',
+      'User-agent: PerplexityBot', 'Allow: /',
+      'User-agent: Google-Extended', 'Allow: /',
+      'User-agent: CCBot', 'Allow: /',
+      'User-agent: Applebot', 'Allow: /',
+      'User-agent: Bytespider', 'Allow: /',
+      ''
+    ].join('\n');
   }
   text(res, body);
 }
@@ -353,9 +366,9 @@ function sitemapPaths(kind, options) {
 
 function llmsTxt(res, host, kind, options) {
   if (kind === 'geo' && options.referenceFull) {
-    return text(res, `# GEO Fixture\n\nSee ${host}/llms-full.txt\n`);
+    return text(res, `# GEO Fixture\n\n## Resources\n- [Full corpus](${host}/llms-full.txt)\n`);
   }
-  text(res, '# Local Fixture\n\n- Home\n');
+  text(res, `# Local Fixture\n\n## Resources\n- [Home](${host}/)\n`);
 }
 
 function llmsFullTxt(res, kind, options) {

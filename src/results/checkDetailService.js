@@ -224,8 +224,8 @@ function handlerFor(checkResult) {
   if (/hsts_header|content_security_policy|x_frame_options|x_content_type_options|referrer_policy|permissions_policy|compression_header|cache_control_header/.test(id)) return headerPresenceDetails;
   if (/high_ttfb/.test(id)) return ttfbDetails;
   if (/^template\./.test(id)) return templatePerformanceDetails;
-  if (/llms/.test(id) || /markdown_twin/.test(id)) return llmsDetails;
-  if (/ai_bots_policy|robots_mentions_/.test(id)) return aiBotPolicyDetails;
+  if (/llms_txt_(?:present|http_status)/.test(id) || /markdown_twin/.test(id)) return llmsDetails;
+  if (/ai_bots_policy|robots_mentions_|robots_blocks_txt_files/.test(id)) return aiBotPolicyDetails;
   if (/structured data|schema|article|product|breadcrumb|faq|speakable|localbusiness|organization/i.test(`${id} ${checkResult.category}`)) return structuredDataDetails;
   return genericDetails;
 }
@@ -908,28 +908,63 @@ function structuredRows(rows, dataSource) {
 
 function aiBotPolicyDetails({ db, runId, checkResult, recommendation }) {
   const robots = db.prepare("SELECT * FROM domain_assets WHERE runId = ? AND type = 'robots' ORDER BY id DESC LIMIT 1").get(runId);
-  const summary = checkResult.evidence?.summary || (checkResult.evidence?.botName ? [checkResult.evidence] : []);
-  const rows = Array.isArray(summary) && summary.length
-    ? summary.map((item) => ({
-        botName: item.botName || item.userAgent || item.bot || checkResult.evidence?.botName || '',
-        mentioned: item.mentioned ?? checkResult.evidence?.mentioned ?? '',
-        robotsStatus: robots?.statusCode ?? checkResult.evidence?.robotsStatusCode ?? '',
-        suggestedRobotsRule: `User-agent: ${item.botName || item.userAgent || item.bot || checkResult.evidence?.botName || 'BOT'}\\nAllow: /`,
+  const policies = checkResult.evidence?.summary ||
+    checkResult.evidence?.policies ||
+    (checkResult.evidence?.policy ? [checkResult.evidence.policy] : []);
+  const rows = [];
+  for (const policy of Array.isArray(policies) ? policies : []) {
+    const pathResults = Array.isArray(policy.pathResults) && policy.pathResults.length
+      ? policy.pathResults
+      : [{ path: '', role: '', pageType: '', allowed: '', winningRule: null }];
+    for (const pathResult of pathResults) {
+      rows.push({
+        botName: policy.bot || checkResult.evidence?.botName || '',
+        policyStatus: policy.status || policy.policyStatus || '',
+        policySource: policy.policySource || '',
+        explicitGroup: policy.mentioned ?? '',
+        testedPath: pathResult.path || '',
+        pathRole: pathResult.role || '',
+        pageType: pathResult.pageType || '',
+        allowed: pathResult.allowed ?? '',
+        winningDirective: pathResult.winningRule
+          ? `${pathResult.winningRule.type}: ${pathResult.winningRule.pattern}`
+          : 'default allow',
+        robotsStatus: checkResult.evidence?.robots?.finalStatusCode ?? robots?.statusCode ?? '',
+        finalHost: checkResult.evidence?.robots?.finalHost || '',
+        policyVersion: checkResult.evidence?.policyVersion || policy.version || '',
         recommendation
-      }))
-    : [{
-        botName: checkResult.evidence?.botName || '',
-        mentioned: checkResult.evidence?.mentioned ?? '',
-        robotsStatus: robots?.statusCode ?? checkResult.evidence?.robotsStatusCode ?? '',
-        suggestedRobotsRule: 'Add explicit rules only if policy clarity is required.',
-        recommendation
-      }];
+      });
+    }
+  }
+  if (!rows.length) rows.push({
+    botName: checkResult.evidence?.botName || '',
+    policyStatus: checkResult.evaluationState || '',
+    policySource: '',
+    explicitGroup: '',
+    testedPath: '',
+    pathRole: '',
+    pageType: '',
+    allowed: '',
+    winningDirective: '',
+    robotsStatus: checkResult.evidence?.robots?.finalStatusCode ?? robots?.statusCode ?? '',
+    finalHost: checkResult.evidence?.robots?.finalHost || '',
+    policyVersion: checkResult.evidence?.policyVersion || '',
+    recommendation
+  });
   return {
     columns: [
       ['botName', 'Bot Name'],
-      ['mentioned', 'Mentioned'],
+      ['policyStatus', 'Policy Status'],
+      ['policySource', 'Policy Source'],
+      ['explicitGroup', 'Explicit Group'],
+      ['testedPath', 'Tested Path'],
+      ['pathRole', 'Path Role'],
+      ['pageType', 'Page Type'],
+      ['allowed', 'Allowed'],
+      ['winningDirective', 'Winning Directive'],
       ['robotsStatus', 'robots.txt Status'],
-      ['suggestedRobotsRule', 'Suggested robots.txt Rule'],
+      ['finalHost', 'Final Host'],
+      ['policyVersion', 'Policy Version'],
       ['recommendation', 'Recommendation']
     ],
     rows,
@@ -937,28 +972,54 @@ function aiBotPolicyDetails({ db, runId, checkResult, recommendation }) {
   };
 }
 
-function llmsDetails({ db, runId, recommendation }) {
+function llmsDetails({ db, runId, checkResult, recommendation }) {
   const rows = db.prepare(`
-    SELECT type, url AS fileUrl, statusCode, LENGTH(COALESCE(content, '')) AS bytes
+    SELECT type, url AS fileUrl, statusCode, metadataJson
     FROM domain_assets
-    WHERE runId = ? AND (type IN ('llms', 'llms_full') OR LOWER(url) LIKE '%llms%')
+    WHERE runId = ? AND type = 'llms'
     ORDER BY type ASC, url ASC
-  `).all(runId).map((row) => ({
-    ...row,
-    referenced: '',
-    recommendation
-  }));
+  `).all(runId).map((row) => {
+    const metadata = safeJson(row.metadataJson, {});
+    const analysis = metadata.llmsTxt || {};
+    return {
+      fileUrl: row.fileUrl,
+      initialStatus: metadata.initialStatusCode ?? '',
+      finalStatus: metadata.finalStatusCode ?? row.statusCode ?? '',
+      finalUrl: metadata.finalUrl || '',
+      redirects: Array.isArray(metadata.redirectChain) ? metadata.redirectChain.length : '',
+      measurementState: metadata.measurementState || checkResult.evidence?.measurementState || '',
+      contentType: metadata.contentType || '',
+      bytes: metadata.sizeBytes ?? analysis.bodyBytes ?? '',
+      charset: analysis.charset || '',
+      siteDesignation: analysis.siteDesignation || '',
+      usableSections: analysis.usableSectionCount ?? '',
+      internalUrls: analysis.internalUrlCount ?? '',
+      validationReasons: (analysis.validationReasons || checkResult.evidence?.validationReasons || []).join(', '),
+      validationVersion: analysis.version || checkResult.evidence?.validationVersion || '',
+      recommendation
+    };
+  });
   return {
     columns: [
       ['fileUrl', 'File URL'],
-      ['statusCode', 'Status Code'],
+      ['initialStatus', 'Initial Status'],
+      ['finalStatus', 'Final Status'],
+      ['finalUrl', 'Final URL'],
+      ['redirects', 'Redirect Hops'],
+      ['measurementState', 'Measurement State'],
+      ['contentType', 'Content Type'],
       ['bytes', 'Bytes'],
-      ['referenced', 'Referenced'],
+      ['charset', 'Charset'],
+      ['siteDesignation', 'Site/Project'],
+      ['usableSections', 'Usable Sections'],
+      ['internalUrls', 'Internal URLs'],
+      ['validationReasons', 'Validation Reasons'],
+      ['validationVersion', 'Validation Version'],
       ['recommendation', 'Recommendation']
     ],
     rows,
     dataSource: 'domain_assets',
-    emptyMessage: 'No llms.txt or llms-full.txt asset rows were stored.'
+    emptyMessage: 'No canonical llms.txt asset row was stored.'
   };
 }
 

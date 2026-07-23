@@ -1,11 +1,11 @@
-# Audit check validation registry v7
+# Audit check validation registry v8
 
 Stand: 23. Juli 2026. Die maschinenlesbare Registry liegt in
 [`check-validation-registry.json`](check-validation-registry.json). Sie ist
-eine interne Vertrauens-, Gap- und Standard-Metadatendokumentation. Batch 12.1
-gleicht ausschliesslich Metadaten an den finalen `audit-standard-v1` an; die
-Prueflogik, Evidence-Erzeugung, Crawler-, Browser- und Parserpfade bleiben
-unveraendert.
+eine interne Vertrauens-, Gap- und Standard-Metadatendokumentation. Batch 12.2
+validiert und implementiert die finale Robots-, AI-Bot- und llms.txt-Familie
+aus `audit-standard-v1`. Andere Checkfamilien, globale Scoringparameter und
+historische Runs bleiben unveraendert.
 
 ## Inventar und Methodik
 
@@ -22,7 +22,7 @@ historische Checks fehlklassifiziert.
 Jeder Eintrag enthaelt Inventarmetadaten, Evidence-Klasse, Coverage-Unit,
 benoetigte Fakten, Datenquellen, Scope, Root-Cause-Familie, Validierungsstatus,
 Evidenzreferenzen, Fehlerhistorie, bekannte Grenzen und eine konkrete
-Vertrauensempfehlung. Die 25 in Batch 12.1 behandelten Eintraege enthalten
+Vertrauensempfehlung. Die 39 standard-ausgerichteten Eintraege enthalten
 zusaetzlich versionierte `standard_*`-Felder fuer Severity, Scorewirkung,
 Nutzungsentscheidung, Applicability, Review-, Roll-up- und Patternstatus.
 `validation_status` dokumentiert weiterhin ausschliesslich die vorhandene
@@ -30,8 +30,8 @@ unabhaengige Validierungsevidenz; `standard_usage` und
 `recommended_trust_action` definieren die beschlossene Produktnutzung. Wo ein
 Check seine Requirements in einem leeren Lauf
 nicht zentral deklariert, bleibt `required_facts` bewusst leer und
-`missing_central_requirement_definition` wird ausgewiesen. Das betrifft nach
-den drei Deaktivierungen 26 aktive Checks und ist selbst eine priorisierte
+`missing_central_requirement_definition` wird ausgewiesen. Das betrifft
+weiterhin 26 aktive Checks und ist selbst eine priorisierte
 Architekturluecke; es wurde keine
 Anforderung erfunden.
 
@@ -46,9 +46,9 @@ aggregierten Ergebniszaehlern ohne Domain- oder Inhaltsdaten.
 
 | Status | Aktive Checks |
 | --- | ---: |
-| `cross_domain_validated` | 7 |
-| `validated_with_limits` | 13 |
-| `manual_review_required` | 90 |
+| `cross_domain_validated` | 17 |
+| `validated_with_limits` | 17 |
+| `manual_review_required` | 76 |
 | `single_domain_validated` | 9 |
 | `fixture_validated` | 8 |
 | `unvalidated` | 7 |
@@ -61,12 +61,12 @@ Alle 134 aktiven Checks besitzen damit einen dokumentierten Status
 `validated_with_limits` und dauerhaft `manual_review_required` und liegt bei
 82,09 %. Weitere Kennzahlen:
 
-- scoregewichtete Validierungsabdeckung: 50,24 %;
+- scoregewichtete Validierungsabdeckung: 60,96 %;
 - Critical-/High-Abdeckung: 37,50 % (es gibt aktuell keine als Critical
   registrierte Default-Severity und acht aktive High-Checks);
-- Primary-Evidence-Abdeckung: 60,38 %;
+- Primary-Evidence-Abdeckung: 68,18 %;
 - nach historischer Ausfuehrungshaeufigkeit gewichtete Abdeckung: 83,66 %;
-- 50 `score_capable`; `tech.redirect_pages` ist nach der HTTP-Validierung ein
+- 63 `score_capable`; `tech.redirect_pages` ist nach der HTTP-Validierung ein
   scorefreies Inventar und kein eigenstaendiger Defekt.
 
 Die scoregewichtete Registry-Kennzahl ist kein Audit-Score. Sie verwendet nur
@@ -86,13 +86,12 @@ Realvalidierung `cross_domain_validated`. Die Raw-/Rendered-Familie
 Client-Renderingmuster sowie technisch schwankende Browser- und
 Netzwerkantworten.
 
-Die 14 `single_domain_validated`-Checks stammen aus der unabhaengigen
+Die neun `single_domain_validated`-Checks stammen aus der unabhaengigen
 Run-77-Forensik und den anschliessenden Regressionen. Sie gelten nicht als
-domainuebergreifend bewiesen. `manual_review_required` kennzeichnet Checks,
-deren Fakten automatisierbar sind, deren Schlussfolgerung aber Suchintent,
-Seitentyp, Geschaeftskontext, redaktionelle Qualitaet oder einen technischen
-Trade-off benoetigt. Dieser Status ist keine Behauptung vollautomatischer
-Zuverlaessigkeit.
+domainuebergreifend bewiesen. `manual_review_required` kennzeichnet weiterhin
+nur die nicht in diesem Batch neu validierten kontextabhaengigen Familien.
+Die 14 Robots-/AI-Bot-/llms.txt-Checks sind nun
+`cross_domain_validated` oder `validated_with_limits`.
 
 ## Priorisierte Luecken
 
@@ -228,16 +227,19 @@ Discovery-Aussage `cross_domain_validated`. `tech.robots_txt_present` und
 Abwesenheitsfaelle sind domainuebergreifend belegt, waehrend organische
 200-HTML- beziehungsweise defekte deklarierte Positivfaelle noch fehlen.
 `tech.sitemap_urls_non_200` bleibt ohne organischen realen Redirect-/4xx-/5xx-
-Positivfall konservativ `fixture_validated`. Orphan- und Bot-Policy-Aussagen
-bleiben wegen Architektur- beziehungsweise Geschaeftskontext
-`manual_review_required`.
+Positivfall konservativ `fixture_validated`. Orphan-Aussagen bleiben wegen
+unvollstaendiger Linkgraphabdeckung begrenzt.
 
-Die fruehere Run-77-Anforderung expliziter Bot-Einzelgruppen war falsch: Eine
-wirksame Wildcard-Regel reicht technisch aus. Fehlende Einzelgruppen erzeugen
-heute kein Finding. robots.txt-Abwesenheit ist ebenfalls keine Crawlblockade,
-und optionale Sitemap-Deklarationen sind scorefrei. Bot-Einzelinventare und
-die Frage, ob Textressourcen absichtlich blockiert werden, bleiben ebenfalls
-scorefrei, weil ihre Bewertung eine Geschaefts- und Contentpolitik voraussetzt.
+Die AI-Bot-Policy wurde in Batch 12.2 gegen den finalen Auditstandard neu
+validiert. Eine wirksame Wildcard-Regel beschreibt weiterhin die technische
+Robots-Semantik, erfuellt aber nicht den definierten Named-Bot-Standard und
+ist deshalb ein scorewirksames Low-Finding. Eine wirksame Blockierung
+repraesentativer oeffentlicher Pfade ist Medium. Summary und Einzelchecks
+werden strikt getrennt; die Summary ist Info und scorefrei.
+
+Details zu Parserpraezedenz, repraesentativen Pfaden, `llms.txt`-
+Mindestvalidierung, realen Positiv-/Negativfaellen und Run 77 stehen in
+[`robots-ai-llms-check-validation-v1.md`](robots-ai-llms-check-validation-v1.md).
 
 ## Structured-data validation group
 

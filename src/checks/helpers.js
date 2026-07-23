@@ -75,6 +75,9 @@ export function makeResult(check, status, options = {}) {
     automationCoverage: normalizeAutomationCoverage(options.automationCoverage || check.automationCoverage || defaultAutomationCoverage(finalStatus, options)),
     interpretation: options.interpretation || check.interpretation || '',
     limitations: options.limitations || check.limitations || '',
+    checkVersion: options.checkVersion || check.checkVersion || check.version || null,
+    evidenceClass: options.evidenceClass || check.evidenceClass || null,
+    coverageUnitKey: options.coverageUnitKey || check.coverageUnitKey || null,
     relatedCheckIds: Array.isArray(options.relatedCheckIds || check.relatedCheckIds)
       ? (options.relatedCheckIds || check.relatedCheckIds).slice(0, 20)
       : []

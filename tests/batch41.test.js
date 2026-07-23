@@ -23,7 +23,7 @@ test('check results persist only valid statuses and priorities', async () => {
 test('disabled llms-full.txt check is not executed for any asset state', async () => {
   const db = setupDb();
   const runId = createRun(db, 'geo');
-  insertAsset(db, runId, 'llms', 'https://example.com/llms.txt', 200, '# llms');
+  insertAsset(db, runId, 'llms', 'https://example.com/llms.txt', 200, '# Example\n\n## Documentation\n- [Home](https://example.com/)');
   insertAsset(db, runId, 'llms_full', 'https://example.com/llms-full.txt', 404, 'not found');
 
   await runChecks(db, runId);
@@ -54,9 +54,10 @@ test('an observed empty robots.txt body is not treated as missing evidence', asy
 
   assert.equal(result(db, runId, 'geo.ai_bots_policy_summary').status, 'OK');
   const bot = result(db, runId, 'geo.robots_mentions_gptbot');
-  assert.equal(bot.status, 'NA');
-  assert.equal(bot.evaluationState, 'not_applicable');
-  assert.equal(bot.scoreEligible, 0);
+  assert.equal(bot.status, 'Warning');
+  assert.equal(bot.priority, 'Low');
+  assert.equal(bot.evaluationState, 'fail');
+  assert.equal(bot.scoreEligible, 1);
   db.close();
 });
 
@@ -193,10 +194,49 @@ function createRun(db, auditType = 'both') {
 }
 
 function insertAsset(db, runId, type, url, statusCode, content) {
+  const contentType = 'text/plain; charset=utf-8';
+  const metadata = statusCode === null
+    ? {
+        logicVersion: type === 'llms' ? 'llms-txt-validation-v1' : 'robots-sitemap-validation-v1',
+        fetchError: 'fixture_network_error',
+        measurementState: 'technical_error',
+        measurementAttempts: [{ attempt: 1, method: 'GET', networkError: 'fixture_network_error' }]
+      }
+    : {
+        logicVersion: type === 'llms' ? 'llms-txt-validation-v1' : 'robots-sitemap-validation-v1',
+        initialStatusCode: statusCode,
+        finalStatusCode: statusCode,
+        finalUrl: url,
+        redirectChain: [],
+        contentType,
+        sizeBytes: Buffer.byteLength(content || ''),
+        truncated: false,
+        utf8Valid: true,
+        measurementState: 'confirmed',
+        measurementAttempts: [{
+          attempt: 1,
+          method: 'GET',
+          initialStatusCode: statusCode,
+          finalStatusCode: statusCode,
+          finalUrl: url,
+          redirectChain: [],
+          contentType,
+          responseBytes: Buffer.byteLength(content || ''),
+          truncated: false
+        }]
+      };
   db.prepare(`
-    INSERT INTO domain_assets (runId, type, url, statusCode, content, responseHeadersJson)
-    VALUES (?, ?, ?, ?, ?, '{}')
-  `).run(runId, type, url, statusCode, content);
+    INSERT INTO domain_assets (runId, type, url, statusCode, content, responseHeadersJson, metadataJson)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    runId,
+    type,
+    url,
+    statusCode,
+    content,
+    JSON.stringify({ 'content-type': contentType }),
+    JSON.stringify(metadata)
+  );
 }
 
 function insertPage(db, runId, {

@@ -47,24 +47,23 @@ test('OK and informational NA checks are not open review tasks or action items',
   db.close();
 });
 
-test('inherited AI crawler policy is informational and not a core issue', async () => {
+test('wildcard-only AI crawler policy is a Low core finding and summary remains diagnostic', async () => {
   const db = setupDb();
   const runId = createRun(db, 'geo');
   insertAsset(db, runId, 'robots', 'https://example.com/robots.txt', 200, 'User-agent: *\nAllow: /');
-  insertAsset(db, runId, 'llms', 'https://example.com/llms.txt', 200, '# llms');
+  insertAsset(db, runId, 'llms', 'https://example.com/llms.txt', 200, '# Example\n\n## Documentation\n- [Home](https://example.com/)');
   insertAsset(db, runId, 'llms_full', 'https://example.com/llms-full.txt', 404, 'not found');
 
   await runChecks(db, runId);
   const gptbot = result(db, runId, 'geo.robots_mentions_gptbot');
   assert.equal(gptbot.category, 'AI Crawler Policy');
   assert.equal(gptbot.priority, 'Low');
-  assert.equal(gptbot.status, 'NA');
-  assert.equal(gptbot.evaluationState, 'not_applicable');
-  assert.equal(gptbot.findingType, 'info');
+  assert.equal(gptbot.status, 'Warning');
+  assert.equal(gptbot.evaluationState, 'fail');
+  assert.equal(gptbot.findingType, 'core_issue');
 
   const html = generateReportHtml(db, runId);
-  assert.match(section(html, 'Not Applicable Checks', 'All Findings'), /geo\.robots_mentions_gptbot/);
-  assert.doesNotMatch(section(html, 'Action Items', 'Confirmed / Needs Fix Findings'), /geo\.robots_mentions_gptbot/);
+  assert.match(section(html, 'Action Items', 'Confirmed / Needs Fix Findings'), /robots\.txt mentions GPTBot/);
   db.close();
 });
 
@@ -72,7 +71,7 @@ test('disabled llms-full check is not executed while historical results remain r
   const db = setupDb();
   const runId = createRun(db, 'geo');
   insertAsset(db, runId, 'robots', 'https://example.com/robots.txt', 200, 'User-agent: *\nAllow: /');
-  insertAsset(db, runId, 'llms', 'https://example.com/llms.txt', 200, '# llms');
+  insertAsset(db, runId, 'llms', 'https://example.com/llms.txt', 200, '# Example\n\n## Documentation\n- [Home](https://example.com/)');
   insertAsset(db, runId, 'llms_full', 'https://example.com/llms-full.txt', 500, 'server error');
 
   await runChecks(db, runId);
@@ -351,10 +350,41 @@ function insertCheckResult(db, runId, overrides = {}) {
 }
 
 function insertAsset(db, runId, type, url, statusCode, content) {
+  const contentType = 'text/plain; charset=utf-8';
   db.prepare(`
-    INSERT INTO domain_assets (runId, type, url, statusCode, content, responseHeadersJson)
-    VALUES (?, ?, ?, ?, ?, '{}')
-  `).run(runId, type, url, statusCode, content);
+    INSERT INTO domain_assets (runId, type, url, statusCode, content, responseHeadersJson, metadataJson)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    runId,
+    type,
+    url,
+    statusCode,
+    content,
+    JSON.stringify({ 'content-type': contentType }),
+    JSON.stringify({
+      logicVersion: type === 'llms' ? 'llms-txt-validation-v1' : 'robots-sitemap-validation-v1',
+      initialStatusCode: statusCode,
+      finalStatusCode: statusCode,
+      finalUrl: url,
+      redirectChain: [],
+      contentType,
+      sizeBytes: Buffer.byteLength(content || ''),
+      truncated: false,
+      utf8Valid: true,
+      measurementState: 'confirmed',
+      measurementAttempts: [{
+        attempt: 1,
+        method: 'GET',
+        initialStatusCode: statusCode,
+        finalStatusCode: statusCode,
+        finalUrl: url,
+        redirectChain: [],
+        contentType,
+        responseBytes: Buffer.byteLength(content || ''),
+        truncated: false
+      }]
+    })
+  );
 }
 
 function insertSample(db, runId, { playwrightStatus, lighthouseStatus, errorMessage }) {

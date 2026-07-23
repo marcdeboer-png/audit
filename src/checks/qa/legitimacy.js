@@ -73,9 +73,16 @@ export const legitCheckFamilies = [
   },
   {
     family: 'AI Files and Bot Policy',
-    checkIds: ['geo.llms_txt_present', 'geo.robots_mentions_gptbot', 'geo.ai_bots_policy_summary', 'geo.markdown_twin_homepage'],
-    dataBasis: 'domain_assets, robots.txt parsing and known references',
-    expectation: 'AI-readiness signals are opportunities unless a referenced local AI asset is demonstrably broken.'
+    checkIds: [
+      'geo.llms_txt_present',
+      'geo.llms_txt_http_status',
+      'geo.robots_blocks_txt_files',
+      'geo.robots_mentions_gptbot',
+      'geo.ai_bots_policy_summary',
+      'geo.markdown_twin_homepage'
+    ],
+    dataBasis: 'versioned domain-asset GET provenance, robots.txt parsing, representative public paths and compact llms.txt validation evidence',
+    expectation: 'Defined llms.txt and explicit AI-bot policy violations are core findings; the policy summary remains diagnostic.'
   },
   {
     family: 'Template Rendering',
@@ -88,8 +95,6 @@ export const legitCheckFamilies = [
 export const legitCheckGuardrails = {
   opportunitiesAreNotCore: [
     'tech.webmanifest_missing',
-    'geo.llms_txt_present',
-    'geo.robots_mentions_gptbot',
     'geo.markdown_twin_homepage',
     'tech.faqpage_missing_low_coverage',
     'geo.faq_html_present_schema_missing'
@@ -373,17 +378,17 @@ export const legitCheckExpectations = [
     detailHandlerExpected: true
   }),
   expectation('geo.llms_txt_present', {
-    expectedScope: 'Optional llms.txt availability signal.',
+    expectedScope: 'Canonical /llms.txt on the primary host with complete direct-GET and minimum-content evidence.',
     allowedStatuses: ['OK', 'Warning', 'NA'],
-    allowedFindingTypes: OPPORTUNITY_TYPES,
-    hardIssueAllowed: false,
+    allowedFindingTypes: ['core_issue', 'info'],
+    hardIssueAllowed: true,
     detailHandlerExpected: true
   }),
   expectation('geo.llms_txt_http_status', {
-    expectedScope: 'Stored HTTP status for optional llms.txt availability.',
+    expectedScope: 'Direct stable HTTP-200 text representation for canonical /llms.txt with complete redirect provenance.',
     allowedStatuses: ['OK', 'Warning', 'NA'],
-    allowedFindingTypes: OPPORTUNITY_TYPES,
-    hardIssueAllowed: false,
+    allowedFindingTypes: ['core_issue', 'info'],
+    hardIssueAllowed: true,
     detailHandlerExpected: true
   }),
   expectation('geo.markdown_twin_homepage', {
@@ -394,23 +399,35 @@ export const legitCheckExpectations = [
     detailHandlerExpected: true
   }),
   ...[
+    'geo.robots_mentions_applebot',
+    'geo.robots_mentions_bytespider',
+    'geo.robots_mentions_ccbot',
+    'geo.robots_mentions_chatgpt_user',
+    'geo.robots_mentions_claude_web',
     'geo.robots_mentions_gptbot',
     'geo.robots_mentions_oai_searchbot',
     'geo.robots_mentions_claudebot',
     'geo.robots_mentions_perplexitybot',
     'geo.robots_mentions_google_extended'
   ].map((checkId) => expectation(checkId, {
-    expectedScope: 'Explicit AI crawler user-agent block presence in robots.txt.',
+    expectedScope: 'Explicit AI crawler group and effective access across deterministic representative public paths.',
     allowedStatuses: ['OK', 'Warning', 'NA'],
-    allowedFindingTypes: OPPORTUNITY_TYPES,
-    hardIssueAllowed: false,
+    allowedFindingTypes: ['core_issue', 'info'],
+    hardIssueAllowed: true,
     detailHandlerExpected: true
   })),
   expectation('geo.ai_bots_policy_summary', {
-    expectedScope: 'AI crawler allow/block/unclear summary inferred only from stored robots.txt.',
-    allowedStatuses: ['OK', 'Warning', 'NA'],
-    allowedFindingTypes: OPPORTUNITY_TYPES,
+    expectedScope: 'Score-free aggregation of explicit, implicit, unclear, blocked and technically unavailable individual AI-bot policies.',
+    allowedStatuses: ['OK', 'NA'],
+    allowedFindingTypes: ['info'],
     hardIssueAllowed: false,
+    detailHandlerExpected: true
+  }),
+  expectation('geo.robots_blocks_txt_files', {
+    expectedScope: 'Effective /llms.txt crawl access for every supported AI bot.',
+    allowedStatuses: ['OK', 'Warning', 'NA'],
+    allowedFindingTypes: ['core_issue', 'info'],
+    hardIssueAllowed: true,
     detailHandlerExpected: true
   }),
   expectation('tech.webmanifest_missing', {

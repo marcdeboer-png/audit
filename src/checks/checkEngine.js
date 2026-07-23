@@ -200,6 +200,16 @@ const LIVE_DATA_CHECK_IDS = new Set([
   'geo.llms_full_txt_present',
   'geo.robots_blocks_txt_files',
   'geo.ai_bots_policy_summary',
+  'geo.robots_mentions_applebot',
+  'geo.robots_mentions_bytespider',
+  'geo.robots_mentions_ccbot',
+  'geo.robots_mentions_chatgpt_user',
+  'geo.robots_mentions_claude_web',
+  'geo.robots_mentions_claudebot',
+  'geo.robots_mentions_google_extended',
+  'geo.robots_mentions_gptbot',
+  'geo.robots_mentions_oai_searchbot',
+  'geo.robots_mentions_perplexitybot',
   'geo.markdown_twin_homepage'
 ]);
 

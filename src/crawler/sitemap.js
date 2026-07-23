@@ -10,6 +10,11 @@ import {
   parseSitemapDocument,
   ROBOTS_SITEMAP_VALIDATION_VERSION
 } from '../utils/discoverySemantics.js';
+import {
+  analyzeLlmsTxtContent,
+  classifyMeasurementAttempts,
+  LLMS_TXT_VALIDATION_VERSION
+} from '../utils/llmsTxt.js';
 import { isInternalUrl, isLikelyHtmlPage, normalizeUrl } from '../utils/url.js';
 import { enqueueBatchWithPolicy, enqueueUrlWithPolicy } from './crawlPolicy.js';
 import { crawlerDefaults } from './defaults.js';
@@ -74,17 +79,63 @@ export async function discoverDomainAssets(db, run, finalStartUrl, robotsContent
 }
 
 export async function fetchTextAsset(db, runId, type, url, timeoutMs = 10000, options = {}) {
-  try {
-    const response = await fetchWithTimeout(url, { timeoutMs: timeoutMs || 10000, maxBytes: 1024 * 1024, userAgent: options.userAgent });
+  const maximumAttempts = ['llms', 'robots'].includes(type) ? 2 : 1;
+  const measurementAttempts = [];
+  let response = null;
+  let lastError = null;
+  for (let attempt = 1; attempt <= maximumAttempts; attempt += 1) {
+    const started = Date.now();
+    try {
+      response = await fetchWithTimeout(url, {
+        timeoutMs: timeoutMs || 10000,
+        maxBytes: 1024 * 1024,
+        userAgent: options.userAgent
+      });
+      measurementAttempts.push(compactAssetAttempt(response, attempt, Date.now() - started));
+      lastError = null;
+    } catch (error) {
+      lastError = error;
+      measurementAttempts.push({
+        attempt,
+        method: 'GET',
+        initialStatusCode: null,
+        finalStatusCode: null,
+        finalUrl: url,
+        redirectChain: [],
+        contentType: '',
+        responseBytes: 0,
+        truncated: false,
+        durationMs: Date.now() - started,
+        networkError: error.message
+      });
+    }
+    if (!shouldRetryAsset(type, response, lastError, attempt, maximumAttempts)) break;
+    await wait(options.retryDelayMs ?? 200);
+  }
+
+  if (response) {
+    const measurementState = ['llms', 'robots'].includes(type)
+      ? classifyMeasurementAttempts(measurementAttempts)
+      : 'confirmed';
+    const utf8Valid = validUtf8(response.buffer);
+    const llmsTxt = type === 'llms'
+      ? analyzeLlmsTxtContent({
+          url,
+          body: response.body,
+          contentType: response.contentType,
+          utf8Valid,
+          bodyBytes: response.sizeBytes
+        })
+      : undefined;
     insertDomainAsset(db, {
       runId,
       type,
       url,
       statusCode: response.statusCode,
-      content: response.body.slice(0, 1024 * 1024),
+      content: type === 'llms' ? null : response.body.slice(0, 1024 * 1024),
       responseHeadersJson: JSON.stringify(response.headers).slice(0, 20000),
       metadataJson: JSON.stringify({
-        logicVersion: ROBOTS_SITEMAP_VALIDATION_VERSION,
+        logicVersion: type === 'llms' ? LLMS_TXT_VALIDATION_VERSION : ROBOTS_SITEMAP_VALIDATION_VERSION,
         initialStatusCode: response.initialStatusCode,
         finalStatusCode: response.statusCode,
         finalUrl: response.url,
@@ -92,28 +143,80 @@ export async function fetchTextAsset(db, runId, type, url, timeoutMs = 10000, op
         contentType: response.contentType,
         sizeBytes: response.sizeBytes,
         truncated: response.truncated,
+        utf8Valid,
+        measurementState,
+        measurementAttempts,
+        llmsTxt,
         robots: type === 'robots' ? analyzeRobotsAsset({
           url,
           statusCode: response.statusCode,
           content: response.body,
           responseHeadersJson: JSON.stringify(response.headers),
-          metadataJson: JSON.stringify({ initialStatusCode: response.initialStatusCode, finalStatusCode: response.statusCode, finalUrl: response.url, redirectChain: response.redirectChain, contentType: response.contentType })
+          metadataJson: JSON.stringify({
+            initialStatusCode: response.initialStatusCode,
+            finalStatusCode: response.statusCode,
+            finalUrl: response.url,
+            redirectChain: response.redirectChain,
+            contentType: response.contentType,
+            truncated: response.truncated,
+            measurementState,
+            measurementAttempts
+          })
         }) : undefined
       })
     });
     return response;
-  } catch (error) {
-    insertDomainAsset(db, {
-      runId,
-      type,
-      url,
-      statusCode: null,
-      content: '',
-      responseHeadersJson: JSON.stringify({ error: error.message }),
-      metadataJson: JSON.stringify({ logicVersion: ROBOTS_SITEMAP_VALIDATION_VERSION, fetchError: error.message })
-    });
-    return null;
   }
+
+  insertDomainAsset(db, {
+    runId,
+    type,
+    url,
+    statusCode: null,
+    content: null,
+    responseHeadersJson: JSON.stringify({ error: lastError?.message || 'request_failed' }),
+    metadataJson: JSON.stringify({
+      logicVersion: type === 'llms' ? LLMS_TXT_VALIDATION_VERSION : ROBOTS_SITEMAP_VALIDATION_VERSION,
+      fetchError: lastError?.message || 'request_failed',
+      measurementState: 'technical_error',
+      measurementAttempts
+    })
+  });
+  return null;
+}
+
+function compactAssetAttempt(response, attempt, durationMs) {
+  return {
+    attempt,
+    method: 'GET',
+    initialStatusCode: response.initialStatusCode,
+    finalStatusCode: response.statusCode,
+    finalUrl: response.url,
+    redirectChain: (response.redirectChain || []).slice(0, 10),
+    contentType: response.contentType || '',
+    responseBytes: response.sizeBytes,
+    truncated: Boolean(response.truncated),
+    durationMs
+  };
+}
+
+function shouldRetryAsset(type, response, error, attempt, maximumAttempts) {
+  if (!['llms', 'robots'].includes(type) || attempt >= maximumAttempts) return false;
+  if (error || !response) return true;
+  return response.statusCode === 429 || (response.statusCode >= 500 && response.statusCode <= 599);
+}
+
+function validUtf8(buffer) {
+  try {
+    new TextDecoder('utf-8', { fatal: true }).decode(buffer);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function wait(milliseconds) {
+  return new Promise((resolve) => setTimeout(resolve, Math.max(0, Number(milliseconds) || 0)));
 }
 
 async function processSitemap(db, run, sitemapUrl, finalStartUrl, state, depth, queueSourceType, ancestors) {
