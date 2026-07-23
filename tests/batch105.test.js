@@ -116,7 +116,9 @@ test('Batch 10.5 checks separate hard issues from opportunities and review signa
 
   assert.equal(rows.get('tech.favicon_missing').findingType, 'best_practice');
   assert.equal(rows.get('tech.favicon_missing').priority, 'Low');
-  assert.equal(rows.get('tech.html_semantics_summary').reviewRecommended, 1);
+  assert.equal(rows.get('tech.html_semantics_summary').reviewRecommended, false);
+  assert.equal(rows.get('tech.html_semantics_summary').standardUsage, 'diagnostic_only');
+  assert.equal(rows.get('tech.html_semantics_summary').scoreEligible, false);
 
   assert.equal(rows.get('tech.x_robots_tag_unusual').status, 'Warning');
   assert.equal(rows.get('tech.x_robots_tag_unusual').evidence.contentNoindexCount, 1);

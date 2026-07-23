@@ -2875,6 +2875,7 @@ function checkCard(row) {
       <div class="check-tags">
         ${type ? `<span>${escapeHtml(type)}</span>` : ''}
         ${confidence ? `<span>confidence: ${escapeHtml(confidence)}</span>` : ''}
+        ${row.standardUsage ? `<span>standard: ${escapeHtml(row.standardUsage)}</span>` : ''}
         ${row.displayReviewRecommended ? '<span>review recommended</span>' : ''}
         <span>${Number(row.affectedCount || 0)} betroffen</span>
       </div>
@@ -3239,6 +3240,8 @@ function renderCheckDetail(detail) {
       <dt>Das wurde gefunden</dt><dd>${escapeHtml(narrative.found || '')}</dd>
       <dt>Empfehlung</dt><dd>${escapeHtml(narrative.recommendation || '')}</dd>
       <dt>Availability</dt><dd>${escapeHtml(detail.evaluationStatus || detail.evaluationState || 'historisch nicht vorhanden')}${detail.scoreEligible ? ' · scorewirksam' : ' · vom Score ausgeschlossen'}</dd>
+      <dt>Audit-Standard</dt><dd>${escapeHtml(detail.standardVersion || 'für diesen Check noch nicht als Metadaten-Overlay hinterlegt')} · ${escapeHtml(detail.standardUsage || 'bestehende Produktionsmetadaten')} · ${escapeHtml(detail.standardScoreEffect || '')}${detail.standardSeverity ? ` · ${escapeHtml(detail.standardSeverity)}` : ''}</dd>
+      <dt>Applicability</dt><dd>${escapeHtml(detail.standardApplicability || 'bestehender Check-Scope')}${detail.standardNotApplicableRule ? ` · not_applicable: ${escapeHtml(detail.standardNotApplicableRule)}` : ''}</dd>
       <dt>Evidence/Coverage</dt><dd>${escapeHtml(detail.evidenceClass || 'historisch unbekannt')} · ${escapeHtml(detail.executionStatus || 'historisch unbekannt')} · ${escapeHtml(detail.evidenceStatus || 'historisch unbekannt')} · ${escapeHtml(detail.coverageStatus || 'historisch unbekannt')}</dd>
       <dt>Coverage Unit</dt><dd>${escapeHtml(detail.coverageUnitKey || 'historisch nicht vorhanden')}${detail.coverageWeight === null || detail.coverageWeight === undefined ? '' : ` · Gewicht ${escapeHtml(detail.coverageWeight)}`}${detail.coverageReason ? ` · ${escapeHtml(detail.coverageReason)}` : ''}</dd>
       <dt>Root-Cause-Scoring</dt><dd>${escapeHtml(rootCauseSummary)}</dd>

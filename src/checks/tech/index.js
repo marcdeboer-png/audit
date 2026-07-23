@@ -40,6 +40,7 @@ import {
   ROBOTS_SITEMAP_VALIDATION_VERSION,
   sitemapMetadata
 } from '../../utils/discoverySemantics.js';
+import { activeStandardChecks } from '../standardMetadata.js';
 
 const tech = (id, category, name, run, options = {}) => ({
   id: id.startsWith('template.') ? id : `tech.${id}`,
@@ -99,7 +100,7 @@ function storedFactGate(check, ctx, runFlag, factName, targetedRunHint) {
 }
 
 export function techChecks() {
-  return [
+  return activeStandardChecks([
     domainHttpsReachable(),
     httpToHttpsRedirect(),
     wwwConsistency(),
@@ -245,7 +246,7 @@ export function techChecks() {
     largeImages(),
     modernImageCoverageLow(),
     videoObjectCheck()
-  ];
+  ]);
 }
 
 function domainHttpsReachable() {

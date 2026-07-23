@@ -68,7 +68,7 @@ test('inherited AI crawler policy is informational and not a core issue', async 
   db.close();
 });
 
-test('llms-full 500 without reference is optional and score-excluded', async () => {
+test('disabled llms-full check is not executed while historical results remain readable', async () => {
   const db = setupDb();
   const runId = createRun(db, 'geo');
   insertAsset(db, runId, 'robots', 'https://example.com/robots.txt', 200, 'User-agent: *\nAllow: /');
@@ -76,13 +76,22 @@ test('llms-full 500 without reference is optional and score-excluded', async () 
   insertAsset(db, runId, 'llms_full', 'https://example.com/llms-full.txt', 500, 'server error');
 
   await runChecks(db, runId);
-  const row = result(db, runId, 'geo.llms_full_txt_present');
-  assert.equal(row.status, 'NA');
-  assert.equal(row.evaluationState, 'not_applicable');
-  assert.equal(row.scoreEligible, 0);
-  assert.equal(row.priority, 'Low');
-  assert.equal(row.findingType, 'info');
-  assert.match(row.finding, /returned 500 and is not referenced/);
+  assert.equal(result(db, runId, 'geo.llms_full_txt_present'), undefined);
+
+  insertCheckResult(db, runId, {
+    checkId: 'geo.llms_full_txt_present',
+    category: 'GEO Opportunities',
+    checkName: 'llms-full.txt vorhanden',
+    status: 'Warning',
+    priority: 'Low',
+    findingType: 'opportunity',
+    reviewRecommended: 1
+  });
+  const historical = loadResultsWithScores(db, runId).results.find((row) => row.checkId === 'geo.llms_full_txt_present');
+  assert.equal(historical.standardStatus, 'disabled');
+  assert.equal(historical.standardUsage, 'disabled');
+  assert.equal(historical.scoreEligible, false);
+  assert.equal(historical.disabled, true);
   db.close();
 });
 

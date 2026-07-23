@@ -1,7 +1,10 @@
+import { applyStandardResultMetadata } from '../checks/standardMetadata.js';
+
 const REVIEW_BLOCKING_STATUSES = new Set(['false_positive', 'ignored']);
 const ISSUE_STATUSES = new Set(['Warning', 'Error']);
 
 export function applyDisplaySemantics(row = {}) {
+  row = applyStandardResultMetadata(row);
   const status = row.effectiveStatus || row.manualStatus || row.status || row.originalStatus || 'NA';
   const priority = row.effectivePriority || row.manualPriority || row.priority || row.originalPriority || 'Medium';
   const originalType = row.findingType || row.normalizedFindingType || 'info';

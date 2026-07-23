@@ -84,7 +84,7 @@ test('settled browser H1 extraction accepts image alt and aria-labelledby while 
   }
 });
 
-test('missing and length checks fail closed on scope and keep editorial opportunities score-free', () => {
+test('missing and length checks fail closed on scope and use standard score metadata', () => {
   const fixture = makeFixture('https://scope.invalid');
   insertPage(fixture, '/title', { title: null, h1Count: 1 });
   insertPage(fixture, '/description', { metaDescription: null, h1Count: 1 });
@@ -98,14 +98,14 @@ test('missing and length checks fail closed on scope and keep editorial opportun
   const description = runTech('tech.meta_description_missing', fixture);
   assert.equal(description.affectedCount, 1);
   assert.equal(description.priority, 'Low');
-  assert.equal(description.scoreEligible, false);
+  assert.equal(description.scoreEligible, true);
   const h1 = runTech('tech.h1_missing', fixture);
   assert.equal(h1.affectedCount, 1);
   assert.equal(h1.status, 'Warning');
-  assert.equal(h1.priority, 'Low');
-  assert.equal(h1.scoreEligible, false);
+  assert.equal(h1.priority, 'Medium');
+  assert.equal(h1.scoreEligible, true);
   fixture.db.prepare("UPDATE pages SET title='Tiny', titleLength=4 WHERE runId=? AND url LIKE '%/title'").run(fixture.runId);
-  assert.equal(runTech('tech.title_too_short', fixture).scoreEligible, false);
+  assert.equal(runTech('tech.title_too_short', fixture).scoreEligible, true);
   fixture.db.close();
 });
 
@@ -122,7 +122,7 @@ test('duplicate grouping uses effective NFKC whitespace normalization and exclud
   assert.equal(title.evidence.normalization, 'NFKC + collapsed whitespace + locale-independent case folding');
   const description = runTech('tech.duplicate_meta_descriptions', fixture);
   assert.equal(description.affectedCount, 2);
-  assert.equal(description.scoreEligible, false);
+  assert.equal(description.scoreEligible, true);
   assert.equal(normalizeHeadComparisonKey(' Cafe\u0301  Guide '), normalizeHeadComparisonKey('CAFÉ Guide'));
   fixture.db.close();
 });

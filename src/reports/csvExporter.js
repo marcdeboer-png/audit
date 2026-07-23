@@ -30,7 +30,11 @@ const EXPORTS = {
       'isActionable', 'normalizedFindingType', 'displayReviewRecommended',
       'maturityImpact', 'dataBasis', 'evidenceLevel', 'reviewReason',
       'automationCoverage', 'interpretation', 'limitations',
-      'checkVersion', 'provenanceJson'
+      'checkVersion', 'provenanceJson',
+      'standardVersion', 'standardStatus', 'standardUsage', 'standardSeverity',
+      'standardScoreEffect', 'standardFindingType', 'diagnosticOnly', 'disabled',
+      'standardApplicability', 'standardNotApplicableRule', 'standardReviewStatus',
+      'standardRollupRole', 'standardPatternRole', 'standardScoreOwnerCheckId'
     ],
     sql: `
       SELECT
@@ -121,7 +125,11 @@ const EXPORTS = {
       'findingType', 'confidence', 'reviewRecommended',
       'affectedCount', 'sampleUrls',
       'displayReviewStatus', 'displayActionStatus',
-      'isActionable', 'reportSection', 'normalizedFindingType', 'displayReviewRecommended'
+      'isActionable', 'reportSection', 'normalizedFindingType', 'displayReviewRecommended',
+      'standardVersion', 'standardStatus', 'standardUsage', 'standardSeverity',
+      'standardScoreEffect', 'standardFindingType', 'diagnosticOnly', 'disabled',
+      'standardApplicability', 'standardNotApplicableRule', 'standardReviewStatus',
+      'standardRollupRole', 'standardPatternRole', 'standardScoreOwnerCheckId'
     ],
     sql: `
       SELECT

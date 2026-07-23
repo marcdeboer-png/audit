@@ -66,14 +66,14 @@ export const legitCheckFamilies = [
     expectation: 'Schema checks apply only to suitable page types or domain-level hints.'
   },
   {
-    family: 'FAQ/Speakable',
-    checkIds: ['tech.faqpage_missing_low_coverage', 'geo.faq_html_present_schema_missing', 'tech.speakable_missing', 'geo.speakable_present'],
+    family: 'FAQ',
+    checkIds: ['tech.faqpage_missing_low_coverage', 'geo.faq_html_present_schema_missing'],
     dataBasis: 'hasFaqPattern, weak FAQ hints and schema inventory',
-    expectation: 'FAQPage requires strong FAQ structure; Speakable is an opportunity.'
+    expectation: 'FAQPage requires strong FAQ structure.'
   },
   {
     family: 'AI Files and Bot Policy',
-    checkIds: ['geo.llms_txt_present', 'geo.llms_full_txt_present', 'geo.robots_mentions_gptbot', 'geo.ai_bots_policy_summary', 'geo.markdown_twin_homepage'],
+    checkIds: ['geo.llms_txt_present', 'geo.robots_mentions_gptbot', 'geo.ai_bots_policy_summary', 'geo.markdown_twin_homepage'],
     dataBasis: 'domain_assets, robots.txt parsing and known references',
     expectation: 'AI-readiness signals are opportunities unless a referenced local AI asset is demonstrably broken.'
   },
@@ -88,15 +88,11 @@ export const legitCheckFamilies = [
 export const legitCheckGuardrails = {
   opportunitiesAreNotCore: [
     'tech.webmanifest_missing',
-    'tech.speakable_missing',
     'geo.llms_txt_present',
-    'geo.llms_full_txt_present',
     'geo.robots_mentions_gptbot',
     'geo.markdown_twin_homepage',
     'tech.faqpage_missing_low_coverage',
-    'geo.faq_html_present_schema_missing',
-    'tech.article_coverage_on_article_like_pages',
-    'tech.product_coverage_on_product_like_pages'
+    'geo.faq_html_present_schema_missing'
   ],
   bestPracticesAreNotCore: [
     'tech.hsts_header',
@@ -156,36 +152,26 @@ export const legitCheckExpectations = [
   expectation('tech.title_too_short', {
     expectedScope: 'Successful indexable non-legal HTML pages with complete effective title below the internal editorial threshold.',
     allowedStatuses: ['OK', 'Warning', 'NA'],
-    allowedFindingTypes: OPPORTUNITY_TYPES,
-    hardIssueAllowed: false,
     detailHandlerExpected: true
   }),
   expectation('tech.title_too_long', {
     expectedScope: 'Successful indexable non-legal HTML pages with complete effective title above the internal editorial threshold.',
     allowedStatuses: ['OK', 'Warning', 'NA'],
-    allowedFindingTypes: OPPORTUNITY_TYPES,
-    hardIssueAllowed: false,
     detailHandlerExpected: true
   }),
   expectation('tech.meta_description_missing', {
     expectedScope: 'Successful indexable non-legal HTML pages with complete effective state and no usable meta description.',
     allowedStatuses: ['OK', 'Warning', 'NA'],
-    allowedFindingTypes: OPPORTUNITY_TYPES,
-    hardIssueAllowed: false,
     detailHandlerExpected: true
   }),
   expectation('tech.meta_description_too_short', {
     expectedScope: 'Successful indexable non-legal HTML pages with effective description below the internal editorial threshold.',
     allowedStatuses: ['OK', 'Warning', 'NA'],
-    allowedFindingTypes: OPPORTUNITY_TYPES,
-    hardIssueAllowed: false,
     detailHandlerExpected: true
   }),
   expectation('tech.meta_description_too_long', {
     expectedScope: 'Successful indexable non-legal HTML pages with effective description above the internal editorial threshold.',
     allowedStatuses: ['OK', 'Warning', 'NA'],
-    allowedFindingTypes: OPPORTUNITY_TYPES,
-    hardIssueAllowed: false,
     detailHandlerExpected: true
   }),
   expectation('tech.canonical_missing', {
@@ -255,15 +241,11 @@ export const legitCheckExpectations = [
   expectation('tech.h1_missing', {
     expectedScope: 'Successful indexable non-legal HTML pages with complete effective state and no visible, named H1.',
     allowedStatuses: ['OK', 'Warning', 'NA'],
-    allowedFindingTypes: BEST_PRACTICE_TYPES,
-    hardIssueAllowed: false,
     detailHandlerExpected: true
   }),
   expectation('tech.multiple_h1', {
     expectedScope: 'Successful HTML pages with complete effective state and more than one visible, named H1.',
     allowedStatuses: ['OK', 'Warning', 'NA'],
-    allowedFindingTypes: ['info'],
-    hardIssueAllowed: false,
     detailHandlerExpected: true
   }),
   expectation('tech.charset_utf8_present', {
@@ -314,8 +296,6 @@ export const legitCheckExpectations = [
   expectation('tech.high_ttfb', {
     expectedScope: 'Pages with stored ttfbMs above configured highTtfbMs; network timing is volatile and should be confirmed before final prioritization.',
     allowedStatuses: ['OK', 'Warning', 'NA'],
-    allowedFindingTypes: BEST_PRACTICE_TYPES,
-    hardIssueAllowed: false,
     detailHandlerExpected: true
   }),
   ...[
@@ -354,8 +334,6 @@ export const legitCheckExpectations = [
   expectation('tech.article_coverage_on_article_like_pages', {
     expectedScope: 'Only pages classified as pageType=article are expected to carry Article schema.',
     allowedStatuses: ['OK', 'Warning', 'NA'],
-    allowedFindingTypes: OPPORTUNITY_TYPES,
-    hardIssueAllowed: false,
     pageTypeScope: ['article'],
     detailHandlerExpected: true
   }),
@@ -370,8 +348,6 @@ export const legitCheckExpectations = [
   expectation('tech.product_coverage_on_product_like_pages', {
     expectedScope: 'Only pages classified as pageType=product are expected to carry Product schema.',
     allowedStatuses: ['OK', 'Warning', 'NA'],
-    allowedFindingTypes: OPPORTUNITY_TYPES,
-    hardIssueAllowed: false,
     pageTypeScope: ['product'],
     detailHandlerExpected: true
   }),
@@ -396,20 +372,6 @@ export const legitCheckExpectations = [
     pageTypeScope: ['hasFaqPattern'],
     detailHandlerExpected: true
   }),
-  expectation('tech.speakable_missing', {
-    expectedScope: 'Optional Speakable structured data signal, never a hard technical error.',
-    allowedStatuses: ['OK', 'NA'],
-    allowedFindingTypes: OPPORTUNITY_TYPES,
-    hardIssueAllowed: false,
-    detailHandlerExpected: true
-  }),
-  expectation('geo.speakable_present', {
-    expectedScope: 'Optional GEO Speakable presence signal.',
-    allowedStatuses: ['OK', 'Warning', 'NA'],
-    allowedFindingTypes: OPPORTUNITY_TYPES,
-    hardIssueAllowed: false,
-    detailHandlerExpected: true
-  }),
   expectation('geo.llms_txt_present', {
     expectedScope: 'Optional llms.txt availability signal.',
     allowedStatuses: ['OK', 'Warning', 'NA'],
@@ -419,13 +381,6 @@ export const legitCheckExpectations = [
   }),
   expectation('geo.llms_txt_http_status', {
     expectedScope: 'Stored HTTP status for optional llms.txt availability.',
-    allowedStatuses: ['OK', 'Warning', 'NA'],
-    allowedFindingTypes: OPPORTUNITY_TYPES,
-    hardIssueAllowed: false,
-    detailHandlerExpected: true
-  }),
-  expectation('geo.llms_full_txt_present', {
-    expectedScope: 'Optional llms-full.txt availability; hard only when referenced and demonstrably broken, still displayed as opportunity.',
     allowedStatuses: ['OK', 'Warning', 'NA'],
     allowedFindingTypes: OPPORTUNITY_TYPES,
     hardIssueAllowed: false,

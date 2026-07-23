@@ -228,8 +228,7 @@ test('GEO fixture treats AI bot policy, llms files and trust links as opportunit
   assert.equal(result(missingResults, 'geo.ai_bots_policy_summary').status, 'OK');
   assert.equal(result(missingResults, 'geo.ai_bots_policy_summary').normalizedFindingType, 'info');
   assert.equal(result(missingResults, 'geo.llms_txt_present').status, 'OK');
-  assert.equal(result(missingResults, 'geo.llms_full_txt_present').status, 'NA');
-  assert.equal(result(missingResults, 'geo.llms_full_txt_present').evaluationState, 'not_applicable');
+  assert.equal(missingResults.some((row) => row.checkId === 'geo.llms_full_txt_present'), false);
   assert.equal(result(missingResults, 'geo.markdown_twin_homepage').status, 'OK');
   assert.equal(result(missingResults, 'geo.about_linked').status, 'Warning');
   assert.equal(result(missingResults, 'geo.contact_linked').status, 'Warning');
@@ -256,20 +255,9 @@ test('GEO fixture treats AI bot policy, llms files and trust links as opportunit
   ]) {
     assert.equal(result(explicitResults, checkId).status, 'OK', checkId);
   }
-  const full = result(explicitResults, 'geo.llms_full_txt_present');
-  assert.equal(full.status, 'Warning');
-  assert.equal(full.priority, 'Low');
-  assert.equal(full.normalizedFindingType, 'opportunity');
-  assert.equal(full.displayReviewRecommended, 1);
-  assert.equal(full.evidence.references.length > 0, true);
+  assert.equal(explicitResults.some((row) => row.checkId === 'geo.llms_full_txt_present'), false);
   assert.equal(result(explicitResults, 'geo.about_linked').status, 'OK');
   assert.equal(result(explicitResults, 'geo.contact_linked').status, 'OK');
-
-  const llmsDetail = detail(explicit.db, explicit.runId, 'geo.llms_full_txt_present');
-  assert.ok(llmsDetail.rows.some((row) => row.fileUrl === `${explicit.origin}/llms-full.txt` && Number(row.statusCode) === 500));
-  const llmsCsv = collectCheckDetailCsv(explicit.db, explicit.runId, idFor(explicitResults, 'geo.llms_full_txt_present')).csv;
-  assert.match(llmsCsv, /File URL,Status Code,Bytes,Referenced/);
-  assert.match(llmsCsv, /llms-full\.txt/);
 });
 
 test('rendering fixture captures Playwright data when available and keeps unavailable tooling informational', async () => {

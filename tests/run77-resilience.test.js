@@ -236,10 +236,9 @@ test('redirect aliases, article subtypes, page scopes, alt states, references an
   assert.equal(runCheck('tech.empty_alt_texts', { db, run, project }).affectedCount, 2);
 
   db.prepare(`INSERT INTO domain_assets (runId,type,url,statusCode,content) VALUES (?, 'llms_full', ?, 404, ?)`).run(runId, 'https://checks.invalid/llms-full.txt', 'https://checks.invalid/llms-full.txt');
-  assert.equal(runGeoCheck('geo.llms_full_txt_present', { db, run, project }).evaluationState, 'not_applicable');
   db.prepare(`INSERT INTO page_links (runId,sourceUrl,targetUrl,normalizedTargetUrl,linkType) VALUES (?, ?, ?, ?, 'internal')`)
     .run(runId, 'https://checks.invalid/source', 'https://checks.invalid/llms-full.txt', 'https://checks.invalid/llms-full.txt');
-  assert.equal(runGeoCheck('geo.llms_full_txt_present', { db, run, project }).status, 'Warning');
+  assert.equal(geoChecks().some((check) => check.id === 'geo.llms_full_txt_present'), false);
 
   for (let index = 0; index < 15; index += 1) insertMinimalPage(db, runId, `https://checks.invalid/duplicate-${index}`, { title: 'Duplicate title' });
   const duplicates = runCheck('tech.duplicate_titles', { db, run, project });

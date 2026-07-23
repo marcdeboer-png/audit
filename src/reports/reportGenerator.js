@@ -986,7 +986,7 @@ function findingsTable(rows, { emptyMessage = 'No findings in this category.' } 
         <td>${escapeHtml(row.category)}</td>
         <td>${findingBadges(row).join(' ')}<div class="muted">Evaluation: ${escapeHtml(row.evaluationState || '')} · Score: ${escapeHtml(formatCell(row.score))}${row.scoreEligible ? '' : ' · excluded'}</div></td>
         <td>${badge(row.displayReviewStatus || row.reviewStatus || 'unreviewed', 'review')} ${badge(row.displayActionStatus || row.actionStatus || 'open', 'review')}</td>
-        <td>${escapeHtml(row.effectiveFinding || row.finding || '')}<div class="muted">Original: ${escapeHtml(row.status)} / ${escapeHtml(row.priority)}</div></td>
+        <td>${escapeHtml(row.effectiveFinding || row.finding || '')}<div class="muted">Original: ${escapeHtml(row.status)} / ${escapeHtml(row.originalPriority || row.priority)}</div></td>
         <td>${escapeHtml(row.details || '')}${row.scoreExclusionReason ? `<div class="muted">${escapeHtml(row.scoreExclusionReason)}</div>` : ''}</td>
         <td>${escapeHtml(row.effectiveRecommendation || row.recommendation || '')}</td>
         <td>${row.affectedCount || 0}</td>
@@ -1064,6 +1064,7 @@ function findingBadges(row) {
     badge(row.normalizedFindingType || row.findingType || 'info', row.normalizedFindingType || row.findingType || 'info')
   ];
   if (row.confidence) badges.push(badge(`confidence: ${row.confidence}`));
+  if (row.standardUsage) badges.push(badge(`standard: ${row.standardUsage}`));
   if (row.displayReviewRecommended) badges.push(badge('review recommended', 'review'));
   if (row.hasManualOverride) badges.push(badge('manual override applied', 'manual'));
   return badges;

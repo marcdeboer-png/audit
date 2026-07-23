@@ -3,10 +3,11 @@ import {
   normalizeEvaluationState,
   statusForEvaluationState
 } from './availability.js';
+import { applyStandardResultMetadata } from './standardMetadata.js';
 
 export const HTML_WHERE = `(contentType LIKE '%text/html%' OR contentType LIKE '%application/xhtml%')`;
 export const VALID_STATUSES = new Set(['OK', 'Warning', 'Error', 'NA']);
-export const VALID_PRIORITIES = new Set(['High', 'Medium', 'Low']);
+export const VALID_PRIORITIES = new Set(['High', 'Medium', 'Low', 'Info']);
 export const VALID_FINDING_TYPES = new Set(['core_issue', 'opportunity', 'best_practice', 'info', 'llm_assisted']);
 export const VALID_CONFIDENCE = new Set(['high', 'medium', 'low']);
 export const VALID_EVIDENCE_LEVELS = new Set(['none', 'fact', 'sample', 'aggregate', 'pattern', 'external']);
@@ -33,7 +34,7 @@ export function makeResult(check, status, options = {}) {
     confidence: options.confidence || check.confidence
   });
   const recommendation = options.recommendation || check.recommendation || '';
-  return {
+  return applyStandardResultMetadata({
     id: check.id,
     category: check.category,
     name: check.name,
@@ -77,7 +78,7 @@ export function makeResult(check, status, options = {}) {
     relatedCheckIds: Array.isArray(options.relatedCheckIds || check.relatedCheckIds)
       ? (options.relatedCheckIds || check.relatedCheckIds).slice(0, 20)
       : []
-  };
+  });
 }
 
 export function availabilityResult(check, evaluationState, options = {}) {

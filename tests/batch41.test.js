@@ -14,13 +14,13 @@ test('check results persist only valid statuses and priorities', async () => {
 
   await runChecks(db, runId);
 
-  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM check_results WHERE runId = ? AND priority NOT IN ('High', 'Medium', 'Low')").get(runId).count, 0);
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM check_results WHERE runId = ? AND priority NOT IN ('High', 'Medium', 'Low', 'Info')").get(runId).count, 0);
   assert.equal(db.prepare("SELECT COUNT(*) AS count FROM check_results WHERE runId = ? AND status NOT IN ('OK', 'Warning', 'Error', 'NA')").get(runId).count, 0);
   assert.equal(db.prepare("SELECT COUNT(*) AS count FROM check_results WHERE runId = ? AND priority IN ('Warning', 'Error', 'OK')").get(runId).count, 0);
   db.close();
 });
 
-test('unreferenced llms-full.txt is excluded while referenced broken files remain reviewable', async () => {
+test('disabled llms-full.txt check is not executed for any asset state', async () => {
   const db = setupDb();
   const runId = createRun(db, 'geo');
   insertAsset(db, runId, 'llms', 'https://example.com/llms.txt', 200, '# llms');
@@ -28,32 +28,20 @@ test('unreferenced llms-full.txt is excluded while referenced broken files remai
 
   await runChecks(db, runId);
   assert.equal(result(db, runId, 'geo.llms_txt_present').status, 'OK');
-  const missingFull = result(db, runId, 'geo.llms_full_txt_present');
-  assert.equal(missingFull.status, 'NA');
-  assert.equal(missingFull.evaluationState, 'not_applicable');
-  assert.equal(missingFull.scoreEligible, 0);
-  assert.equal(missingFull.priority, 'Low');
-  assert.equal(missingFull.findingType, 'info');
-  assert.equal(missingFull.reviewRecommended, 0);
+  assert.equal(result(db, runId, 'geo.llms_full_txt_present'), undefined);
 
   const referencedRunId = createRun(db, 'geo');
   insertAsset(db, referencedRunId, 'llms', 'https://example.com/llms.txt', 200, 'See https://example.com/llms-full.txt');
   insertAsset(db, referencedRunId, 'llms_full', 'https://example.com/llms-full.txt', 500, 'server error');
   await runChecks(db, referencedRunId);
 
-  const referenced = result(db, referencedRunId, 'geo.llms_full_txt_present');
-  assert.equal(referenced.status, 'Warning');
-  assert.equal(JSON.parse(referenced.evidenceJson).references.length, 1);
+  assert.equal(result(db, referencedRunId, 'geo.llms_full_txt_present'), undefined);
 
   const technicalRunId = createRun(db, 'geo');
   insertAsset(db, technicalRunId, 'llms', 'https://example.com/llms.txt', null, null);
   insertAsset(db, technicalRunId, 'llms_full', 'https://example.com/llms-full.txt', null, null);
   await runChecks(db, technicalRunId);
-  const technical = result(db, technicalRunId, 'geo.llms_full_txt_present');
-  assert.equal(technical.status, 'NA');
-  assert.equal(technical.evaluationState, 'technical_error');
-  assert.equal(technical.scoreEligible, 0);
-  assert.equal(technical.score, null);
+  assert.equal(result(db, technicalRunId, 'geo.llms_full_txt_present'), undefined);
   db.close();
 });
 

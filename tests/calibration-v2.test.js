@@ -171,8 +171,9 @@ test('calibrated optional checks cannot outrank measured core issues', () => {
     'tech.hsts_header', 'tech.content_security_policy', 'tech.title_too_short', 'tech.title_too_long',
     'tech.raw_html_size_large', 'tech.too_many_js', 'tech.too_many_css',
     'tech.organization_missing', 'tech.website_missing', 'tech.breadcrumb_missing_low_coverage', 'tech.empty_alt_texts',
-    'tech.images_without_width_height', 'tech.canonical_non_self'
+    'tech.images_without_width_height'
   ]) assert.equal(tech.get(id).priority, 'Low', id);
+  assert.equal(tech.get('tech.canonical_non_self').priority, 'Info');
   assert.equal(geo.get('geo.organization_schema_sameas').priority, 'Low');
   assert.equal(geo.get('geo.llms_txt_present').priority, 'Low');
   assert.equal(tech.get('tech.synthetic_not_found_handling').priority, 'High');
@@ -188,15 +189,16 @@ test('rendered H1 evidence prevents a raw-only missing-H1 finding', () => {
   assert.equal(runTech('tech.h1_missing', fixture).status, 'OK');
 });
 
-test('H1 absence remains a measured review signal without claiming an automatic SEO error', () => {
+test('H1 absence uses the standard Medium score-capable metadata', () => {
   const fixture = makeFixture('https://heading.invalid');
   insertPage(fixture.db, fixture.runId, 'https://heading.invalid/', { h1Count: 0 });
   const result = runTech('tech.h1_missing', fixture);
   assert.equal(result.status, 'Warning');
-  assert.equal(result.priority, 'Low');
-  assert.equal(result.assessment.severity, 'low');
-  assert.equal(result.scoreEligible, false);
-  assert.equal(result.reviewRecommended, true);
+  assert.equal(result.priority, 'Medium');
+  assert.equal(result.assessment.severity, 'medium');
+  assert.equal(result.scoreEligible, true);
+  assert.equal(result.reviewRecommended, false);
+  assert.equal(result.standardUsage, 'fully_automated');
 });
 
 test('HTML scope gates exclude redirect responses even when their final response is 200 HTML', () => {

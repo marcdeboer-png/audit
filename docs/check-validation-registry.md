@@ -1,28 +1,37 @@
-# Audit check validation registry v6
+# Audit check validation registry v7
 
-Stand: 20. Juli 2026. Die maschinenlesbare Registry liegt in
+Stand: 23. Juli 2026. Die maschinenlesbare Registry liegt in
 [`check-validation-registry.json`](check-validation-registry.json). Sie ist
-eine interne Vertrauens- und Gap-Dokumentation. Sie aendert weder den
-Auditablauf noch Scoringparameter, Check-Severities oder Kundenreports.
+eine interne Vertrauens-, Gap- und Standard-Metadatendokumentation. Batch 12.1
+gleicht ausschliesslich Metadaten an den finalen `audit-standard-v1` an; die
+Prueflogik, Evidence-Erzeugung, Crawler-, Browser- und Parserpfade bleiben
+unveraendert.
 
 ## Inventar und Methodik
 
 Inventarisiert wurden die Tech-, GEO-, Trust- und Template-Registries, die
 historischen `check_results` einer read-only Datenbankkopie sowie direkte
 Check-ID-Referenzen in Tests, Reports, Exports und Dokumentation. Das Ergebnis
-sind 137 aktive, eindeutige Check-IDs in 25 Kategorien. Die historische
+sind 134 aktive, eindeutige Check-IDs in 24 aktiven Kategorien. Drei weitere
+historische Check-IDs bleiben als deaktivierte und `deprecated` markierte
+Eintraege lesbar. Die historische
 Datenbank enthaelt 136 davon; `tech.synthetic_not_found_handling` ist der
-einzige spaeter hinzugekommene aktive Check. Es gibt in diesem Snapshot keinen
-entfernten Produktionscheck. Test-only IDs wurden nicht als historische
-Checks fehlklassifiziert.
+einzige spaeter hinzugekommene aktive Check. Test-only IDs wurden nicht als
+historische Checks fehlklassifiziert.
 
 Jeder Eintrag enthaelt Inventarmetadaten, Evidence-Klasse, Coverage-Unit,
 benoetigte Fakten, Datenquellen, Scope, Root-Cause-Familie, Validierungsstatus,
 Evidenzreferenzen, Fehlerhistorie, bekannte Grenzen und eine konkrete
-Vertrauensempfehlung. Wo ein Check seine Requirements in einem leeren Lauf
+Vertrauensempfehlung. Die 25 in Batch 12.1 behandelten Eintraege enthalten
+zusaetzlich versionierte `standard_*`-Felder fuer Severity, Scorewirkung,
+Nutzungsentscheidung, Applicability, Review-, Roll-up- und Patternstatus.
+`validation_status` dokumentiert weiterhin ausschliesslich die vorhandene
+unabhaengige Validierungsevidenz; `standard_usage` und
+`recommended_trust_action` definieren die beschlossene Produktnutzung. Wo ein
+Check seine Requirements in einem leeren Lauf
 nicht zentral deklariert, bleibt `required_facts` bewusst leer und
 `missing_central_requirement_definition` wird ausgewiesen. Das betrifft nach
-der HTML-Head-/Heading-Validierung 28 Checks und ist selbst eine priorisierte
+den drei Deaktivierungen 26 aktive Checks und ist selbst eine priorisierte
 Architekturluecke; es wurde keine
 Anforderung erfunden.
 
@@ -39,25 +48,25 @@ aggregierten Ergebniszaehlern ohne Domain- oder Inhaltsdaten.
 | --- | ---: |
 | `cross_domain_validated` | 7 |
 | `validated_with_limits` | 13 |
-| `manual_review_required` | 93 |
+| `manual_review_required` | 90 |
 | `single_domain_validated` | 9 |
 | `fixture_validated` | 8 |
 | `unvalidated` | 7 |
 | `invalid` | 0 |
 | `deprecated` | 0 |
 
-Alle 137 aktiven Checks besitzen damit einen dokumentierten Status
+Alle 134 aktiven Checks besitzen damit einen dokumentierten Status
 (`status_assignment_coverage`: 100 %). Die strengere
 `check_validation_coverage` zaehlt nur `cross_domain_validated`,
 `validated_with_limits` und dauerhaft `manual_review_required` und liegt bei
-82,48 %. Weitere Kennzahlen:
+82,09 %. Weitere Kennzahlen:
 
-- scoregewichtete Validierungsabdeckung: 44,76 %;
-- Critical-/High-Abdeckung: 33,33 % (es gibt aktuell keine als Critical
-  registrierte Default-Severity und neun High-Checks);
+- scoregewichtete Validierungsabdeckung: 50,24 %;
+- Critical-/High-Abdeckung: 37,50 % (es gibt aktuell keine als Critical
+  registrierte Default-Severity und acht aktive High-Checks);
 - Primary-Evidence-Abdeckung: 60,38 %;
-- nach historischer Ausfuehrungshaeufigkeit gewichtete Abdeckung: 84,12 %;
-- 40 `score_capable`; `tech.redirect_pages` ist nach der HTTP-Validierung ein
+- nach historischer Ausfuehrungshaeufigkeit gewichtete Abdeckung: 83,66 %;
+- 50 `score_capable`; `tech.redirect_pages` ist nach der HTTP-Validierung ein
   scorefreies Inventar und kein eigenstaendiger Defekt.
 
 Die scoregewichtete Registry-Kennzahl ist kein Audit-Score. Sie verwendet nur
@@ -105,12 +114,28 @@ Positivfall konservativ fixture-validiert. Die vollstaendige Gap-Liste
 steht je Check in `validation_gap` und nennt fehlende Positiv-/Negativfaelle,
 Archetypen, Fixture, unabhaengige Methode, Aufwand und Risiko.
 
+## Standard-Metadatenalignment v1
+
+Die 22 Kategorie-B-Checks verwenden nun die beschlossene Severity,
+Scorewirkung und Nutzungsentscheidung in Runtime, Registry, HTML, JSON, CSV,
+API und UI. `diagnostic_only`-Checks sind `Info` und scorefrei. Automatisierte
+Checks sind nicht mehr allein wegen frueherer Review-Metadaten vom Score
+ausgeschlossen; Availability-Zustaende wie `not_applicable`,
+`insufficient_evidence`, `technical_error` und `not_executed` bleiben
+scorefrei.
+
+`geo.llms_full_txt_present`, `geo.speakable_present` und
+`tech.speakable_missing` sind fuer neue Audits deaktiviert. Ihre Funktionen
+und historischen Ergebniszeilen bleiben erhalten, die Registry fuehrt sie als
+inaktive `deprecated`-Eintraege mit `standard_usage: disabled`.
+
 ## Vertrauenspolicy
 
 - `cross_domain_validated` bleibt aktiv.
 - `validated_with_limits` bleibt mit sichtbarer Limitierung aktiv.
-- `manual_review_required` wird vor einer fachlichen Priorisierung manuell
-  eingeordnet.
+- `manual_review_required` beschreibt weiterhin den belegten
+  Validierungsstand. Die aktuelle Produktnutzung folgt bei den
+  standard-ausgerichteten Checks dem separaten Feld `standard_usage`.
 - `single_domain_validated` und `fixture_validated` bleiben diagnostisch und
   erhalten einen klaren Validierungsvorbehalt.
 - `unvalidated` erhaelt `validation_required_score_free` als Empfehlung und
@@ -118,7 +143,8 @@ Archetypen, Fixture, unabhaengige Methode, Aufwand und Risiko.
   solche Checks nicht pauschal.
 - `invalid` muss scorefrei sein; die Registry-Pruefung lehnt eine
   scorewirksame `invalid`-Konfiguration ab.
-- `deprecated` darf nicht mehr in der aktiven Registry vorkommen.
+- `deprecated` darf nicht in der aktiven Registry vorkommen; deaktivierte
+  historische Checks bleiben als inaktive Eintraege erhalten.
 
 Das langfristige 100-%-Ziel ist erst erreicht, wenn jeder scorewirksame Check
 mindestens `cross_domain_validated` oder `validated_with_limits` ist, dauerhaft

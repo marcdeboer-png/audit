@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import { AUDIT_STANDARD_VERSION, standardMetadataFor } from '../checks/standardMetadata.js';
 
 export const CHECK_VALIDATION_STATUSES = Object.freeze([
   'unvalidated',
@@ -38,6 +39,8 @@ const EVIDENCE_CLASSES = new Set([
 ]);
 const CONFIDENCE_VALUES = new Set(['high', 'medium', 'low']);
 const SCORE_EFFECT_VALUES = new Set(['score_capable', 'conditional', 'score_free']);
+const STANDARD_USAGE_VALUES = new Set(['fully_automated', 'automated_with_limits', 'diagnostic_only', 'disabled']);
+const STANDARD_STATUS_VALUES = new Set(['active', 'disabled']);
 const COMMIT_PATTERN = /^[0-9a-f]{40}$/;
 
 export function loadCheckValidationRegistry(fileUrl = new URL('../../docs/check-validation-registry.json', import.meta.url)) {
@@ -78,6 +81,7 @@ export function validateCheckValidationRegistry(registry, activeChecks = []) {
 
     const registered = activeById.has(label);
     const activeDefinition = activeById.get(label);
+    const standard = standardMetadataFor(label);
     if (registered && !entry.active) errors.push(`${label}: an active check cannot be marked inactive in the registry.`);
     if (registered && entry.name !== activeDefinition.name) errors.push(`${label}: registry name is stale.`);
     if (registered && entry.category !== activeDefinition.category) errors.push(`${label}: registry category is stale.`);
@@ -108,11 +112,50 @@ export function validateCheckValidationRegistry(registry, activeChecks = []) {
     if (['unvalidated', 'fixture_validated', 'single_domain_validated'].includes(entry.validation_status) && !entry.validation_gap) {
       errors.push(`${label}: incomplete validation requires a documented gap.`);
     }
+    if (standard) validateStandardAlignment(entry, activeDefinition, standard, errors);
   }
 
   for (const checkId of activeById.keys()) if (!seen.has(checkId)) errors.push(`${checkId}: active check is missing from the validation registry.`);
   validateSummary(registry, errors);
   return errors;
+}
+
+function validateStandardAlignment(entry, activeDefinition, standard, errors) {
+  const label = entry.check_id;
+  if (entry.standard_version !== AUDIT_STANDARD_VERSION) errors.push(`${label}: standard_version is stale.`);
+  if (!STANDARD_STATUS_VALUES.has(entry.standard_status)) errors.push(`${label}: invalid standard_status.`);
+  if (!STANDARD_USAGE_VALUES.has(entry.standard_usage)) errors.push(`${label}: invalid standard_usage.`);
+  if (entry.standard_status !== standard.status) errors.push(`${label}: standard_status does not match the audit standard.`);
+  if (entry.standard_usage !== standard.usage) errors.push(`${label}: standard_usage does not match the audit standard.`);
+  if ((entry.standard_severity ?? null) !== (standard.severity ?? null)) errors.push(`${label}: standard_severity does not match the audit standard.`);
+  if (entry.standard_score_effect !== standard.scoreEffect) errors.push(`${label}: standard_score_effect does not match the audit standard.`);
+  if (entry.standard_finding_type !== standard.findingType) errors.push(`${label}: standard_finding_type does not match the audit standard.`);
+  if (entry.finding_type !== standard.findingType) errors.push(`${label}: finding_type does not match the audit standard.`);
+  if (entry.score_effect !== standard.scoreEffect) errors.push(`${label}: score_effect does not match the audit standard.`);
+  if (Boolean(entry.diagnostic_only) !== standard.diagnosticOnly) errors.push(`${label}: diagnostic_only does not match the audit standard.`);
+  if (Boolean(entry.disabled) !== standard.disabled) errors.push(`${label}: disabled does not match the audit standard.`);
+  if (entry.applicability !== standard.applicability) errors.push(`${label}: applicability does not match the audit standard.`);
+  if (entry.not_applicable_rule !== standard.notApplicableRule) errors.push(`${label}: not_applicable_rule does not match the audit standard.`);
+  if (entry.review_status !== standard.reviewStatus) errors.push(`${label}: review_status does not match the audit standard.`);
+  if (entry.rollup_role !== standard.rollupRole) errors.push(`${label}: rollup_role does not match the audit standard.`);
+  if (entry.pattern_role !== standard.patternRole) errors.push(`${label}: pattern_role does not match the audit standard.`);
+  if ((entry.score_owner_check_id ?? null) !== (standard.scoreOwnerCheckId ?? null)) errors.push(`${label}: score_owner_check_id does not match the audit standard.`);
+  if (entry.recommended_trust_action !== standard.usage) errors.push(`${label}: recommended_trust_action must match standard_usage.`);
+  if (standard.diagnosticOnly) {
+    if (entry.score_effect !== 'score_free') errors.push(`${label}: diagnostic-only checks must be score_free.`);
+    if (entry.finding_type !== 'info') errors.push(`${label}: diagnostic-only checks must use finding_type info.`);
+  }
+  if (standard.disabled) {
+    if (entry.active) errors.push(`${label}: disabled checks cannot be active.`);
+    if (entry.validation_status !== 'deprecated') errors.push(`${label}: disabled checks must be deprecated.`);
+    if (entry.default_severity !== 'None') errors.push(`${label}: disabled checks must have no default severity.`);
+    if (entry.score_effect !== 'score_free') errors.push(`${label}: disabled checks must be score_free.`);
+    if (activeDefinition) errors.push(`${label}: disabled checks cannot be returned by the active runtime registry.`);
+  } else {
+    if (!entry.active) errors.push(`${label}: standard-active checks must remain active.`);
+    if (entry.default_severity !== standard.severity) errors.push(`${label}: default_severity does not match the audit standard.`);
+    if (!activeDefinition) errors.push(`${label}: standard-active check is missing from the runtime registry.`);
+  }
 }
 
 export function summarizeCheckValidationRegistry(registry) {

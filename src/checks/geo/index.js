@@ -14,6 +14,7 @@ import { hasVisibleTextProvenance, VISIBLE_TEXT_NORMALIZATION_VERSION } from '..
 import { analyzeRobotsAsset, ROBOTS_SITEMAP_VALIDATION_VERSION } from '../../utils/discoverySemantics.js';
 import { evaluatePageTypeSchemaCoverage, STRUCTURED_DATA_COVERAGE_LOGIC_VERSION } from '../structuredDataCoverage.js';
 import { SCHEMA_TYPE_HIERARCHY_VERSION } from '../../extractors/structuredData.js';
+import { activeStandardChecks } from '../standardMetadata.js';
 
 const geo = (id, category, name, run, options = {}) => ({
   id: `geo.${id}`,
@@ -66,7 +67,7 @@ const ABOUT_ANCHOR_LABELS = [
 ];
 
 export function geoChecks() {
-  return [
+  return activeStandardChecks([
     llmsTxtPresent(),
     llmsTxtStatus(),
     llmsFullTxtPresent(),
@@ -91,7 +92,7 @@ export function geoChecks() {
     schemaPresence('speakable_present', 'GEO Opportunities', 'Speakable Schema vorhanden', 'SpeakableSpecification', 'Low'),
     articleBlogWithArticleSchema(),
     lowStructuredSections()
-  ];
+  ]);
 }
 
 function getAsset(ctx, type) {

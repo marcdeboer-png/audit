@@ -16,6 +16,8 @@ test('every active audit check has one valid registry entry', () => {
   const summary = summarizeCheckValidationRegistry(registry);
   assert.equal(summary.activeChecks, activeChecks.length);
   assert.equal(summary.totalChecks, registry.checks.length);
+  assert.equal(summary.activeChecks, 134);
+  assert.equal(summary.historicalChecks, 3);
   assert.equal(summary.statusCounts.cross_domain_validated, 7);
 });
 
@@ -69,11 +71,14 @@ test('canonical family records automation limits without inflating trust', () =>
   assert.equal(byId.get('tech.canonical_missing').validation_status, 'cross_domain_validated');
   assert.equal(byId.get('tech.canonical_target_non_200').validation_status, 'fixture_validated');
   assert.match(byId.get('tech.canonical_target_non_200').validation_gap.missing_evidence.join(' '), /real positive case/);
-  for (const id of ['tech.canonical_non_self', 'tech.canonical_to_other_domain', 'template.canonical_pattern_issue']) {
+  for (const id of ['tech.canonical_to_other_domain', 'template.canonical_pattern_issue']) {
     assert.equal(byId.get(id).validation_status, 'manual_review_required', id);
     assert.equal(byId.get(id).score_effect, 'score_free', id);
     assert.ok(byId.get(id).manual_review_reason.length > 20, id);
   }
+  assert.equal(byId.get('tech.canonical_non_self').validation_status, 'manual_review_required');
+  assert.equal(byId.get('tech.canonical_non_self').score_effect, 'conditional');
+  assert.equal(byId.get('tech.canonical_non_self').standard_usage, 'automated_with_limits');
 });
 
 test('HTTP family records retry, host and inventory trust limits conservatively', () => {
@@ -129,7 +134,7 @@ test('structured-data family records parser, page-type and optional GEO limits c
   for (const id of ['tech.article_coverage_on_article_like_pages', 'tech.product_coverage_on_product_like_pages']) {
     const entry = byId.get(id);
     assert.equal(entry.validation_status, 'validated_with_limits', id);
-    assert.equal(entry.recommended_trust_action, 'automated_with_limits', id);
+    assert.equal(entry.recommended_trust_action, 'fully_automated', id);
     assert.ok(entry.known_limits.length >= 2, id);
   }
   const techArticle = byId.get('tech.article_coverage_on_article_like_pages');
@@ -163,18 +168,26 @@ test('HTML head and heading family records effective-state and editorial limits 
 
   const rawH1 = byId.get('tech.raw_h1_missing_rendered_present');
   assert.equal(rawH1.validation_status, 'validated_with_limits');
-  assert.equal(rawH1.score_effect, 'score_free');
+  assert.equal(rawH1.score_effect, 'score_capable');
+  assert.equal(rawH1.standard_usage, 'fully_automated');
 
   for (const id of [
     'tech.title_too_short', 'tech.title_too_long', 'tech.meta_description_missing',
     'tech.meta_description_too_short', 'tech.meta_description_too_long',
-    'tech.duplicate_meta_descriptions', 'tech.h1_missing', 'tech.multiple_h1',
-    'tech.html_semantics_summary', 'template.title_pattern_issue', 'template.meta_pattern_issue'
+    'tech.duplicate_meta_descriptions', 'tech.h1_missing', 'tech.multiple_h1'
   ]) {
     const entry = byId.get(id);
     assert.equal(entry.validation_status, 'manual_review_required', id);
-    assert.equal(entry.score_effect, 'score_free', id);
+    assert.equal(entry.score_effect, 'score_capable', id);
+    assert.equal(entry.standard_usage, 'fully_automated', id);
     assert.ok(entry.manual_review_reason.length > 20, id);
+  }
+  assert.equal(byId.get('tech.html_semantics_summary').validation_status, 'manual_review_required');
+  assert.equal(byId.get('tech.html_semantics_summary').score_effect, 'score_free');
+  assert.equal(byId.get('tech.html_semantics_summary').standard_usage, 'diagnostic_only');
+  for (const id of ['template.title_pattern_issue', 'template.meta_pattern_issue']) {
+    assert.equal(byId.get(id).validation_status, 'manual_review_required', id);
+    assert.equal(byId.get(id).score_effect, 'score_free', id);
   }
   assert.equal(byId.get('tech.duplicate_titles').validation_status, 'manual_review_required');
   assert.equal(byId.get('tech.duplicate_titles').score_effect, 'score_capable');

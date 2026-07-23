@@ -78,9 +78,25 @@ export function collectCheckDetailCsv(db, runId, checkResultId) {
     { key: 'coverageReason', label: 'coverageReason' },
     { key: 'availabilitySemanticsVersion', label: 'availabilitySemanticsVersion' }
   ];
-  const metadataKeys = new Set([...metadataColumns, ...scoringColumns].map((column) => column.key));
+  const standardColumns = [
+    { key: 'standardVersion', label: 'standardVersion' },
+    { key: 'standardStatus', label: 'standardStatus' },
+    { key: 'standardUsage', label: 'standardUsage' },
+    { key: 'standardSeverity', label: 'standardSeverity' },
+    { key: 'standardScoreEffect', label: 'standardScoreEffect' },
+    { key: 'standardFindingType', label: 'standardFindingType' },
+    { key: 'diagnosticOnly', label: 'diagnosticOnly' },
+    { key: 'disabled', label: 'disabled' },
+    { key: 'standardApplicability', label: 'standardApplicability' },
+    { key: 'standardNotApplicableRule', label: 'standardNotApplicableRule' },
+    { key: 'standardReviewStatus', label: 'standardReviewStatus' },
+    { key: 'standardRollupRole', label: 'standardRollupRole' },
+    { key: 'standardPatternRole', label: 'standardPatternRole' },
+    { key: 'standardScoreOwnerCheckId', label: 'standardScoreOwnerCheckId' }
+  ];
+  const metadataKeys = new Set([...metadataColumns, ...scoringColumns, ...standardColumns].map((column) => column.key));
   const detailColumns = (detail.columns || []).filter((column) => !metadataKeys.has(column.key));
-  const columns = [...metadataColumns, ...detailColumns, ...scoringColumns];
+  const columns = [...metadataColumns, ...detailColumns, ...scoringColumns, ...standardColumns];
   const metadata = {
     checkId: detail.checkId,
     checkTitle: detail.title || '',
@@ -90,6 +106,20 @@ export function collectCheckDetailCsv(db, runId, checkResultId) {
     displayStatus: detail.displayStatus || detail.effectiveStatus || detail.status,
     displayPriority: detail.displayPriority || detail.effectivePriority || detail.priority,
     displayFindingType: detail.displayFindingType || detail.normalizedFindingType || detail.findingType || '',
+    standardVersion: detail.standardVersion || '',
+    standardStatus: detail.standardStatus || '',
+    standardUsage: detail.standardUsage || '',
+    standardSeverity: detail.standardSeverity ?? '',
+    standardScoreEffect: detail.standardScoreEffect || '',
+    standardFindingType: detail.standardFindingType || '',
+    diagnosticOnly: detail.diagnosticOnly ? 1 : 0,
+    disabled: detail.disabled ? 1 : 0,
+    standardApplicability: detail.standardApplicability || '',
+    standardNotApplicableRule: detail.standardNotApplicableRule || '',
+    standardReviewStatus: detail.standardReviewStatus || '',
+    standardRollupRole: detail.standardRollupRole || '',
+    standardPatternRole: detail.standardPatternRole || '',
+    standardScoreOwnerCheckId: detail.standardScoreOwnerCheckId || '',
     priority: detail.priority,
     effectivePriority: detail.effectivePriority || detail.priority,
     findingType: detail.normalizedFindingType || detail.findingType || '',
